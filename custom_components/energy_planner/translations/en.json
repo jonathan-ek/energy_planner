@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Energy planner",
+        "description": "Integration configuration for energy planner",
+        "data": {
+          "host": "IP address of Solis Inverter",
+        }
+      }
+    }
+  },
+  "services": {
+    "add_slot": {
+      "name": "Add Slot",
+      "description": "Add new slot, will overwrite part of or whole existing slots if they overlap",
+      "fields": {
+        "start_time": {
+          "name": "Start time",
+          "description": "Start time of slot"
+        },
+        "end_time": {
+          "name": "End time",
+          "description": "End time of slot"
+        },
+        "start_date": {
+          "name": "Start date",
+          "description": "Date when the slot starts, it could end the next day if end time is before start time"
+        },
+        "state": {
+          "name": "State",
+          "description": "State of the slot, one of 'charge', 'discharge', 'pause', 'off'"
+        }
+      }
+    },
+    "run_planner": {
+      "name": "Run Planner",
+      "description": "Run the planner to calculate the schedule"
+    }
+  }
+}
