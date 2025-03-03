@@ -5,7 +5,7 @@
         "title": "Energy planner",
         "description": "Integration configuration for energy planner",
         "data": {
-          "host": "IP address of Solis Inverter",
+          "nordpool_entity_id": "Entity ID of Nordpool sensor"
         }
       }
     }
