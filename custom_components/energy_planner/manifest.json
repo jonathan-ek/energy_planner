@@ -5,9 +5,10 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/jonathan-ek/energy_planner/blob/master/README.md",
-  "integration_type": "hub",
+  "integration_type": "device",
   "issue_tracker": "https://github.com/jonathan-ek/energy_planner/issues",
   "iot_class": "local_polling",
   "requirements": [],
-  "single_config_entry": true
+  "quality_scale": "bronze",
+  "version": "0.0.1"
 }
