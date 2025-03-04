@@ -1,5 +1,5 @@
 import asyncio
-import datetime
+import datetime as dt
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -46,7 +46,7 @@ async def async_setup(hass, config):
     @callback
     def run_planner_service(call: ServiceCall) -> None:
         """Service to run the planner."""
-        hass.data[DOMAIN]['values']["slot_1_date_time_start"] = datetime.datetime.now()
+        hass.data[DOMAIN]['values']["slot_1_date_time_start"] = dt.datetime.now()
         _LOGGER.info("Running planner: %s", config)
         _LOGGER.info("Received planning data: %s", call.data)
 
