@@ -20,8 +20,8 @@ async def async_setup(hass, config):
 
     # Register the configuration flow.
     @callback
-    def set_state_service(call: ServiceCall) -> None:
-        """Service to send a message."""
+    def add_slot_service(call: ServiceCall) -> None:
+        """Service to add a slot."""
         start_time = call.data.get("start_time")
         end_time = call.data.get("end_time")
         start_date = call.data.get("start_date")
@@ -34,10 +34,12 @@ async def async_setup(hass, config):
 
     @callback
     def run_planner_service(call: ServiceCall) -> None:
+        """Service to run the planner."""
+        _LOGGER.info("Running planner: %s", config)
         _LOGGER.info("Received planning data: %s", call.data)
 
     # Register our service with Home Assistant.
-    hass.services.async_register(DOMAIN, 'set_state', set_state_service)
+    hass.services.async_register(DOMAIN, 'add_slot', add_slot_service)
     hass.services.async_register(DOMAIN, 'run_planner', run_planner_service)
     # Return boolean to indicate that initialization was successful.
     return True
