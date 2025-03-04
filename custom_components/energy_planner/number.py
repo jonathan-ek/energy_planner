@@ -73,3 +73,4 @@ class EnergyPlannerNumberEntity(RestoreSensor, NumberEntity):
 
         value: float = self._hass.data[DOMAIN][self.id]
         self.schedule_update_ha_state()
+        self._attr_native_value = value

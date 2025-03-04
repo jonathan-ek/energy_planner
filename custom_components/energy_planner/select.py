@@ -12,7 +12,7 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     _LOGGER.info("Setting up datetime platform")
     datetimes = [
-        EnergyPlannerDateTimeEntity(hass, {
+        EnergyPlannerSelectEntity(hass, {
             "id": f"slot_{i}_state", "options": ["charge", "discharge", "pause", "off"], "default": "off",
             "name": f"Slot {i} state", "enabled": True})
         for i in range(1, 50)
@@ -24,7 +24,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     return True
 
 
-class EnergyPlannerDateTimeEntity(RestoreSensor, SelectEntity):
+class EnergyPlannerSelectEntity(RestoreSensor, SelectEntity):
     """Representation of a Number entity."""
 
     def __init__(self, hass, entity_definition):
@@ -54,10 +54,7 @@ class EnergyPlannerDateTimeEntity(RestoreSensor, SelectEntity):
 
     def update(self):
         """Update Modbus data periodically."""
-        self._attr_available = True
-
-        value: float = self._hass.data[DOMAIN][self.id]
-        self.schedule_update_ha_state()
+        pass
 
     async def async_select_option(self, option: str) -> None:
         """Update the current value."""
