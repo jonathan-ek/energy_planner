@@ -47,7 +47,7 @@ async def async_setup(hass, config):
     def run_planner_service(call: ServiceCall) -> None:
         """Service to run the planner."""
         hass.data[DOMAIN]['values']["slot_1_date_time_start"] = dt.datetime.now()
-        hass.data[DOMAIN][DATE_TIME_ENTITIES]["slot_1_date_time_start"].update()
+        hass.data[DOMAIN][DATE_TIME_ENTITIES][0].update()
         _LOGGER.info("Running planner: %s", config)
         _LOGGER.info("Received planning data: %s", call.data)
 
