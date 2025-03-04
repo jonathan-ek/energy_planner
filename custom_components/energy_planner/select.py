@@ -54,7 +54,11 @@ class EnergyPlannerSelectEntity(RestoreSensor, SelectEntity):
 
     def update(self):
         """Update Modbus data periodically."""
-        pass
+        self._attr_available = True
+        value = self._hass.data[DOMAIN].get(self.id, None)
+        if value is not None:
+            self._attr_native_value = value
+        self.schedule_update_ha_state()
 
     async def async_select_option(self, option: str) -> None:
         """Update the current value."""

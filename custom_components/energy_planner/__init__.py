@@ -18,8 +18,6 @@ async def async_setup(hass, config):
         "values": []
     }
 
-    hass.helpers.discovery.load_platform('sensor', DOMAIN, {}, config)
-
     # Register the configuration flow.
     @callback
     def set_state_service(call: ServiceCall) -> None:
@@ -53,12 +51,7 @@ async def state_automation_listener(event: Event[EventStateChangedData]):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up Modbus from a config entry."""
     # Set up the platforms associated with this integration
-    for component in PLATFORMS:
-        hass.async_create_task(hass.config_entries.async_forward_entry_setup(entry, component))
-        _LOGGER.debug(f"async_setup_entry: loading: {component}")
-        await asyncio.sleep(1)
-    await asyncio.sleep(20)
-
+    hass.async_create_task(hass.config_entries.async_forward_entry_setups(entry, PLATFORMS))
     return True
 
 

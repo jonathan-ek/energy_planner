@@ -55,7 +55,9 @@ class EnergyPlannerDateTimeEntity(RestoreSensor, DateTimeEntity):
         """Update Modbus data periodically."""
         self._attr_available = True
 
-        value: float = self._hass.data[DOMAIN][self.id]
+        value = self._hass.data[DOMAIN].get(self.id, None)
+        if value is not None:
+            self._attr_native_value = value
         self.schedule_update_ha_state()
 
     async def async_set_value(self, value: datetime.datetime) -> None:

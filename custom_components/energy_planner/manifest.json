@@ -1,7 +1,7 @@
 {
   "domain": "energy_planner",
   "name": "Energy Planner",
-  "codeowners": ["jonathan-ek"],
+  "codeowners": ["@jonathan-ek"],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/jonathan-ek/energy_planner/blob/master/README.md",

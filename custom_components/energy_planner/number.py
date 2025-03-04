@@ -71,6 +71,6 @@ class EnergyPlannerNumberEntity(RestoreSensor, NumberEntity):
         """Update Modbus data periodically."""
         self._attr_available = True
 
-        value: float = self._hass.data[DOMAIN][self.id]
+        value = self._hass.data[DOMAIN].get(self.id, None)
         self.schedule_update_ha_state()
         self._attr_native_value = value
