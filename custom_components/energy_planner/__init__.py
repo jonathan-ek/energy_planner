@@ -52,6 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up Modbus from a config entry."""
     # Set up the platforms associated with this integration
     hass.async_create_task(hass.config_entries.async_forward_entry_setups(entry, PLATFORMS))
+    await asyncio.sleep(10)
     return True
 
 

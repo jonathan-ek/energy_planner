@@ -25,7 +25,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             "unit_of_measurement": UnitOfEnergy.WATT_HOUR, "enabled": True}),
         EnergyPlannerNumberEntity(hass, {
             "id": "battery_shutdown_soc",
-            "name": "Battery capacity", "default": 20,
+            "name": "Battery shutdown SOC", "default": 20,
             "min_val": 0, "max_val": 100, "step": 1,
             "unit_of_measurement": PERCENTAGE, "enabled": True}),
     ]

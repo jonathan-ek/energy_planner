@@ -6,22 +6,16 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-
-from custom_components.energy_planner import DOMAIN
+from custom_components.energy_planner import DOMAIN, _LOGGER
 
 
-def setup_platform(
-    hass: HomeAssistant,
-    config: ConfigType,
-    add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None
-) -> None:
-    """Set up the sensor platform."""
-    add_entities([ExampleSensor()])
+async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
+    _LOGGER.info("Setting up sensor platform")
+    async_add_devices([ExampleSensor()], True)
+    # Return boolean to indicate that initialization was successful
+    return True
 
 
 class ExampleSensor(SensorEntity):

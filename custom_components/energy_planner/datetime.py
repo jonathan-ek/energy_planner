@@ -13,8 +13,8 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     _LOGGER.info("Setting up datetime platform")
     datetimes = [
         EnergyPlannerDateTimeEntity(hass, {
-            "id": f"slot_{i}_date_time",
-            "name": f"Slot {i} date time", "enabled": True})
+            "id": f"slot_{i}_date_time_start",
+            "name": f"Slot {i} start", "enabled": True})
         for i in range(1, 50)
     ]
 

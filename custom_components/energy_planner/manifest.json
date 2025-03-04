@@ -8,7 +8,7 @@
   "integration_type": "device",
   "issue_tracker": "https://github.com/jonathan-ek/energy_planner/issues",
   "iot_class": "local_polling",
-  "requirements": [],
   "quality_scale": "bronze",
+  "requirements": [],
   "version": "0.0.1"
 }
