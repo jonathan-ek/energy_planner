@@ -55,17 +55,18 @@ class EnergyPlannerSwitchEntity(RestoreSensor, SwitchEntity):
     def update(self):
         """Update Modbus data periodically."""
         self._attr_available = True
-        value = self._hass.data[DOMAIN].get(self.id, None)
-        if value is not None:
-            self._attr_native_value = value
+        value = self._hass.data[DOMAIN]['values'].get(self.id, None)
+        self._attr_native_value = value
         self.schedule_update_ha_state()
 
     async def async_turn_on(self, **kwargs):
         self._attr_native_value = True
+        self._hass.data[DOMAIN]['values'][self.id] = True
         self.schedule_update_ha_state()
 
     async def async_turn_off(self, **kwargs):
         self._attr_native_value = False
+        self._hass.data[DOMAIN]['values'][self.id] = False
         self.schedule_update_ha_state()
 
     @property
