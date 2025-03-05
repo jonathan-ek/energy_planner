@@ -32,8 +32,8 @@ async def async_setup(hass: HomeAssistant, config):
         SELECT_ENTITIES: {},
         'save': save
     }
-    hass.data[DOMAIN]['values'] = async_load_from_store(hass, 'values')
-    hass.data[DOMAIN]['config'] = async_load_from_store(hass, 'config')
+    hass.data[DOMAIN]['values'] = await async_load_from_store(hass, 'values')
+    hass.data[DOMAIN]['config'] = await async_load_from_store(hass, 'config')
 
     @callback
     async def add_slot_service(call: ServiceCall) -> None:
@@ -57,15 +57,15 @@ async def async_setup(hass: HomeAssistant, config):
         """Service to run the planner."""
         _LOGGER.info("Running planner: %s", config)
         _LOGGER.info("Received planning data: %s", call.data)
-        if hass.data[DOMAIN]['values']["planner_state"] == "off":
+        if hass.data[DOMAIN]['config']["planner_state"] == "off":
             _LOGGER.info("Planner is off")
             return
-        if hass.data[DOMAIN]['values']["planner_state"] == "basic":
+        if hass.data[DOMAIN]['config']["planner_state"] == "basic":
             _LOGGER.info("Running basic planner")
             await basic_planner(hass, call)
             await hass.data[DOMAIN]['save']()
             return
-        if hass.data[DOMAIN]['values']["planner_state"] == "dynamic":
+        if hass.data[DOMAIN]['config']["planner_state"] == "dynamic":
             _LOGGER.info("Running dynamic planner")
             return
         raise ValueError("Invalid planner state")
