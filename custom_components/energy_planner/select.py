@@ -9,17 +9,26 @@ from custom_components.energy_planner.const import DOMAIN, SELECT_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
 
+
 async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     _LOGGER.info("Setting up datetime platform")
-    datetimes = [
+    selects = [
+        *[
+            EnergyPlannerSelectEntity(hass, {
+                "id": f"slot_{i}_state", "options": ["charge", "discharge", "pause", "off"], "default": "off",
+                "name": f"Slot {i} state", "enabled": True})
+            for i in range(1, 50)
+        ],
         EnergyPlannerSelectEntity(hass, {
-            "id": f"slot_{i}_state", "options": ["charge", "discharge", "pause", "off"], "default": "off",
-            "name": f"Slot {i} state", "enabled": True})
-        for i in range(1, 50)
+            "id": "planner_state", "options": ["basic", "dynamic", "off"], "default": "basic",
+            "name": "Planner state", "enabled": True})
     ]
 
-    hass.data[DOMAIN][SELECT_ENTITIES] = datetimes
-    async_add_devices(datetimes, True)
+    hass.data[DOMAIN][SELECT_ENTITIES] = selects
+
+    for select in selects:
+        hass.data[DOMAIN]['values'][select.id] = select.native_value
+    async_add_devices(selects, True)
     # Return boolean to indicate that initialization was successful
     return True
 

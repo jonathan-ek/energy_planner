@@ -1,34 +1,35 @@
-import datetime
+from datetime import time
 import logging
-from email.policy import default
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.time import TimeEntity
 from homeassistant.components.sensor import RestoreSensor
 from homeassistant.config_entries import ConfigEntry
 
-from custom_components.energy_planner.const import DOMAIN, SWITCH_ENTITIES
+from custom_components.energy_planner.const import DOMAIN, TIME_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     _LOGGER.info("Setting up datetime platform")
-    switches = [
-        EnergyPlannerSwitchEntity(hass, {
-            "id": f"slot_{i}_active", default: False,
-            "name": f"Slot {i} active", "enabled": True})
-        for i in range(1, 50)
+    times = [
+        EnergyPlannerTimeEntity(hass, {
+            "id": f"earliest_charge_time",
+            "name": f"Earliest charge time", "enabled": True}),
+        EnergyPlannerTimeEntity(hass, {
+            "id": f"earliest_discharge_time",
+            "name": f"Earliest discharge_time", "enabled": True})
     ]
 
-    hass.data[DOMAIN][SWITCH_ENTITIES] = switches
+    hass.data[DOMAIN][TIME_ENTITIES] = times
 
-    for switch in switches:
-        hass.data[DOMAIN]['values'][switch.id] = switch.native_value
-    async_add_devices(switches, True)
+    for time in times:
+        hass.data[DOMAIN]['values'][time.id] = time.native_value
+    async_add_devices(times, True)
     # Return boolean to indicate that initialization was successful
     return True
 
 
-class EnergyPlannerSwitchEntity(RestoreSensor, SwitchEntity):
+class EnergyPlannerTimeEntity(RestoreSensor, TimeEntity):
     """Representation of a Number entity."""
 
     def __init__(self, hass, entity_definition):
@@ -58,21 +59,14 @@ class EnergyPlannerSwitchEntity(RestoreSensor, SwitchEntity):
     def update(self):
         """Update Modbus data periodically."""
         self._attr_available = True
+
         value = self._hass.data[DOMAIN]['values'].get(self.id, None)
         self._attr_native_value = value
         self.schedule_update_ha_state()
 
-    async def async_turn_on(self, **kwargs):
-        self._attr_native_value = True
-        self._hass.data[DOMAIN]['values'][self.id] = True
+    async def async_set_value(self, value: time) -> None:
+        """Update the current value."""
+        self._attr_native_value = value
+        self._hass.data[DOMAIN]['values'][self.id] = value
         self.schedule_update_ha_state()
-
-    async def async_turn_off(self, **kwargs):
-        self._attr_native_value = False
-        self._hass.data[DOMAIN]['values'][self.id] = False
-        self.schedule_update_ha_state()
-
-    @property
-    def is_on(self):
-        return self._attr_native_value
-
+        self.async_write_ha_state()

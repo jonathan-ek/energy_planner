@@ -7,10 +7,11 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback, Event, Even
 from homeassistant.const import Platform
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import DOMAIN, DATE_TIME_ENTITIES, NUMBER_ENTITIES, SWITCH_ENTITIES, SENSOR_ENTITIES, SELECT_ENTITIES
+from .const import DOMAIN, DATE_TIME_ENTITIES, NUMBER_ENTITIES, SWITCH_ENTITIES, SENSOR_ENTITIES, SELECT_ENTITIES, TIME_ENTITIES
+from .planner import basic_planner
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.DATETIME, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [Platform.DATETIME, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH, Platform.TIME]
 
 
 async def async_setup(hass, config):
@@ -20,6 +21,7 @@ async def async_setup(hass, config):
         "config": {},
         "add_slot_values": [],
         DATE_TIME_ENTITIES: {},
+        TIME_ENTITIES: {},
         NUMBER_ENTITIES: {},
         SWITCH_ENTITIES: {},
         SENSOR_ENTITIES: {},
@@ -46,10 +48,19 @@ async def async_setup(hass, config):
     @callback
     def run_planner_service(call: ServiceCall) -> None:
         """Service to run the planner."""
-        hass.data[DOMAIN]['values']["slot_1_date_time_start"] = dt.datetime.now()
-        hass.data[DOMAIN][DATE_TIME_ENTITIES][0].update()
         _LOGGER.info("Running planner: %s", config)
         _LOGGER.info("Received planning data: %s", call.data)
+        if hass.data[DOMAIN]['values']["planner_state"] == "off":
+            _LOGGER.info("Planner is off")
+            return
+        if hass.data[DOMAIN]['values']["planner_state"] == "basic":
+            _LOGGER.info("Running basic planner")
+            basic_planner(hass, call)
+            return
+        if hass.data[DOMAIN]['values']["planner_state"] == "dynamic":
+            _LOGGER.info("Running dynamic planner")
+            return
+        raise ValueError("Invalid planner state")
 
     # Register our service with Home Assistant.
     hass.services.async_register(DOMAIN, 'add_slot', add_slot_service)

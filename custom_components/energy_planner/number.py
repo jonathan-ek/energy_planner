@@ -3,7 +3,7 @@ import logging
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.sensor import RestoreSensor
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfElectricCurrent, UnitOfEnergy, PERCENTAGE
+from homeassistant.const import UnitOfElectricCurrent, UnitOfEnergy, PERCENTAGE, UnitOfTime
 
 from custom_components.energy_planner.const import DOMAIN, NUMBER_ENTITIES
 
@@ -13,6 +13,18 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     _LOGGER.info("Setting up number platform")
     numbers = [
+
+        EnergyPlannerNumberEntity(hass, {
+            "id": "basic_nr_of_charge_hours",
+            "name": "Number of charge hours", "default": 4,
+            "min_val": 0, "max_val": 12, "step": 0.25,
+            "unit_of_measurement": UnitOfTime.HOURS, "enabled": True}),
+        EnergyPlannerNumberEntity(hass, {
+            "id": "basic_nr_of_discharge_hours",
+            "name": "Number of discharge hours", "default": 12,
+            "min_val": 0, "max_val": 24, "step": 0.25,
+            "unit_of_measurement": UnitOfTime.HOURS, "enabled": True}),
+
         EnergyPlannerNumberEntity(hass, {
             "id": "max_charge_current",
             "name": "Max charge current", "default": 16,
@@ -31,6 +43,9 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     ]
 
     hass.data[DOMAIN][NUMBER_ENTITIES] = numbers
+    for number in numbers:
+        hass.data[DOMAIN]['values'][number.id] = number.native_value
+
     async_add_devices(numbers, True)
     # Return boolean to indicate that initialization was successful
     return True
