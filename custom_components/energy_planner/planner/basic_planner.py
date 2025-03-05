@@ -1,9 +1,11 @@
 import datetime as dt
+import logging
 
 from homeassistant.core import ServiceCall, HomeAssistant
 
-from .. import DATE_TIME_ENTITIES, DOMAIN, _LOGGER
+from ..const import DATE_TIME_ENTITIES, DOMAIN
 
+_LOGGER = logging.getLogger(__name__)
 
 def planner(hass: HomeAssistant, call: ServiceCall):
     nordpool_entity_id = hass.data[DOMAIN]['config'].get("nordpool_entity_id")
