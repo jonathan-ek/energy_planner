@@ -1,21 +1,25 @@
 import asyncio
-import datetime as dt
 import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback, Event, EventStateChangedData
 from homeassistant.const import Platform
-from homeassistant.helpers.event import async_track_state_change_event
+
 
 from .const import DOMAIN, DATE_TIME_ENTITIES, NUMBER_ENTITIES, SWITCH_ENTITIES, SENSOR_ENTITIES, SELECT_ENTITIES, TIME_ENTITIES
 from .planner import basic_planner
+from .store import async_save_to_store, async_load_from_store
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.DATETIME, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH, Platform.TIME]
 
 
-async def async_setup(hass, config):
+async def async_setup(hass: HomeAssistant, config):
     """Set up the Energy Planner component."""
+    async def save():
+        for data_store in ['values', 'config']:
+            await async_save_to_store(hass, data_store, hass.data[DOMAIN][data_store])
+
     hass.data[DOMAIN] = {
         "values": {},
         "config": {},
@@ -25,12 +29,14 @@ async def async_setup(hass, config):
         NUMBER_ENTITIES: {},
         SWITCH_ENTITIES: {},
         SENSOR_ENTITIES: {},
-        SELECT_ENTITIES: {}
+        SELECT_ENTITIES: {},
+        'save': save
     }
+    hass.data[DOMAIN]['values'] = async_load_from_store(hass, 'values')
+    hass.data[DOMAIN]['config'] = async_load_from_store(hass, 'config')
 
-    # Register the configuration flow.
     @callback
-    def add_slot_service(call: ServiceCall) -> None:
+    async def add_slot_service(call: ServiceCall) -> None:
         """Service to add a slot."""
         start_time = call.data.get("start_time")
         end_time = call.data.get("end_time")
@@ -42,11 +48,12 @@ async def async_setup(hass, config):
             "start_date": start_date,
             "state": state
         })
+        await hass.data[DOMAIN]['save']()
         _LOGGER.info("Received data: %s", call.data)
         _LOGGER.info("Current values: %s", hass.data[DOMAIN]["values"])
 
     @callback
-    def run_planner_service(call: ServiceCall) -> None:
+    async def run_planner_service(call: ServiceCall) -> None:
         """Service to run the planner."""
         _LOGGER.info("Running planner: %s", config)
         _LOGGER.info("Received planning data: %s", call.data)
@@ -55,7 +62,8 @@ async def async_setup(hass, config):
             return
         if hass.data[DOMAIN]['values']["planner_state"] == "basic":
             _LOGGER.info("Running basic planner")
-            basic_planner(hass, call)
+            await basic_planner(hass, call)
+            await hass.data[DOMAIN]['save']()
             return
         if hass.data[DOMAIN]['values']["planner_state"] == "dynamic":
             _LOGGER.info("Running dynamic planner")

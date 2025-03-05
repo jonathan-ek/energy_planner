@@ -21,14 +21,17 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         ],
         EnergyPlannerSelectEntity(hass, {
             "id": "planner_state", "options": ["basic", "dynamic", "off"], "default": "basic",
-            "name": "Planner state", "enabled": True})
+            "name": "Planner state", "enabled": True, "data_store": "config"})
     ]
 
     hass.data[DOMAIN][SELECT_ENTITIES] = selects
 
     for select in selects:
-        hass.data[DOMAIN]['values'][select.id] = select.current_option
+        if hass.data[DOMAIN][select.data_store].get(select.id) is None:
+            hass.data[DOMAIN][select.data_store][select.id] = select.current_option
     async_add_devices(selects, True)
+    for select in selects:
+        select.update()
     # Return boolean to indicate that initialization was successful
     return True
 
@@ -46,6 +49,7 @@ class EnergyPlannerSelectEntity(RestoreSensor, SelectEntity):
         self._attr_unique_id = "{}_{}".format(DOMAIN, self.id)
         self._attr_has_entity_name = True
         self._attr_name = entity_definition["name"]
+        self.data_store = entity_definition.get("data_store", 'values')
         self._attr_assumed_state = entity_definition.get("assumed", False)
         self._attr_options = entity_definition.get("options", [])
         self._attr_current_option = entity_definition.get("default", None)
@@ -64,7 +68,7 @@ class EnergyPlannerSelectEntity(RestoreSensor, SelectEntity):
     def update(self):
         """Update Modbus data periodically."""
         self._attr_available = True
-        value = self._hass.data[DOMAIN]['values'].get(self.id, None)
+        value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
         self._attr_native_value = value
         self._attr_current_option = value
         self.schedule_update_ha_state()
@@ -73,5 +77,5 @@ class EnergyPlannerSelectEntity(RestoreSensor, SelectEntity):
         """Update the current value."""
         self._attr_current_option = option
         self._attr_native_value = option
-        self._hass.data[DOMAIN]['values'][self.id] = option
+        self._hass.data[DOMAIN][self.data_store][self.id] = option
         self.schedule_update_ha_state()

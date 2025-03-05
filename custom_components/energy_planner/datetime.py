@@ -20,6 +20,8 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
 
     hass.data[DOMAIN][DATE_TIME_ENTITIES] = datetimes
     async_add_devices(datetimes, True)
+    for entity in datetimes:
+        entity.update()
     # Return boolean to indicate that initialization was successful
     return True
 
@@ -37,6 +39,7 @@ class EnergyPlannerDateTimeEntity(RestoreSensor, DateTimeEntity):
         self._attr_unique_id = "{}_{}".format(DOMAIN, self.id)
         self._attr_has_entity_name = True
         self._attr_name = entity_definition["name"]
+        self.data_store = entity_definition.get("data_store", 'values')
         self._attr_native_value = entity_definition.get("default", None)
         self._attr_assumed_state = entity_definition.get("assumed", False)
         self._attr_available = True
@@ -55,13 +58,13 @@ class EnergyPlannerDateTimeEntity(RestoreSensor, DateTimeEntity):
         """Update Modbus data periodically."""
         self._attr_available = True
 
-        value = self._hass.data[DOMAIN]['values'].get(self.id, None)
+        value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
         self._attr_native_value = value
         self.schedule_update_ha_state()
 
     async def async_set_value(self, value: datetime.datetime) -> None:
         """Update the current value."""
         self._attr_native_value = value
-        self._hass.data[DOMAIN]['values'][self.id] = value
+        self._hass.data[DOMAIN][self.data_store][self.id] = value
         self.schedule_update_ha_state()
         self.async_write_ha_state()

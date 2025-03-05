@@ -18,35 +18,37 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             "id": "basic_nr_of_charge_hours",
             "name": "Number of charge hours", "default": 4,
             "min_val": 0, "max_val": 12, "step": 0.25,
-            "unit_of_measurement": UnitOfTime.HOURS, "enabled": True}),
+            "unit_of_measurement": UnitOfTime.HOURS, "enabled": True, "data_store": "config"}),
         EnergyPlannerNumberEntity(hass, {
             "id": "basic_nr_of_discharge_hours",
             "name": "Number of discharge hours", "default": 12,
             "min_val": 0, "max_val": 24, "step": 0.25,
-            "unit_of_measurement": UnitOfTime.HOURS, "enabled": True}),
-
+            "unit_of_measurement": UnitOfTime.HOURS, "enabled": True, "data_store": "config"}),
         EnergyPlannerNumberEntity(hass, {
             "id": "max_charge_current",
             "name": "Max charge current", "default": 16,
             "min_val": 0, "max_val": 50, "step": 1,
-            "unit_of_measurement": UnitOfElectricCurrent.AMPERE, "enabled": True}),
+            "unit_of_measurement": UnitOfElectricCurrent.AMPERE, "enabled": True, "data_store": "config"}),
         EnergyPlannerNumberEntity(hass, {
             "id": "battery_capacity",
             "name": "Battery capacity", "default": 25600,
             "min_val": 0, "max_val": 1000000, "step": 1,
-            "unit_of_measurement": UnitOfEnergy.WATT_HOUR, "enabled": True}),
+            "unit_of_measurement": UnitOfEnergy.WATT_HOUR, "enabled": True, "data_store": "config"}),
         EnergyPlannerNumberEntity(hass, {
             "id": "battery_shutdown_soc",
             "name": "Battery shutdown SOC", "default": 20,
             "min_val": 0, "max_val": 100, "step": 1,
-            "unit_of_measurement": PERCENTAGE, "enabled": True}),
+            "unit_of_measurement": PERCENTAGE, "enabled": True, "data_store": "config"}),
     ]
 
     hass.data[DOMAIN][NUMBER_ENTITIES] = numbers
     for number in numbers:
-        hass.data[DOMAIN]['values'][number.id] = number.native_value
-
+        if hass.data[DOMAIN][number.data_store].get(number.id) is None:
+            hass.data[DOMAIN][number.data_store][number.id] = number.native_value
     async_add_devices(numbers, True)
+    for number in numbers:
+        number.update()
+
     # Return boolean to indicate that initialization was successful
     return True
 
@@ -64,6 +66,7 @@ class EnergyPlannerNumberEntity(RestoreSensor, NumberEntity):
         self._attr_unique_id = "{}_{}".format(DOMAIN, self.id)
         self._attr_has_entity_name = True
         self._attr_name = entity_definition["name"]
+        self.data_store = entity_definition.get("data_store", 'values')
         self._attr_native_value = entity_definition.get("default", None)
         self._attr_assumed_state = entity_definition.get("assumed", False)
         self._attr_available = True
@@ -86,13 +89,13 @@ class EnergyPlannerNumberEntity(RestoreSensor, NumberEntity):
         """Update Modbus data periodically."""
         self._attr_available = True
 
-        value = self._hass.data[DOMAIN]['values'].get(self.id, None)
+        value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
         self.schedule_update_ha_state()
         self._attr_native_value = value
 
     def set_value(self, value: float) -> None:
         """Update the current value."""
         self._attr_native_value = value
-        self._hass.data[DOMAIN]['values'][self.id] = value
+        self._hass.data[DOMAIN][self.data_store][self.id] = value
         self.schedule_update_ha_state()
         self.async_write_ha_state()
