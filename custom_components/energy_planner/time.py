@@ -1,4 +1,4 @@
-from datetime import time
+import datetime as dt
 import logging
 
 from homeassistant.components.time import TimeEntity
@@ -13,11 +13,11 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     _LOGGER.info("Setting up datetime platform")
     times = [
         EnergyPlannerTimeEntity(hass, {
-            "id": f"earliest_charge_time",
+            "id": f"earliest_charge_time", "default": dt.time(22,0),
             "name": f"Earliest charge time", "enabled": True}),
         EnergyPlannerTimeEntity(hass, {
-            "id": f"earliest_discharge_time",
-            "name": f"Earliest discharge_time", "enabled": True})
+            "id": f"earliest_discharge_time", "default": dt.time(6,0),
+            "name": f"Earliest discharge time", "enabled": True})
     ]
 
     hass.data[DOMAIN][TIME_ENTITIES] = times
@@ -64,7 +64,7 @@ class EnergyPlannerTimeEntity(RestoreSensor, TimeEntity):
         self._attr_native_value = value
         self.schedule_update_ha_state()
 
-    async def async_set_value(self, value: time) -> None:
+    async def async_set_value(self, value: dt.time) -> None:
         """Update the current value."""
         self._attr_native_value = value
         self._hass.data[DOMAIN]['values'][self.id] = value

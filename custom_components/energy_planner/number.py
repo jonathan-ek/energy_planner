@@ -89,3 +89,10 @@ class EnergyPlannerNumberEntity(RestoreSensor, NumberEntity):
         value = self._hass.data[DOMAIN]['values'].get(self.id, None)
         self.schedule_update_ha_state()
         self._attr_native_value = value
+
+    def set_value(self, value: float) -> None:
+        """Update the current value."""
+        self._attr_native_value = value
+        self._hass.data[DOMAIN]['values'][self.id] = value
+        self.schedule_update_ha_state()
+        self.async_write_ha_state()

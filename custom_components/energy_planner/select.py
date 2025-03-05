@@ -27,7 +27,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     hass.data[DOMAIN][SELECT_ENTITIES] = selects
 
     for select in selects:
-        hass.data[DOMAIN]['values'][select.id] = select.native_value
+        hass.data[DOMAIN]['values'][select.id] = select.current_option
     async_add_devices(selects, True)
     # Return boolean to indicate that initialization was successful
     return True
@@ -51,7 +51,7 @@ class EnergyPlannerSelectEntity(RestoreSensor, SelectEntity):
         self._attr_current_option = entity_definition.get("default", None)
         self._attr_available = True
         self.is_added_to_hass = False
-        self._attr_device_class = entity_definition.get("device_class", None)
+        self._attr_device_class = 'enum'
         self._attr_icon = entity_definition.get("icon", None)
         self._attr_native_step = entity_definition.get("step", 1.0)
         self._attr_should_poll = False
