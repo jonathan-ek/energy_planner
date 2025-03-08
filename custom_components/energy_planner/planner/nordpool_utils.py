@@ -3,10 +3,14 @@ import logging
 from collections import defaultdict
 
 from datetime import datetime
+from datetime import timedelta
 from datetime import timezone as ts
 from dateutil.parser import parse as parse_dt
 from pytz import timezone, utc
 from homeassistant.util import dt as dt_utils
+from homeassistant.core import HomeAssistant
+
+from ..const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 tzs = {
@@ -42,6 +46,7 @@ def _parse_dt(time_str):
         return timezone("Europe/Stockholm").localize(time).astimezone(utc)
     return time.astimezone(utc)
 
+
 def _conv_to_float(s):
     """Convert numbers to float. Return infinity, if conversion fails."""
     # Skip if already float
@@ -51,6 +56,7 @@ def _conv_to_float(s):
         return float(s.replace(",", ".").replace(" ", ""))
     except ValueError:
         return float("inf")
+
 
 def parse_json(data, currency=None, areas=None):
     """
@@ -64,7 +70,8 @@ def parse_json(data, currency=None, areas=None):
             - list of values (dictionary with start and endtime and value)
             - possible other values, such as min, max, average for hourly
     """
-
+    if data is None:
+        return None
     if areas is None:
         areas = []
 
@@ -73,12 +80,10 @@ def parse_json(data, currency=None, areas=None):
 
     data_source = ("multiAreaEntries", "entryPerArea")
 
-
     if data.get("status", 200) != 200 and "version" not in data:
         raise Exception(f"Invalid response from Nordpool API: {data}")
 
     currency = data.get("currency", currency)
-
 
     start_time = None
     end_time = None
@@ -125,51 +130,121 @@ def parse_json(data, currency=None, areas=None):
         "areas": area_data,
     }
 
-async def join_result_for_correct_time(results, dt):
+
+async def join_result_for_correct_time(results, dt, nordpool_area):
     """Parse a list of responses from the api
     to extract the correct hours in their timezone.
     """
-    # utc = datetime.utcnow()
-    fin = defaultdict(dict)
+    fin = []
     _LOGGER.debug("join_result_for_correct_time %s", dt)
-    if dt is None:
-        utc = datetime.now(ts.utc)
+    zone = tzs.get(nordpool_area)
+    if zone is None:
+        _LOGGER.debug("Failed to get timezone for %s", nordpool_area)
+        return []
     else:
-        utc = dt
-
+        zone = await dt_utils.async_get_time_zone(zone)
+    start_of_day = dt.astimezone(zone).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    end_of_day = dt.astimezone(zone).replace(
+        hour=23, minute=59, second=59, microsecond=999999
+    )
     for day_ in results:
-        for key, value in day_.get("areas", {}).items():
-            zone = tzs.get(key)
-            if zone is None:
-                _LOGGER.debug("Skipping %s", key)
-                continue
-            else:
-                zone = await dt_utils.async_get_time_zone(zone)
-
-            values = day_["areas"][key].pop("values")
-
-            if key not in fin["areas"]:
-                fin = {}
-            fin.update(value)
-            if "values" not in fin:
-                fin["values"] = []
-
-            start_of_day = utc.astimezone(zone).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-            end_of_day = utc.astimezone(zone).replace(
-                hour=23, minute=59, second=59, microsecond=999999
-            )
-
-            for val in values:
-                local = val["start"].astimezone(zone)
-                local_end = val["end"].astimezone(zone)
-                if start_of_day <= local <= end_of_day:
-                    if local == local_end:
-                        _LOGGER.info(
-                            "Hour has the same start and end, most likely due to dst change %s excluded this hour",
-                            val,
-                        )
-                    else:
-                        fin["values"].append(val)
+        if day_ is None:
+            continue
+        for val in day_["areas"][nordpool_area].get("values", []):
+            start = val["start"]
+            end = val["end"]
+            if type(start) is str:
+                start = datetime.fromisoformat(start)
+                end = datetime.fromisoformat(end)
+            local = start.astimezone(zone)
+            local_end = end.astimezone(zone)
+            if start_of_day <= local <= end_of_day:
+                if local == local_end:
+                    _LOGGER.info(
+                        "Hour has the same start and end, most likely due to dst change %s excluded this hour",
+                        val,
+                    )
+                else:
+                    fin.append(val)
     return fin
+
+
+async def fetch_single_day(hass: HomeAssistant, nordpool_currency: str, nordpool_area: str, date: str):
+    nordpool_values = hass.data[DOMAIN]['values'].get('nordpool_values', {})
+    if nordpool_area not in nordpool_values:
+        nordpool_values[nordpool_area] = []
+    else:
+        nordpool_values[nordpool_area] = [*nordpool_values[nordpool_area]]
+    for value in nordpool_values[nordpool_area]:
+        if value.get('date') == date:
+            _LOGGER.info("Using cached nordpool data for %s %s %s", nordpool_currency, nordpool_area, date)
+            return value.get('values')
+    try:
+        values = await hass.services.async_call('nordpool', 'hourly', {
+            "currency": nordpool_currency,
+            "area": nordpool_area,
+            "date": date
+        }, True, return_response=True)
+    except Exception as e:
+        _LOGGER.error("Failed to fetch nordpool data for %s %s %s", nordpool_currency, nordpool_area, date)
+        values = None
+    tmp = parse_json(values, nordpool_currency, areas=[nordpool_area])
+    if tmp is not None:
+        nordpool_values[nordpool_area].append({
+            'date': date,
+            'values': tmp
+        })
+    hass.data[DOMAIN]['values']['nordpool_values'] = nordpool_values
+    return tmp
+
+
+async def fetch_nordpool_data(hass: HomeAssistant, nordpool_currency: str, nordpool_area: str,
+                              include_tomorrow: bool = True):
+    now = dt_utils.now()
+    nordpool_values = hass.data[DOMAIN]['values'].get('nordpool_values', {})
+    if nordpool_area not in nordpool_values:
+        nordpool_values[nordpool_area] = []
+    else:
+        nordpool_values[nordpool_area] = [
+            value for value in nordpool_values[nordpool_area] if
+            datetime.strptime(value.get('date'), "%Y-%m-%d") >= datetime.strptime((now - timedelta(days=2)).strftime("%Y-%m-%d"), "%Y-%m-%d")]
+    hass.data[DOMAIN]['values']['nordpool_values'] = nordpool_values
+    yesterdays_yesterdays_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
+                                                          (now - timedelta(days=2)).strftime("%Y-%m-%d"))
+    yesterdays_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
+                                               (now - timedelta(days=1)).strftime("%Y-%m-%d"))
+    todays_values = await fetch_single_day(hass, nordpool_currency, nordpool_area, now.strftime("%Y-%m-%d"))
+    tomorrows_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
+                                              (now + timedelta(days=1)).strftime("%Y-%m-%d"))
+    _LOGGER.info("Fetching nordpool data for %s %s", nordpool_currency, nordpool_area)
+    _LOGGER.info("Yesterdays yesterday: %s", yesterdays_yesterdays_values)
+    _LOGGER.info("Yesterday: %s", yesterdays_values)
+    _LOGGER.info("Today: %s", todays_values)
+    _LOGGER.info("Tomorrow: %s", tomorrows_values)
+
+    tomorrows_tomorrows_values = None
+    if include_tomorrow:
+        tomorrows_tomorrows_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
+                                                            (now + timedelta(days=2)).strftime("%Y-%m-%d"))
+        _LOGGER.info("Tomorrows tomorrow: %s", tomorrows_tomorrows_values)
+
+    yesterday = await join_result_for_correct_time([
+        yesterdays_yesterdays_values,
+        yesterdays_values,
+        todays_values,
+    ], now - timedelta(days=1), nordpool_area)
+    today = await join_result_for_correct_time([
+        yesterdays_values,
+        todays_values,
+        tomorrows_values,
+    ], now, nordpool_area)
+    tomorrow = None
+    if include_tomorrow:
+        tomorrow = await join_result_for_correct_time([
+            todays_values,
+            tomorrows_values,
+            tomorrows_tomorrows_values,
+        ], now + timedelta(days=1), nordpool_area)
+    return yesterday, today, tomorrow
