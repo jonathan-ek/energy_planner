@@ -1,12 +1,55 @@
 import datetime as dt
 import logging
-
+from datetime import timezone as ts
 from homeassistant.core import ServiceCall, HomeAssistant
-
+from homeassistant.util import dt as dt_utils
 from .nordpool_utils import join_result_for_correct_time, parse_json
 from ..const import DATE_TIME_ENTITIES, DOMAIN, TIME_ENTITIES, SELECT_ENTITIES, SWITCH_ENTITIES, SENSOR_ENTITIES, NUMBER_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
+async def fetch_nordpool_data(hass: HomeAssistant, nordpool_currency: str, nordpool_area: str):
+    now = dt_utils.now()
+    yesterdays_yesterdays_values = await hass.services.async_call('nordpool', 'hourly', {
+        "currency": nordpool_currency,
+        "area": nordpool_area,
+        "date": (now - dt.timedelta(days=2)).strftime("%Y-%m-%d")
+    }, True, return_response=True)
+    yesterdays_values = await hass.services.async_call('nordpool', 'hourly', {
+        "currency": nordpool_currency,
+        "area": nordpool_area,
+        "date": (now - dt.timedelta(days=1)).strftime("%Y-%m-%d")
+    }, True, return_response=True)
+    todays_values = await hass.services.async_call('nordpool', 'hourly', {
+        "currency": nordpool_currency,
+        "area": nordpool_area,
+        "date": now.strftime("%Y-%m-%d")
+    }, True, return_response=True)
+    tomorrows_values = await hass.services.async_call('nordpool', 'hourly', {
+        "currency": nordpool_currency,
+        "area": nordpool_area,
+        "date": (now + dt.timedelta(days=1)).strftime("%Y-%m-%d")
+    }, True, return_response=True)
+    tomorrows_tomorrows_values = await hass.services.async_call('nordpool', 'hourly', {
+        "currency": nordpool_currency,
+        "area": nordpool_area,
+        "date": (now + dt.timedelta(days=2)).strftime("%Y-%m-%d")
+    }, True, return_response=True)
+    yesterday = await join_result_for_correct_time([
+        parse_json(yesterdays_yesterdays_values, nordpool_currency, areas=[nordpool_area]),
+        parse_json(yesterdays_values, nordpool_currency, areas=[nordpool_area]),
+        parse_json(todays_values, nordpool_currency, areas=[nordpool_area])
+    ], now - dt.timedelta(days=1))
+    today = await join_result_for_correct_time([
+        parse_json(yesterdays_values, nordpool_currency, areas=[nordpool_area]),
+        parse_json(todays_values, nordpool_currency, areas=[nordpool_area]),
+        parse_json(tomorrows_values, nordpool_currency, areas=[nordpool_area])
+    ], now)
+    tomorrow = await join_result_for_correct_time([
+        parse_json(todays_values, nordpool_currency, areas=[nordpool_area]),
+        parse_json(tomorrows_values, nordpool_currency, areas=[nordpool_area]),
+        parse_json(tomorrows_tomorrows_values, nordpool_currency, areas=[nordpool_area])
+    ], now + dt.timedelta(days=1))
+    return yesterday, today, tomorrow
 
 async def reset(hass: HomeAssistant):
     _LOGGER.info("Resetting planner")
@@ -45,29 +88,9 @@ async def planner(hass: HomeAssistant, call: ServiceCall):
     tomorrow_valid = attributes.get('tomorrow_valid')
     if not tomorrow_valid:
         raise ValueError("Tomorrow's prices are not valid")
-    yesterdays_values = await hass.services.async_call('nordpool', 'hourly', {
-        "currency": nordpool_currency,
-        "area": nordpool_area,
-        "date": (dt.datetime.now() - dt.timedelta(days=1)).strftime("%Y-%m-%d")
-    }, True, return_response=True)
-    todays_values = await hass.services.async_call('nordpool', 'hourly', {
-        "currency": nordpool_currency,
-        "area": nordpool_area,
-        "date": (dt.datetime.now()).strftime("%Y-%m-%d")
-    }, True, return_response=True)
-    tomorrows_values = await hass.services.async_call('nordpool', 'hourly', {
-        "currency": nordpool_currency,
-        "area": nordpool_area,
-        "date": (dt.datetime.now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
-    }, True, return_response=True)
-    res = await join_result_for_correct_time([
-        parse_json(yesterdays_values, nordpool_currency, areas=[nordpool_area]),
-        parse_json(todays_values, nordpool_currency, areas=[nordpool_area]),
-        parse_json(tomorrows_values, nordpool_currency, areas=[nordpool_area])
-    ], dt.datetime.now())
-    _LOGGER.info("Nordpool response: %s", res)
+    yesterday, today, tomorrow = await fetch_nordpool_data(hass, nordpool_currency, nordpool_area)
+    _LOGGER.info("Nordpool response: %s", today)
 
-    yesterday = [(i, x['entryPerArea'][str(nordpool_area).upper()], -1) for i, x in enumerate(res['multiAreaEntries'])]
     _LOGGER.info("Yesterday: %s", yesterday)
 
     earliest_charge = hass.data[DOMAIN]['config'].get("earliest_charge_time")

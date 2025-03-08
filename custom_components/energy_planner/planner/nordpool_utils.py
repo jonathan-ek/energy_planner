@@ -149,10 +149,10 @@ async def join_result_for_correct_time(results, dt):
             values = day_["areas"][key].pop("values")
 
             if key not in fin["areas"]:
-                fin["areas"][key] = {}
-            fin["areas"][key].update(value)
-            if "values" not in fin["areas"][key]:
-                fin["areas"][key]["values"] = []
+                fin = {}
+            fin.update(value)
+            if "values" not in fin:
+                fin["values"] = []
 
             start_of_day = utc.astimezone(zone).replace(
                 hour=0, minute=0, second=0, microsecond=0
@@ -171,6 +171,5 @@ async def join_result_for_correct_time(results, dt):
                             val,
                         )
                     else:
-                        fin["areas"][key]["values"].append(val)
-
+                        fin["values"].append(val)
     return fin
