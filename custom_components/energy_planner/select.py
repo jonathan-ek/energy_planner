@@ -29,14 +29,14 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     for select in selects:
         if hass.data[DOMAIN][select.data_store].get(select.id) is None:
             hass.data[DOMAIN][select.data_store][select.id] = select.current_option
-    async_add_devices(selects, True)
+    async_add_devices(selects)
     for select in selects:
         select.update()
     # Return boolean to indicate that initialization was successful
     return True
 
 
-class EnergyPlannerSelectEntity(RestoreSensor, SelectEntity):
+class EnergyPlannerSelectEntity(SelectEntity):
     """Representation of a Number entity."""
 
     def __init__(self, hass, entity_definition):
@@ -45,6 +45,8 @@ class EnergyPlannerSelectEntity(RestoreSensor, SelectEntity):
         # Visible Instance Attributes Outside Class
         self._hass = hass
         self.id = entity_definition["id"]
+
+        self.entity_id = f"select.{DOMAIN}_{self.id}"
         # Hidden Inherited Instance Attributes
         self._attr_unique_id = "{}_{}".format(DOMAIN, self.id)
         self._attr_has_entity_name = True
@@ -78,4 +80,5 @@ class EnergyPlannerSelectEntity(RestoreSensor, SelectEntity):
         self._attr_current_option = option
         self._attr_native_value = option
         self._hass.data[DOMAIN][self.data_store][self.id] = option
+        await self._hass.data[DOMAIN]['save']()
         self.schedule_update_ha_state()

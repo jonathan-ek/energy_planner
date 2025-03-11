@@ -9,6 +9,7 @@ from custom_components.energy_planner.const import DOMAIN, DATE_TIME_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
 
+
 async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     _LOGGER.info("Setting up datetime platform")
     datetimes = [
@@ -19,14 +20,14 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     ]
 
     hass.data[DOMAIN][DATE_TIME_ENTITIES] = datetimes
-    async_add_devices(datetimes, True)
+    async_add_devices(datetimes)
     for entity in datetimes:
         entity.update()
     # Return boolean to indicate that initialization was successful
     return True
 
 
-class EnergyPlannerDateTimeEntity(RestoreSensor, DateTimeEntity):
+class EnergyPlannerDateTimeEntity(DateTimeEntity):
     """Representation of a Number entity."""
 
     def __init__(self, hass, entity_definition):
@@ -35,6 +36,7 @@ class EnergyPlannerDateTimeEntity(RestoreSensor, DateTimeEntity):
         # Visible Instance Attributes Outside Class
         self._hass = hass
         self.id = entity_definition["id"]
+        self.entity_id = f"datetime.{DOMAIN}_{self.id}"
         # Hidden Inherited Instance Attributes
         self._attr_unique_id = "{}_{}".format(DOMAIN, self.id)
         self._attr_has_entity_name = True
@@ -59,6 +61,8 @@ class EnergyPlannerDateTimeEntity(RestoreSensor, DateTimeEntity):
         self._attr_available = True
 
         value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
+        if type(value) is str:
+            value = datetime.datetime.fromisoformat(value)
         self._attr_native_value = value
         self.schedule_update_ha_state()
 
@@ -66,5 +70,12 @@ class EnergyPlannerDateTimeEntity(RestoreSensor, DateTimeEntity):
         """Update the current value."""
         self._attr_native_value = value
         self._hass.data[DOMAIN][self.data_store][self.id] = value
+        await self._hass.data[DOMAIN]['save']()
         self.schedule_update_ha_state()
-        self.async_write_ha_state()
+
+    def _stringify_state(self, available: bool) -> str:
+        """Return the state as a string."""
+        if self._attr_native_value is None:
+            return "unknown"
+        d = f"{self._attr_native_value.day}/{self._attr_native_value.month} {self._attr_native_value.strftime('%H:%M')}"
+        return d

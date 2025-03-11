@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode
@@ -45,7 +46,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     for number in numbers:
         if hass.data[DOMAIN][number.data_store].get(number.id) is None:
             hass.data[DOMAIN][number.data_store][number.id] = number.native_value
-    async_add_devices(numbers, True)
+    async_add_devices(numbers)
     for number in numbers:
         number.update()
 
@@ -53,7 +54,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     return True
 
 
-class EnergyPlannerNumberEntity(RestoreSensor, NumberEntity):
+class EnergyPlannerNumberEntity(NumberEntity):
     """Representation of a Number entity."""
 
     def __init__(self, hass, entity_definition):
@@ -64,6 +65,7 @@ class EnergyPlannerNumberEntity(RestoreSensor, NumberEntity):
         self.id = entity_definition["id"]
         # Hidden Inherited Instance Attributes
         self._attr_unique_id = "{}_{}".format(DOMAIN, self.id)
+        self.entity_id = f"number.{DOMAIN}_{self.id}"
         self._attr_has_entity_name = True
         self._attr_name = entity_definition["name"]
         self.data_store = entity_definition.get("data_store", 'values')
@@ -90,12 +92,12 @@ class EnergyPlannerNumberEntity(RestoreSensor, NumberEntity):
         self._attr_available = True
 
         value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
-        self.schedule_update_ha_state()
         self._attr_native_value = value
+        self.schedule_update_ha_state()
 
-    def set_value(self, value: float) -> None:
+    async def async_set_native_value(self, value: float) -> None:
         """Update the current value."""
         self._attr_native_value = value
         self._hass.data[DOMAIN][self.data_store][self.id] = value
+        await self._hass.data[DOMAIN]['save']()
         self.schedule_update_ha_state()
-        self.async_write_ha_state()

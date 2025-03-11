@@ -218,17 +218,17 @@ async def fetch_nordpool_data(hass: HomeAssistant, nordpool_currency: str, nordp
     todays_values = await fetch_single_day(hass, nordpool_currency, nordpool_area, now.strftime("%Y-%m-%d"))
     tomorrows_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
                                               (now + timedelta(days=1)).strftime("%Y-%m-%d"))
-    _LOGGER.info("Fetching nordpool data for %s %s", nordpool_currency, nordpool_area)
-    _LOGGER.info("Yesterdays yesterday: %s", yesterdays_yesterdays_values)
-    _LOGGER.info("Yesterday: %s", yesterdays_values)
-    _LOGGER.info("Today: %s", todays_values)
-    _LOGGER.info("Tomorrow: %s", tomorrows_values)
+    # _LOGGER.info("Fetching nordpool data for %s %s", nordpool_currency, nordpool_area)
+    # _LOGGER.info("Yesterdays yesterday: %s", yesterdays_yesterdays_values)
+    # _LOGGER.info("Yesterday: %s", yesterdays_values)
+    # _LOGGER.info("Today: %s", todays_values)
+    # _LOGGER.info("Tomorrow: %s", tomorrows_values)
 
     tomorrows_tomorrows_values = None
     if include_tomorrow:
         tomorrows_tomorrows_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
                                                             (now + timedelta(days=2)).strftime("%Y-%m-%d"))
-        _LOGGER.info("Tomorrows tomorrow: %s", tomorrows_tomorrows_values)
+        # _LOGGER.info("Tomorrows tomorrow: %s", tomorrows_tomorrows_values)
 
     yesterday = await join_result_for_correct_time([
         yesterdays_yesterdays_values,

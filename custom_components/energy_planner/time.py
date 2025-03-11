@@ -4,12 +4,13 @@ import logging
 from homeassistant.components.time import TimeEntity
 from homeassistant.components.sensor import RestoreSensor
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from custom_components.energy_planner.const import DOMAIN, TIME_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
+async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices: AddEntitiesCallback):
     _LOGGER.info("Setting up datetime platform")
     times = [
         EnergyPlannerTimeEntity(hass, {
@@ -25,14 +26,14 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     for time in times:
         if hass.data[DOMAIN][time.data_store].get(time.id) is None:
             hass.data[DOMAIN][time.data_store][time.id] = time.native_value
-    async_add_devices(times, True)
+    async_add_devices(times)
     for time in times:
         time.update()
     # Return boolean to indicate that initialization was successful
     return True
 
 
-class EnergyPlannerTimeEntity(RestoreSensor, TimeEntity):
+class EnergyPlannerTimeEntity(TimeEntity):
     """Representation of a Number entity."""
 
     def __init__(self, hass, entity_definition):
@@ -41,6 +42,8 @@ class EnergyPlannerTimeEntity(RestoreSensor, TimeEntity):
         # Visible Instance Attributes Outside Class
         self._hass = hass
         self.id = entity_definition["id"]
+
+        self.entity_id = f"time.{DOMAIN}_{self.id}"
         # Hidden Inherited Instance Attributes
         self._attr_unique_id = "{}_{}".format(DOMAIN, self.id)
         self._attr_has_entity_name = True
@@ -72,5 +75,5 @@ class EnergyPlannerTimeEntity(RestoreSensor, TimeEntity):
         """Update the current value."""
         self._attr_native_value = value
         self._hass.data[DOMAIN][self.data_store][self.id] = value
+        await self._hass.data[DOMAIN]['save']()
         self.schedule_update_ha_state()
-        self.async_write_ha_state()

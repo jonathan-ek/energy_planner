@@ -23,15 +23,15 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
 
     for switch in switches:
         if hass.data[DOMAIN][switch.data_store].get(switch.id) is None:
-            hass.data[DOMAIN][switch.data_store][switch.id] = switch.native_value
-    async_add_devices(switches, True)
+            hass.data[DOMAIN][switch.data_store][switch.id] = switch._attr_native_value
+    async_add_devices(switches)
     for switch in switches:
         switch.update()
     # Return boolean to indicate that initialization was successful
     return True
 
 
-class EnergyPlannerSwitchEntity(RestoreSensor, SwitchEntity):
+class EnergyPlannerSwitchEntity(SwitchEntity):
     """Representation of a Number entity."""
 
     def __init__(self, hass, entity_definition):
@@ -40,6 +40,8 @@ class EnergyPlannerSwitchEntity(RestoreSensor, SwitchEntity):
         # Visible Instance Attributes Outside Class
         self._hass = hass
         self.id = entity_definition["id"]
+
+        self.entity_id = f"switch.{DOMAIN}_{self.id}"
         # Hidden Inherited Instance Attributes
         self._attr_unique_id = "{}_{}".format(DOMAIN, self.id)
         self._attr_has_entity_name = True
@@ -69,11 +71,13 @@ class EnergyPlannerSwitchEntity(RestoreSensor, SwitchEntity):
     async def async_turn_on(self, **kwargs):
         self._attr_native_value = True
         self._hass.data[DOMAIN][self.data_store][self.id] = True
+        await self._hass.data[DOMAIN]['save']()
         self.schedule_update_ha_state()
 
     async def async_turn_off(self, **kwargs):
         self._attr_native_value = False
         self._hass.data[DOMAIN][self.data_store][self.id] = False
+        await self._hass.data[DOMAIN]['save']()
         self.schedule_update_ha_state()
 
     @property
