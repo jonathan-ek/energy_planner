@@ -1,4 +1,3 @@
-
 DOMAIN = "energy_planner"
 
 NUMBER_ENTITIES = "number_entities"

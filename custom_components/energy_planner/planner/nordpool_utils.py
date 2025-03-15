@@ -1,10 +1,8 @@
 # Heavily based on https://github.com/custom-components/nordpool/blob/master/custom_components/nordpool/aio_price.py
 import logging
-from collections import defaultdict
 
 from datetime import datetime
 from datetime import timedelta
-from datetime import timezone as ts
 from dateutil.parser import parse as parse_dt
 from pytz import timezone, utc
 from homeassistant.util import dt as dt_utils
@@ -59,8 +57,8 @@ def _conv_to_float(s):
 
 
 def parse_json(data, currency=None, areas=None):
-    """
-    Parse json response from fetcher.
+    """Parse json response from fetcher.
+
     Returns dictionary with
         - start time
         - end time
@@ -101,7 +99,7 @@ def parse_json(data, currency=None, areas=None):
         row_end_time = _parse_dt(r["deliveryEnd"])
 
         # Loop through columns
-        for area_key in r[data_source[1]].keys():
+        for area_key in r[data_source[1]]:
             area_price = r[data_source[1]][area_key]
             # If areas is defined and name isn't in areas, skip column
             if area_key not in areas:
@@ -132,8 +130,10 @@ def parse_json(data, currency=None, areas=None):
 
 
 async def join_result_for_correct_time(results, dt, nordpool_area):
-    """Parse a list of responses from the api
-    to extract the correct hours in their timezone.
+    """Join raw data to format correctly.
+
+    Parse a list of responses from the api to extract
+    the correct hours in their timezone.
     """
     fin = []
     _LOGGER.debug("join_result_for_correct_time %s", dt)
@@ -141,8 +141,7 @@ async def join_result_for_correct_time(results, dt, nordpool_area):
     if zone is None:
         _LOGGER.debug("Failed to get timezone for %s", nordpool_area)
         return []
-    else:
-        zone = await dt_utils.async_get_time_zone(zone)
+    zone = await dt_utils.async_get_time_zone(zone)
     start_of_day = dt.astimezone(zone).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -163,7 +162,8 @@ async def join_result_for_correct_time(results, dt, nordpool_area):
             if start_of_day <= local <= end_of_day:
                 if local == local_end:
                     _LOGGER.info(
-                        "Hour has the same start and end, most likely due to dst change %s excluded this hour",
+                        "Hour has the same start and end, "
+                        "most likely due to dst change %s excluded this hour",
                         val,
                     )
                 else:
@@ -171,53 +171,89 @@ async def join_result_for_correct_time(results, dt, nordpool_area):
     return fin
 
 
-async def fetch_single_day(hass: HomeAssistant, nordpool_currency: str, nordpool_area: str, date: str):
-    nordpool_values = hass.data[DOMAIN]['values'].get('nordpool_values', {})
+async def fetch_single_day(
+    hass: HomeAssistant, nordpool_currency: str, nordpool_area: str, date: str
+):
+    """Fetch nordpool data for a single day."""
+    nordpool_values = hass.data[DOMAIN]["values"].get("nordpool_values", {})
     if nordpool_area not in nordpool_values:
         nordpool_values[nordpool_area] = []
     else:
         nordpool_values[nordpool_area] = [*nordpool_values[nordpool_area]]
     for value in nordpool_values[nordpool_area]:
-        if value.get('date') == date:
-            _LOGGER.info("Using cached nordpool data for %s %s %s", nordpool_currency, nordpool_area, date)
-            return value.get('values')
+        if value.get("date") == date:
+            _LOGGER.info(
+                "Using cached nordpool data for %s %s %s",
+                nordpool_currency,
+                nordpool_area,
+                date,
+            )
+            return value.get("values")
     try:
-        values = await hass.services.async_call('nordpool', 'hourly', {
-            "currency": nordpool_currency,
-            "area": nordpool_area,
-            "date": date
-        }, True, return_response=True)
-    except Exception as e:
-        _LOGGER.error("Failed to fetch nordpool data for %s %s %s", nordpool_currency, nordpool_area, date)
+        values = await hass.services.async_call(
+            "nordpool",
+            "hourly",
+            {"currency": nordpool_currency, "area": nordpool_area, "date": date},
+            True,
+            return_response=True,
+        )
+    except Exception:
+        _LOGGER.error(
+            "Failed to fetch nordpool data for %s %s %s",
+            nordpool_currency,
+            nordpool_area,
+            date,
+        )
         values = None
     tmp = parse_json(values, nordpool_currency, areas=[nordpool_area])
     if tmp is not None:
-        nordpool_values[nordpool_area].append({
-            'date': date,
-            'values': tmp
-        })
-    hass.data[DOMAIN]['values']['nordpool_values'] = nordpool_values
+        nordpool_values[nordpool_area].append({"date": date, "values": tmp})
+    hass.data[DOMAIN]["values"]["nordpool_values"] = nordpool_values
     return tmp
 
 
-async def fetch_nordpool_data(hass: HomeAssistant, nordpool_currency: str, nordpool_area: str,
-                              include_tomorrow: bool = True):
+async def fetch_nordpool_data(
+    hass: HomeAssistant,
+    nordpool_currency: str,
+    nordpool_area: str,
+    include_tomorrow: bool = True,
+):
+    """Fetch nordpool data for today, tomorrow and the day after tomorrow."""
     now = dt_utils.now()
-    nordpool_values = hass.data[DOMAIN]['values'].get('nordpool_values', {})
+    nordpool_values = hass.data[DOMAIN]["values"].get("nordpool_values", {})
     if nordpool_area not in nordpool_values:
         nordpool_values[nordpool_area] = []
     else:
         nordpool_values[nordpool_area] = [
-            value for value in nordpool_values[nordpool_area] if
-            datetime.strptime(value.get('date'), "%Y-%m-%d") >= datetime.strptime((now - timedelta(days=2)).strftime("%Y-%m-%d"), "%Y-%m-%d")]
-    hass.data[DOMAIN]['values']['nordpool_values'] = nordpool_values
-    yesterdays_yesterdays_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
-                                                          (now - timedelta(days=2)).strftime("%Y-%m-%d"))
-    yesterdays_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
-                                               (now - timedelta(days=1)).strftime("%Y-%m-%d"))
-    todays_values = await fetch_single_day(hass, nordpool_currency, nordpool_area, now.strftime("%Y-%m-%d"))
-    tomorrows_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
-                                              (now + timedelta(days=1)).strftime("%Y-%m-%d"))
+            value
+            for value in nordpool_values[nordpool_area]
+            if datetime.strptime(value.get("date"), "%Y-%m-%d")
+            >= datetime.strptime(
+                (now - timedelta(days=2)).strftime("%Y-%m-%d"), "%Y-%m-%d"
+            )
+        ]
+    hass.data[DOMAIN]["values"]["nordpool_values"] = nordpool_values
+    yesterdays_yesterdays_values = await fetch_single_day(
+        hass,
+        nordpool_currency,
+        nordpool_area,
+        (now - timedelta(days=2)).strftime("%Y-%m-%d"),
+    )
+    yesterdays_values = await fetch_single_day(
+        hass,
+        nordpool_currency,
+        nordpool_area,
+        (now - timedelta(days=1)).strftime("%Y-%m-%d"),
+    )
+    todays_values = await fetch_single_day(
+        hass, nordpool_currency, nordpool_area, now.strftime("%Y-%m-%d")
+    )
+    tomorrows_values = await fetch_single_day(
+        hass,
+        nordpool_currency,
+        nordpool_area,
+        (now + timedelta(days=1)).strftime("%Y-%m-%d"),
+    )
     # _LOGGER.info("Fetching nordpool data for %s %s", nordpool_currency, nordpool_area)
     # _LOGGER.info("Yesterdays yesterday: %s", yesterdays_yesterdays_values)
     # _LOGGER.info("Yesterday: %s", yesterdays_values)
@@ -226,25 +262,41 @@ async def fetch_nordpool_data(hass: HomeAssistant, nordpool_currency: str, nordp
 
     tomorrows_tomorrows_values = None
     if include_tomorrow:
-        tomorrows_tomorrows_values = await fetch_single_day(hass, nordpool_currency, nordpool_area,
-                                                            (now + timedelta(days=2)).strftime("%Y-%m-%d"))
-        # _LOGGER.info("Tomorrows tomorrow: %s", tomorrows_tomorrows_values)
+        tomorrows_tomorrows_values = await fetch_single_day(
+            hass,
+            nordpool_currency,
+            nordpool_area,
+            (now + timedelta(days=2)).strftime("%Y-%m-%d"),
+        )
+        # _LOGGER.info("Tomorrow's tomorrow: %s", tomorrows_tomorrows_values)
 
-    yesterday = await join_result_for_correct_time([
-        yesterdays_yesterdays_values,
-        yesterdays_values,
-        todays_values,
-    ], now - timedelta(days=1), nordpool_area)
-    today = await join_result_for_correct_time([
-        yesterdays_values,
-        todays_values,
-        tomorrows_values,
-    ], now, nordpool_area)
-    tomorrow = None
-    if include_tomorrow:
-        tomorrow = await join_result_for_correct_time([
+    yesterday = await join_result_for_correct_time(
+        [
+            yesterdays_yesterdays_values,
+            yesterdays_values,
+            todays_values,
+        ],
+        now - timedelta(days=1),
+        nordpool_area,
+    )
+    today = await join_result_for_correct_time(
+        [
+            yesterdays_values,
             todays_values,
             tomorrows_values,
-            tomorrows_tomorrows_values,
-        ], now + timedelta(days=1), nordpool_area)
+        ],
+        now,
+        nordpool_area,
+    )
+    tomorrow = None
+    if include_tomorrow:
+        tomorrow = await join_result_for_correct_time(
+            [
+                todays_values,
+                tomorrows_values,
+                tomorrows_tomorrows_values,
+            ],
+            now + timedelta(days=1),
+            nordpool_area,
+        )
     return yesterday, today, tomorrow

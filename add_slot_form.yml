@@ -1,0 +1,13 @@
+type: entities
+entities:
+  - entity: input_datetime.energy_planner_extras_start
+    name: Slot start
+  - entity: input_datetime.energy_planner_extras_end
+    name: Slot slut
+  - entity: input_select.energy_planner_extras_state
+    name: State
+footer:
+  type: buttons
+  entities:
+    - entity: input_button.energy_planner_extras_add_slot
+      name: Spara

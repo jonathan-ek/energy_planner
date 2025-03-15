@@ -1,0 +1,56 @@
+input_datetime:
+  energy_planner_extras_start:
+    name: Start time
+    has_date: true
+    has_time: true
+  energy_planner_extras_end:
+    name: End time
+    has_date: true
+    has_time: true
+input_select:
+  energy_planner_extras_state:
+    name: Energy Planner State
+    options:
+      - "charge"
+      - "discharge"
+      - "pause"
+      - "off"
+input_button:
+  energy_planner_extras_run:
+    name: Run Planner
+    icon: mdi:play
+  energy_planner_extras_add_slot:
+    name: Add Slot
+    icon: mdi:plus
+  energy_planner_extras_clear_manual_slots:
+    name: Clear Manual Slots
+    icon: mdi:minus
+
+automation:
+  - alias: "Energy Planner Run"
+    triggers:
+      - trigger: state
+        entity_id:
+          - input_button.energy_planner_extras_run
+    action:
+      - service: energy_planner.run_planner
+
+  - alias: "Energy Planner Clear Manual Slots"
+    triggers:
+      - trigger: state
+        entity_id:
+          - input_button.energy_planner_extras_clear_manual_slots
+    action:
+      - service: energy_planner.clear_manual_slots
+
+  - alias: "Energy Planner Add Slot"
+    trigger:
+      - trigger: state
+        entity_id:
+          - input_button.energy_planner_extras_add_slot
+    action:
+      - service: energy_planner.add_slot
+        data_template:
+          start: "{{ states('input_datetime.energy_planner_extras_start') }}"
+          end: "{{ states('input_datetime.energy_planner_extras_end') }}"
+          state: "{{ states('input_select.energy_planner_extras_state') }}"

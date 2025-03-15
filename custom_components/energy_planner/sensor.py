@@ -1,4 +1,5 @@
 """Platform for sensor integration."""
+
 from __future__ import annotations
 
 from homeassistant.components.sensor import (
@@ -8,10 +9,11 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
-from custom_components.energy_planner import DOMAIN, _LOGGER
+from custom_components.energy_planner import _LOGGER
 
 
 async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
+    """Set up the sensor platform."""
     _LOGGER.info("Setting up sensor platform")
     async_add_devices([ExampleSensor()], True)
     # Return boolean to indicate that initialization was successful
@@ -20,6 +22,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
 
 class ExampleSensor(SensorEntity):
     """Representation of a Sensor."""
+
     def __init__(self) -> None:
         """Initialize the sensor."""
         self._state = None
@@ -27,7 +30,7 @@ class ExampleSensor(SensorEntity):
     @property
     def name(self) -> str:
         """Return the name of the sensor."""
-        return 'Example Temperature'
+        return "Example Temperature"
 
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_device_class = SensorDeviceClass.TEMPERATURE

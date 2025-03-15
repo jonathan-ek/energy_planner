@@ -2,26 +2,17 @@ add_slot:
   name: Add Slot
   description: Add new slot, will overwrite part of or whole existing slots if they overlap
   fields:
-    start_time:
-      name: Start time
-      description: Start time of the slot
-      example: "08:00"
+    start:
+      name: Start datetime
+      description: Start datetime of the slot
       selector:
-        time:
+        datetime:
       required: true
-    end_time:
-      name: End time
-      description: End time of the slot
-      example: "16:00"
+    end:
+      name: End datetime
+      description: End datetime of the slot
       selector:
-        time:
-      required: true
-    start_date:
-      name: Start date
-      description: Date when the slot starts, it could end the next day if end time is before start time
-      example: "2025-01-01"
-      selector:
-        date:
+        datetime:
       required: true
     state:
       name: State
@@ -38,3 +29,7 @@ add_slot:
 run_planner:
   name: Run Planner
   description: Run the planner to calculate the schedule
+
+clear_manual_slots:
+  name: Clear Manual slots
+  description: Clear the manual slots from the schedule
