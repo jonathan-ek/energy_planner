@@ -1,0 +1,47 @@
+type: vertical-stack
+cards:
+  - type: entities
+    entities:
+      - entity: number.energy_planner_max_charge_current
+        name: Laddningsström
+      - entity: number.energy_planner_battery_capacity
+        name: Batteri kapacitet
+      - entity: number.energy_planner_battery_shutdown_soc
+        name: Batteri min SOC
+      - entity: select.energy_planner_planner_state
+    title: Inställningar
+  - type: entities
+    entities:
+      - entity: input_datetime.energy_planner_extras_start
+        name: Slot start
+      - entity: input_datetime.energy_planner_extras_end
+        name: Slot slut
+      - entity: input_select.energy_planner_extras_state
+        name: State
+    footer:
+      type: buttons
+      entities:
+        - entity: input_button.energy_planner_extras_add_slot
+          name: Spara
+    title: Manuella Slots
+  - type: entities
+    entities:
+      - entity: number.energy_planner_basic_nr_of_charge_hours
+        name: Laddningstimmar
+      - entity: number.energy_planner_basic_nr_of_discharge_hours
+        name: Urladdningstimmar
+      - entity: time.energy_planner_earliest_charge_time
+        name: Första tillåtna laddningstid
+      - entity: time.energy_planner_earliest_discharge_time
+        name: Första tillåtna urladdningstid
+    title: Basic inställningar
+  - type: entities
+    entities:
+      - entity: number.energy_planner_cheapest_hours_nr_of_charge_hours
+        name: Laddningstimmar
+    title: Billigaste timmar inställningar
+  - type: entities
+    entities:
+      - entity: input_button.energy_planner_extras_run
+      - entity: input_button.energy_planner_extras_clear_manual_slots
+    title: Actions

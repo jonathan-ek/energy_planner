@@ -4,20 +4,17 @@ from homeassistant.core import HomeAssistant
 
 from .manual_slots import add_manual_slots
 from .nordpool_utils import fetch_nordpool_data, tzs
-from .utils import update_entities, parse_datetime
+from .utils import (
+    update_entities,
+    parse_datetime,
+    reset,
+    store_disable_state,
+    restore_disable_state,
+)
 from ..const import DOMAIN
 from homeassistant.util import dt as dt_utils
 
 _LOGGER = logging.getLogger(__name__)
-
-
-async def reset(hass: HomeAssistant):
-    """Reset planner."""
-    _LOGGER.info("Resetting planner")
-    for i in range(1, 50):
-        hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"] = None
-        hass.data[DOMAIN]["values"][f"slot_{i}_state"] = "off"
-        hass.data[DOMAIN]["values"][f"slot_{i}_active"] = False
 
 
 async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
@@ -162,6 +159,7 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
         hass.data[DOMAIN]["config"].get("basic_nr_of_discharge_hours")
     )
     _LOGGER.info("Setting up basic planner")
+    await store_disable_state(hass)
     await reset(hass)
     now = dt_utils.now()
     zone = tzs.get(nordpool_area)
@@ -253,5 +251,6 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
         ]
         await plan_day(hass, tomorrow_data, config)
     await add_manual_slots(hass)
+    await restore_disable_state(hass)
     await update_entities(hass)
     await hass.data[DOMAIN]["save"]()

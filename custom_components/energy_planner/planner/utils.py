@@ -1,3 +1,5 @@
+import logging
+
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_utils
 
@@ -11,6 +13,61 @@ from ..const import (
     SWITCH_ENTITIES,
     NUMBER_ENTITIES,
 )
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def store_disable_state(hass: HomeAssistant):
+    """Store disable state."""
+    _LOGGER.info("Resetting planner")
+    if "tmp" not in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["tmp"] = {}
+    hass.data[DOMAIN]["tmp"]["disable_state"] = []
+    for i in range(1, 50):
+        if (
+            hass.data[DOMAIN]["values"][f"slot_{i}_state"] != "off"
+            and not hass.data[DOMAIN]["values"][f"slot_{i}_active"]
+        ):
+            hass.data[DOMAIN]["tmp"]["disable_state"].append(
+                {
+                    "start": str(
+                        hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"]
+                    ),
+                    "end": str(
+                        hass.data[DOMAIN]["values"][f"slot_{i + 1}_date_time_start"]
+                    ),
+                    "state": hass.data[DOMAIN]["values"][f"slot_{i}_state"],
+                    "active": hass.data[DOMAIN]["values"][f"slot_{i}_active"],
+                }
+            )
+
+
+async def restore_disable_state(hass: HomeAssistant):
+    """Restore disable state."""
+    _LOGGER.info("Resetting planner")
+    if "tmp" not in hass.data[DOMAIN]:
+        return
+    if "disable_state" not in hass.data[DOMAIN]["tmp"]:
+        return
+    for i in range(1, 49):
+        for s in hass.data[DOMAIN]["tmp"]["disable_state"]:
+            if (
+                str(hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"])
+                == s["start"]
+                and str(hass.data[DOMAIN]["values"][f"slot_{i + 1}_date_time_start"])
+                == s["end"]
+            ):
+                hass.data[DOMAIN]["values"][f"slot_{i}_active"] = False
+    del hass.data[DOMAIN]["tmp"]["disable_state"]
+
+
+async def reset(hass: HomeAssistant):
+    """Reset planner."""
+    _LOGGER.info("Resetting planner")
+    for i in range(1, 50):
+        hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"] = None
+        hass.data[DOMAIN]["values"][f"slot_{i}_state"] = "off"
+        hass.data[DOMAIN]["values"][f"slot_{i}_active"] = False
 
 
 def parse_datetime(val, zone=None):
