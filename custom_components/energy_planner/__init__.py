@@ -12,6 +12,7 @@ from homeassistant.core import (
 )
 from homeassistant.const import Platform
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import (
     async_track_utc_time_change,
     async_track_time_interval,
@@ -81,6 +82,11 @@ async def async_setup(hass: HomeAssistant, config):
         await async_setup_data_structure(hass)
 
     @callback
+    async def get_price_service(call: ServiceCall) -> None:
+        client = async_get_clientsession(hass)
+
+
+    @callback
     async def add_slot_service(call: ServiceCall) -> None:
         """Service to add a slot."""
         try:
@@ -89,15 +95,16 @@ async def async_setup(hass: HomeAssistant, config):
             end_datetime = dt.datetime.fromisoformat(call.data.get("end"))
             end_datetime = end_datetime.replace(tzinfo=ZoneInfo("Europe/Stockholm"))
             state = call.data.get("state")
+            soc = call.data.get("soc")
             if start_datetime > end_datetime:
                 raise ValueError("Start must be before end")
-            if state not in ["charge", "discharge", "pause", "off"]:
+            if state not in ["charge", "discharge", "sell", "sell-excess", "discard-excess", "pause", "off"]:
                 raise ValueError("Invalid state")
         except Exception as e:
             _LOGGER.error("Error adding slot: %s", e)
             raise ServiceValidationError("Invalid data") from e
         hass.data[DOMAIN]["manual_slots"].append(
-            {"start": start_datetime, "end": end_datetime, "state": state}
+            {"start": start_datetime, "end": end_datetime, "state": state, "soc": soc}
         )
         await add_manual_slots(hass)
         await update_entities(hass)

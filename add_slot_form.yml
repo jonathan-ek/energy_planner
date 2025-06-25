@@ -6,6 +6,8 @@ entities:
     name: Slot slut
   - entity: input_select.energy_planner_extras_state
     name: State
+  - entity: input_select.energy_planner_extras_soc
+    name: SOC
 footer:
   type: buttons
   entities:

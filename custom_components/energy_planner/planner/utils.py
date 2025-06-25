@@ -38,6 +38,7 @@ async def store_disable_state(hass: HomeAssistant):
                     ),
                     "state": hass.data[DOMAIN]["values"][f"slot_{i}_state"],
                     "active": hass.data[DOMAIN]["values"][f"slot_{i}_active"],
+                    "soc": hass.data[DOMAIN]["values"][f"slot_{i}_soc"],
                 }
             )
 
@@ -68,6 +69,7 @@ async def reset(hass: HomeAssistant):
         hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"] = None
         hass.data[DOMAIN]["values"][f"slot_{i}_state"] = "off"
         hass.data[DOMAIN]["values"][f"slot_{i}_active"] = False
+        hass.data[DOMAIN]["values"][f"slot_{i}_soc"] = 50
 
 
 def parse_datetime(val, zone=None):
@@ -114,6 +116,9 @@ async def clear_passed_slots(hass: HomeAssistant):
             hass.data[DOMAIN]["values"][f"slot_{i - 1}_state"] = hass.data[DOMAIN][
                 "values"
             ].get(f"slot_{i}_state")
+            hass.data[DOMAIN]["values"][f"slot_{i - 1}_soc"] = hass.data[DOMAIN][
+                "values"
+            ].get(f"slot_{i}_soc")
         for s in hass.data[DOMAIN]["manual_slots"]:
             end = s["end"]
             if type(end) is str:

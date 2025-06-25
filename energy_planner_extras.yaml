@@ -7,6 +7,13 @@ input_datetime:
     name: End time
     has_date: true
     has_time: true
+input_number:
+  energy_planner_extras_soc:
+    name: Battery SOC
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: '%'
 input_select:
   energy_planner_extras_state:
     name: Energy Planner State
@@ -14,6 +21,9 @@ input_select:
       - "charge"
       - "discharge"
       - "pause"
+      - "sell"
+      - "sell-excess"
+      - "discard-excess"
       - "off"
 input_button:
   energy_planner_extras_run:
@@ -54,3 +64,4 @@ automation:
           start: "{{ states('input_datetime.energy_planner_extras_start') }}"
           end: "{{ states('input_datetime.energy_planner_extras_end') }}"
           state: "{{ states('input_select.energy_planner_extras_state') }}"
+          soc: "{{ states('input_number.energy_planner_extras_soc') }}"

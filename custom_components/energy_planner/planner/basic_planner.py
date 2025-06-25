@@ -48,9 +48,10 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                         "start": config["earliest_charge"],
                         "end": hour["start"],
                         "state": "pause",
+                        "soc": 100,
                     }
                 )
-            schedule.append({**hour, "state": "charge"})
+            schedule.append({**hour, "state": "charge", "soc": 100})
         else:
             if schedule[-1]["end"] == hour["start"]:
                 schedule[-1]["end"] = hour["end"]
@@ -60,15 +61,17 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                         "start": schedule[-1]["end"],
                         "end": hour["start"],
                         "state": "pause",
+                        "soc": 100,
                     }
                 )
-                schedule.append({**hour, "state": "charge"})
+                schedule.append({**hour, "state": "charge", "soc": 100})
     if len(schedule) > 0 and schedule[-1]["end"] != config["earliest_discharge"]:
         schedule.append(
             {
                 "start": schedule[-1]["end"],
                 "end": config["earliest_discharge"],
                 "state": "pause",
+                "soc": 100,
             }
         )
     for i, hour in enumerate(expensive_hours):
@@ -82,9 +85,10 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                             "start": config["earliest_discharge"],
                             "end": hour["start"],
                             "state": "pause",
+                            "soc": 100,
                         }
                     )
-            schedule.append({**hour, "state": "discharge"})
+            schedule.append({**hour, "state": "discharge", "soc": 0})
         else:
             if schedule[-1]["end"] == hour["start"]:
                 schedule[-1]["end"] = hour["end"]
@@ -94,15 +98,17 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                         "start": schedule[-1]["end"],
                         "end": hour["start"],
                         "state": "pause",
+                        "soc": 100,
                     }
                 )
-                schedule.append({**hour, "state": "discharge"})
+                schedule.append({**hour, "state": "discharge", "soc": 0})
     if len(schedule) > 0 and schedule[-1]["end"] != nordpool_values[-1]["end"]:
         schedule.append(
             {
                 "start": schedule[-1]["end"],
                 "end": nordpool_values[-1]["end"],
                 "state": "pause",
+                "soc": 100,
             }
         )
     now = dt_utils.now()
@@ -117,6 +123,7 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
     for i, slot in enumerate(schedule):
         hass.data[DOMAIN]["values"][f"slot_{index + i}_date_time_start"] = slot["start"]
         hass.data[DOMAIN]["values"][f"slot_{index + i}_state"] = slot["state"]
+        hass.data[DOMAIN]["values"][f"slot_{index + i}_soc"] = slot["soc"]
         hass.data[DOMAIN]["values"][f"slot_{index + i}_active"] = True
     if len(schedule) > 0:
         hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_date_time_start"] = (

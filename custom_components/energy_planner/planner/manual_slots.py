@@ -23,6 +23,9 @@ async def shift_slots_forward(hass: HomeAssistant, start_index: int, steps: int 
         hass.data[DOMAIN]["values"][f"slot_{i + steps}_active"] = hass.data[DOMAIN][
             "values"
         ][f"slot_{i}_active"]
+        hass.data[DOMAIN]["values"][f"slot_{i + steps}_soc"] = hass.data[DOMAIN][
+            "values"
+        ][f"slot_{i}_soc"]
 
 
 async def shift_slots_back(hass: HomeAssistant, start_index: int, steps: int = 1):
@@ -38,6 +41,9 @@ async def shift_slots_back(hass: HomeAssistant, start_index: int, steps: int = 1
         hass.data[DOMAIN]["values"][f"slot_{i}_active"] = hass.data[DOMAIN]["values"][
             f"slot_{i + steps}_active"
         ]
+        hass.data[DOMAIN]["values"][f"slot_{i}_soc"] = hass.data[DOMAIN]["values"][
+            f"slot_{i + steps}_soc"
+        ]
 
 
 def localize_datetime(val):
@@ -52,6 +58,7 @@ async def add_manual_slots(hass: HomeAssistant):
         start = parse_datetime(s["start"], ZoneInfo("Europe/Stockholm"))
         end = parse_datetime(s["end"], ZoneInfo("Europe/Stockholm"))
         state = s["state"]
+        soc = int(s.get("soc", 50))
 
         start_index = 1
         while True:
@@ -91,12 +98,16 @@ async def add_manual_slots(hass: HomeAssistant):
             hass.data[DOMAIN]["values"][f"slot_{start_index}_date_time_start"] = start
             hass.data[DOMAIN]["values"][f"slot_{start_index}_state"] = state
             hass.data[DOMAIN]["values"][f"slot_{start_index}_active"] = True
+            hass.data[DOMAIN]["values"][f"slot_{start_index}_soc"] = soc
 
             hass.data[DOMAIN]["values"][f"slot_{start_index + 1}_date_time_start"] = end
             hass.data[DOMAIN]["values"][f"slot_{start_index + 1}_state"] = hass.data[
                 DOMAIN
             ]["values"][f"slot_{start_index - 1}_state"]
             hass.data[DOMAIN]["values"][f"slot_{start_index + 1}_active"] = True
+            hass.data[DOMAIN]["values"][f"slot_{start_index + 1}_soc"] = hass.data[
+                DOMAIN
+            ]["values"][f"slot_{start_index - 1}_soc"]
         else:
             moves = -2 + (end_index - start_index) + (1 if end_is_end else 0)
             if moves < 0:
@@ -107,3 +118,4 @@ async def add_manual_slots(hass: HomeAssistant):
             hass.data[DOMAIN]["values"][f"slot_{start_index}_date_time_start"] = start
             hass.data[DOMAIN]["values"][f"slot_{start_index}_state"] = state
             hass.data[DOMAIN]["values"][f"slot_{start_index}_active"] = True
+            hass.data[DOMAIN]["values"][f"slot_{start_index}_soc"] = soc

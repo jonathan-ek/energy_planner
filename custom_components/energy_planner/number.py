@@ -18,6 +18,23 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     """Set up the number platform."""
     _LOGGER.info("Setting up number platform")
     numbers = [
+        *[
+            EnergyPlannerNumberEntity(
+                hass,
+                {
+                    "id": f"slot_{i}_soc",
+                    "name": f"Slot {i} soc",
+                    "default": 50,
+                    "min_val": 0,
+                    "max_val": 100,
+                    "step": 1,
+                    "unit_of_measurement": PERCENTAGE,
+                    "enabled": True,
+                    "data_store": "values",
+                },
+            )
+            for i in range(1, 50)
+        ],
         EnergyPlannerNumberEntity(
             hass,
             {
@@ -77,6 +94,20 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
+                "id": "max_discharge_current",
+                "name": "Max discharge current",
+                "default": 16,
+                "min_val": 0,
+                "max_val": 50,
+                "step": 1,
+                "unit_of_measurement": UnitOfElectricCurrent.AMPERE,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
                 "id": "battery_capacity",
                 "name": "Battery capacity",
                 "default": 25600,
@@ -94,6 +125,20 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 "id": "battery_shutdown_soc",
                 "name": "Battery shutdown SOC",
                 "default": 20,
+                "min_val": 0,
+                "max_val": 100,
+                "step": 1,
+                "unit_of_measurement": PERCENTAGE,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                "id": "battery_max_soc",
+                "name": "Battery max SOC",
+                "default": 90,
                 "min_val": 0,
                 "max_val": 100,
                 "step": 1,
