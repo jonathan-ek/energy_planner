@@ -22,8 +22,17 @@ cards:
         name: Slot slut
       - entity: input_select.energy_planner_extras_state
         name: State
-      - entity: input_number.energy_planner_extras_soc
-        name: SOC
+      - type: conditional
+        conditions:
+          - condition: or
+            conditions:
+              - entity: input_select.energy_planner_extras_state
+                state: "sell"
+              - entity: input_select.energy_planner_extras_state
+                state: "charge"
+        row:
+          entity: input_number.energy_planner_extras_soc
+          name: SOC
     footer:
       type: buttons
       entities:
