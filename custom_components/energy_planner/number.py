@@ -8,6 +8,10 @@ from homeassistant.const import (
     PERCENTAGE,
     UnitOfTime,
 )
+from homeassistant.components.sensor.const import (
+    SensorDeviceClass,
+    SensorStateClass,
+)
 
 from custom_components.energy_planner.const import DOMAIN, NUMBER_ENTITIES
 
@@ -147,6 +151,38 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 "data_store": "config",
             },
         ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                "id": "network_compensation",
+                "name": "Network compensation when selling",
+                "default": 0,
+                "min_val": 0,
+                "max_val": 1000,
+                "step": 1,
+                "unit_of_measurement": "öre/kwh",
+                "device_class": SensorDeviceClass.MONETARY,
+                "state_class": SensorStateClass.TOTAL,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                "id": "network_cost",
+                "name": "Network cost when buying",
+                "default": 0,
+                "min_val": 0,
+                "max_val": 1000,
+                "step": 1,
+                "unit_of_measurement": "öre/kwh",
+                "device_class": SensorDeviceClass.MONETARY,
+                "state_class": SensorStateClass.TOTAL,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
     ]
 
     hass.data[DOMAIN][NUMBER_ENTITIES] = numbers
@@ -181,6 +217,7 @@ class EnergyPlannerNumberEntity(NumberEntity):
         self._attr_available = True
         self.is_added_to_hass = False
         self._attr_device_class = entity_definition.get("device_class", None)
+        self._attr_state_class = entity_definition.get("state_class", None)
         self._attr_icon = entity_definition.get("icon", None)
         self._attr_mode = entity_definition.get("mode", NumberMode.AUTO)
         self._attr_native_unit_of_measurement = entity_definition.get(

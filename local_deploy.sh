@@ -2,8 +2,8 @@
 PLUGIN_DIR="energy_planner"
 REPO_DIR="$(dirname "$0")"
 FILES_DIR="${REPO_DIR}/custom_components/energy_planner"
-HA_DIR="/home/jonathan/ha_demo"
-CONFIG_DIR="/home/jonathan/ha_demo/config"
+HA_DIR="/home/jonathan/projects/ha_demo"
+CONFIG_DIR="/home/jonathan/projects/ha_demo/config"
 DEST_DIR="${CONFIG_DIR}/custom_components/"
 
 echo "Copying files from $FILES_DIR to $DEST_DIR"

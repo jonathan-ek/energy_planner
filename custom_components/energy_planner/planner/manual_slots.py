@@ -58,7 +58,28 @@ async def add_manual_slots(hass: HomeAssistant):
         start = parse_datetime(s["start"], ZoneInfo("Europe/Stockholm"))
         end = parse_datetime(s["end"], ZoneInfo("Europe/Stockholm"))
         state = s["state"]
-        soc = int(s.get("soc", 50))
+
+        max_soc = hass.data[DOMAIN]["config"].get("battery_max_soc", 100)
+        min_soc = hass.data[DOMAIN]["config"].get("battery_shutdown_soc", 20)
+        if state in ["charge", "sell"]:
+            raw_soc = s.get("soc")
+            if raw_soc is None:
+                if state in "charge":
+                    soc = max_soc
+                else:  # sell
+                    # if no soc is given for sell, skip it
+                    continue
+            else:
+                soc = int(raw_soc)
+        elif state == "pause":
+            soc = max_soc
+        elif state == "sell-excess":
+            soc = min_soc
+        else:
+            # discard-excess or discharge
+            # Do not set soc, it will be set to 50% by default
+            soc = 50
+        soc = max(min_soc, min(max_soc, soc))
 
         start_index = 1
         while True:
@@ -87,11 +108,15 @@ async def add_manual_slots(hass: HomeAssistant):
                 break
             end_index += 1
         end_is_end = (
-            parse_datetime(
-                hass.data[DOMAIN]["values"][f"slot_{end_index}_date_time_start"],
-                ZoneInfo("Europe/Stockholm"),
+            (
+                parse_datetime(
+                    hass.data[DOMAIN]["values"][f"slot_{end_index}_date_time_start"],
+                    ZoneInfo("Europe/Stockholm"),
+                )
+                == end
             )
-            == end
+            if hass.data[DOMAIN]["values"][f"slot_{end_index}_date_time_start"]
+            else False
         )
         if start_index == end_index and not end_is_end:
             await shift_slots_forward(hass, start_index, 2)

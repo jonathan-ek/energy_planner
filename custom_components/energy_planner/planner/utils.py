@@ -77,6 +77,8 @@ def parse_datetime(val, zone=None):
     if zone is None:
         return dt_utils.parse_datetime(val) if type(val) is str else val
     tmp = dt.datetime.fromisoformat(val) if type(val) is str else val
+    if tmp is None:
+        return None
     return tmp.astimezone(zone)
 
 
@@ -128,3 +130,15 @@ async def clear_passed_slots(hass: HomeAssistant):
 
         await update_entities(hass)
         await hass.data[DOMAIN]["save"]()
+
+
+def get_nordpool_price_per_kwh_in_cent(raw_price, tax=0.25):
+    """Convert raw nordpool price to price per kWh in cents."""
+    return raw_price * 0.1 * (1 + tax)
+
+
+def price_under_discard_point(hass: HomeAssistant, price):
+    """Check if price is under discard point."""
+    return price < -1 * int(
+        hass.data[DOMAIN]["config"].get("network_compensation", 1000)
+    )

@@ -30,6 +30,10 @@
         "state": {
           "name": "State",
           "description": "State of the slot, one of 'charge', 'discharge', 'pause', 'off'"
+        },
+        "soc": {
+          "name": "SOC",
+          "description": "SOC for the slot, if applicable"
         }
       }
     },

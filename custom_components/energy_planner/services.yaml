@@ -16,16 +16,29 @@ add_slot:
       required: true
     state:
       name: State
-      description: State of the slot, one of 'charge', 'discharge', 'pause', 'off'
+      description: State of the slot, one of 'charge', 'discharge', 'pause', 'sell', 'sell-excess', 'discard-excess', 'off'
       example: "discharge"
       required: true
       selector:
         select:
           options:
-            - "charge"
-            - "discharge"
-            - "pause"
-            - "off"
+            - "charge",
+            - "discharge",
+            - "sell",
+            - "sell-excess",
+            - "discard-excess",
+            - "pause",
+            - "off",
+    soc:
+      name: SOC
+      description: SOC for the slots
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: '%'
+          mode: slider
 run_planner:
   name: Run Planner
   description: Run the planner to calculate the schedule

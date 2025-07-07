@@ -17,19 +17,28 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 hass,
                 {
                     "id": f"slot_{i}_state",
-                    # Charge = charge with grid
+                    # Charge = charge with grid (C, SOC, x A)
                     #   Fallback: pause
-                    # Discharge = (self-use) use sun to charge or let battery discharge to house
+                    # Discharge = (self-use) use sun to charge or let
+                    # battery discharge to house (-, -)
                     #   Fallback: -
-                    # Sell = sell to grid
+                    # Sell = sell to grid (D, SOC, x A)
                     #   Fallback: discharge
-                    # Sell excess = sell to grid when house need is met
+                    # Sell excess = sell to grid when house need is met (D, min, 0 A)
                     #   Fallback: -
-                    # Discard excess = Disable export
+                    # Discard excess = Disable export (-, -, -)
                     #   Fallback: -
-                    # Pause = save battery for later use
+                    # Pause = save battery for later use (C, max, 0 A)
                     #   Fallback: -
-                    "options": ["charge", "discharge", "sell", "sell-excess", "discard-excess", "pause", "off"],
+                    "options": [
+                        "charge",
+                        "discharge",
+                        "sell",
+                        "sell-excess",
+                        "discard-excess",
+                        "pause",
+                        "off",
+                    ],
                     "default": "off",
                     "name": f"Slot {i} state",
                     "enabled": True,

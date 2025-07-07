@@ -29,6 +29,8 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
         ],
         key=lambda x: x["start"],
     )
+    max_soc = config.get("battery_max_soc", 100)
+    min_soc = config.get("battery_shutdown_soc", 20)
     # combine neighbouring hours
     schedule = []
     for hour in cheapest_hours:
@@ -39,10 +41,10 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                         "start": config["start_of_day"],
                         "end": hour["start"],
                         "state": "discharge",
-                        "soc": 0,
+                        "soc": min_soc,
                     }
                 )
-            schedule.append({**hour, "state": "charge", "soc": 100})
+            schedule.append({**hour, "state": "charge", "soc": max_soc})
         else:
             if schedule[-1]["end"] == hour["start"]:
                 schedule[-1]["end"] = hour["end"]
@@ -52,10 +54,10 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                         "start": schedule[-1]["end"],
                         "end": hour["start"],
                         "state": "discharge",
-                        "soc": 0,
+                        "soc": min_soc,
                     }
                 )
-                schedule.append({**hour, "state": "charge", "soc": 100})
+                schedule.append({**hour, "state": "charge", "soc": max_soc})
     schedule.append(
         {
             "start": schedule[-1]["end"]
@@ -63,7 +65,7 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
             else config["start_of_day"],
             "end": config["start_of_day"] + dt.timedelta(days=1),
             "state": "discharge",
-            "soc": 0,
+            "soc": min_soc,
         }
     )
 
