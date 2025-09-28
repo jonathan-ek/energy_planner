@@ -29,8 +29,8 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
         ],
         key=lambda x: x["start"],
     )
-    max_soc = config.get("battery_max_soc", 100)
-    min_soc = config.get("battery_shutdown_soc", 20)
+    max_soc = hass.data[DOMAIN]["config"].get("battery_max_soc", 100)
+    min_soc = hass.data[DOMAIN]["config"].get("battery_shutdown_soc", 20)
     # combine neighbouring hours
     schedule = []
     for hour in cheapest_hours:

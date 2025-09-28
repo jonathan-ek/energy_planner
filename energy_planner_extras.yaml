@@ -14,6 +14,7 @@ input_number:
     max: 100
     step: 1
     unit_of_measurement: '%'
+    mode: box
 input_select:
   energy_planner_extras_state:
     name: Energy Planner State

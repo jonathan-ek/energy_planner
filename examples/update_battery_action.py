@@ -111,7 +111,7 @@ if active == "on":
         new_soc = int(float(soc))
         new_current = discharge_current
         battery_soc = float(get_state(battery_soc_entity))
-        if battery_soc <= soc:
+        if battery_soc <= new_soc:
             # Fallback on self-use after the selling is done
             discharge = False
     elif str(state) == "sell-excess":

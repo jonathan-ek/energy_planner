@@ -2,6 +2,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_utils
 
 from .utils import parse_datetime
 from ..const import DOMAIN
@@ -57,6 +58,10 @@ async def add_manual_slots(hass: HomeAssistant):
     for s in hass.data[DOMAIN]["manual_slots"]:
         start = parse_datetime(s["start"], ZoneInfo("Europe/Stockholm"))
         end = parse_datetime(s["end"], ZoneInfo("Europe/Stockholm"))
+        if start >= end:
+            continue
+        if end <= dt_utils.now():
+            continue
         state = s["state"]
 
         max_soc = hass.data[DOMAIN]["config"].get("battery_max_soc", 100)
@@ -75,6 +80,8 @@ async def add_manual_slots(hass: HomeAssistant):
             soc = max_soc
         elif state == "sell-excess":
             soc = min_soc
+        elif s.get("soc") is not None:
+            soc = int(s.get("soc"))
         else:
             # discard-excess or discharge
             # Do not set soc, it will be set to 50% by default
