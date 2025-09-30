@@ -25,7 +25,7 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
 
     cheapest_hours = sorted(
         sorted(nordpool_values, key=lambda x: x["value"])[
-            : config["nr_of_charge_hours"]
+            : config["nr_of_charge_hours"] * 4
         ],
         key=lambda x: x["start"],
     )
@@ -111,7 +111,7 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
     )
     if yesterday is None or today is None:
         raise ValueError("Nordpool data not found")
-    nr_of_charge_hours = int(
+    nr_of_charge_hours = float(
         hass.data[DOMAIN]["config"].get("cheapest_hours_nr_of_charge_hours")
     )
     await store_disable_state(hass)

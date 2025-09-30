@@ -29,12 +29,12 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
         x for x in nordpool_values if config["earliest_discharge"] <= x["start"]
     ]
     cheapest_hours = sorted(
-        sorted(charge_hours, key=lambda x: x["value"])[: config["nr_of_charge_hours"]],
+        sorted(charge_hours, key=lambda x: x["value"])[: config["nr_of_charge_hours"] * 4],
         key=lambda x: x["start"],
     )
     expensive_hours = sorted(
         sorted(discharge_hours, key=lambda x: x["value"], reverse=True)[
-            : config["nr_of_discharge_hours"]
+            : config["nr_of_discharge_hours"] * 4
         ],
         key=lambda x: x["start"],
     )
@@ -161,10 +161,10 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
         earliest_charge = dt.time.fromisoformat(earliest_charge)
     if type(earliest_discharge) is str:
         earliest_discharge = dt.time.fromisoformat(earliest_discharge)
-    nr_of_charge_hours = int(
+    nr_of_charge_hours = float(
         hass.data[DOMAIN]["config"].get("basic_nr_of_charge_hours")
     )
-    nr_of_discharge_hours = int(
+    nr_of_discharge_hours = float(
         hass.data[DOMAIN]["config"].get("basic_nr_of_discharge_hours")
     )
     _LOGGER.info("Setting up basic planner")
