@@ -84,6 +84,34 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
+                "id": "price_peak_nr_of_charge_hours",
+                "name": "Number of charge hours",
+                "default": 2,
+                "min_val": 0,
+                "max_val": 24,
+                "step": 0.25,
+                "unit_of_measurement": UnitOfTime.HOURS,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                "id": "price_peak_nr_of_discharge_hours",
+                "name": "Number of discharge hours",
+                "default": 2,
+                "min_val": 0,
+                "max_val": 24,
+                "step": 0.25,
+                "unit_of_measurement": UnitOfTime.HOURS,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
                 "id": "max_charge_current",
                 "name": "Max charge current",
                 "default": 16,

@@ -50,7 +50,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             hass,
             {
                 "id": "planner_state",
-                "options": ["basic", "cheapest hours", "dynamic", "off"],
+                "options": ["basic", "cheapest hours", "dynamic", "price peak", "off"],
                 "default": "basic",
                 "name": "Planner state",
                 "enabled": True,

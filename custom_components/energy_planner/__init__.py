@@ -35,6 +35,7 @@ from .planner import (
     add_manual_slots,
     clear_passed_slots,
     update_entities,
+    price_peak_planner,
 )
 from .store import async_save_to_store, async_load_from_store
 from .utils import tz_diff
@@ -136,6 +137,10 @@ async def async_setup(hass: HomeAssistant, config):
         if planner_state == "cheapest hours":
             _LOGGER.info("Running cheapest hours planner")
             await cheapest_hours_planner(hass)
+            return
+        if planner_state == "price peak":
+            _LOGGER.info("Running price peak planner")
+            await price_peak_planner(hass)
             return
         if planner_state == "dynamic":
             _LOGGER.info("Running dynamic planner")

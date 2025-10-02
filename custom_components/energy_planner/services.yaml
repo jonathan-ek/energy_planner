@@ -22,13 +22,13 @@ add_slot:
       selector:
         select:
           options:
-            - "charge",
-            - "discharge",
-            - "sell",
-            - "sell-excess",
-            - "discard-excess",
-            - "pause",
-            - "off",
+            - "charge"
+            - "discharge"
+            - "sell"
+            - "sell-excess"
+            - "discard-excess"
+            - "pause"
+            - "off"
     soc:
       name: SOC
       description: SOC for the slots
