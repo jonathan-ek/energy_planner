@@ -1,7 +1,6 @@
 import logging
-import datetime as dt
 
-from collections import defaultdict
+
 from homeassistant.core import HomeAssistant
 
 from .manual_slots import add_manual_slots
@@ -18,79 +17,148 @@ from homeassistant.util import dt as dt_utils
 
 _LOGGER = logging.getLogger(__name__)
 
+
 def match_charge_discharge_periods(prices, charge_periods, discharge_periods):
+    """Match charge and discharge periods."""
+    conversion_losses = 0.85  # 15% conversion loss
     matched_pairs = []
+    slots = [0] * len(prices)
 
-    for discharge in discharge_periods:
-        discharge_start = min(discharge)
-        discharge_avg_price = sum(prices[i] for i in discharge) / len(discharge)
+    # remove overlapping periods
+    for i in range(max(len(charge_periods), len(discharge_periods))):
+        if i < len(charge_periods):
+            charge_period = charge_periods[i]
+            for j in charge_period:
+                if slots[j] != 0:
+                    charge_periods[i] = []
+                    break
+                slots[j] += 1
+        if i < len(discharge_periods):
+            discharge_period = discharge_periods[i]
+            for j in discharge_period:
+                if slots[j] != 0:
+                    discharge_periods[i] = []
+                    break
+                slots[j] -= 1
+    charge_periods = [x for x in charge_periods if x]
+    discharge_periods = [x for x in discharge_periods if x]
+    slots = [0] * len(prices)
+    for cp, c in enumerate(charge_periods):
+        for i in c:
+            slots[i] += cp + 1
+    for dp, d in enumerate(discharge_periods):
+        for i in d:
+            slots[i] -= dp + 1
+    to_remove = []
+    last_period = None
+    for i in range(len(slots)):
+        if i == 0:
+            continue
+        if slots[i] > 0 and slots[i] != last_period:
+            if last_period is None:
+                last_period = slots[i]
+                continue
+            if last_period < 0:
+                last_period = slots[i]
+                continue
+            if last_period > slots[i]:
+                to_remove.append(last_period)
+                last_period = slots[i]
+            elif last_period < slots[i]:
+                to_remove.append(slots[i])
+                last_period = slots[i]
+            else:
+                last_period = slots[i]
+                continue
+        elif slots[i] < 0 and slots[i] != last_period:
+            if last_period is None:
+                last_period = slots[i]
+                continue
+            if last_period > 0:
+                last_period = slots[i]
+                continue
+            if last_period < slots[i]:
+                to_remove.append(last_period)
+                last_period = slots[i]
+            elif last_period > slots[i]:
+                to_remove.append(slots[i])
+                last_period = slots[i]
+            else:
+                last_period = slots[i]
+                continue
+    for r in to_remove:
+        if r < 0:
+            discharge_periods[abs(r) - 1] = []
+        elif r > 0:
+            charge_periods[r - 1] = []
+    charge_periods = [x for x in charge_periods if x]
+    discharge_periods = [x for x in discharge_periods if x]
+    slots = [0] * len(prices)
+    for j, c in enumerate(charge_periods):
+        slots[min(c)] = (sum(prices[i] for i in c) / len(c), "c", j)
+    for j, d in enumerate(discharge_periods):
+        slots[min(d)] = (sum(prices[i] for i in d) / len(d), "d", j)
+    slots = [x for x in slots if x != 0]
+    prev_price = None
+    prev_index = None
+    to_remove = []
+    for p, t, i in slots:
+        if prev_price is None:
+            prev_price = p
+            prev_index = i
+            continue
+        if t == "d":
+            if prev_price * conversion_losses < p:
+                matched_pairs.append((charge_periods[prev_index], discharge_periods[i]))
+                prev_price = None
+                prev_index = None
+            else:
+                if i > prev_index:
+                    to_remove.append((i, "d"))
+                else:
+                    to_remove.append((prev_index, "c"))
+                break
+        elif t == "c":
+            prev_price = p
+            prev_index = i
+    if len(to_remove) > 0:
+        for r, t in to_remove:
+            if t == "d":
+                discharge_periods[r] = []
+            elif t == "c":
+                charge_periods[r] = []
+        charge_periods = [x for x in charge_periods if x]
+        discharge_periods = [x for x in discharge_periods if x]
+        matched_pairs = match_charge_discharge_periods(
+            prices, charge_periods, discharge_periods
+        )
 
-        for idx, charge in enumerate(charge_periods):
-            charge_end = max(charge)
-            charge_avg_price = sum(prices[i] for i in charge) / len(charge)
-
-            if charge_end < discharge_start and charge_avg_price*0.85 < discharge_avg_price:
-                matched_pairs.append((charge, discharge))
-    matched_pairs = sorted(matched_pairs, key=lambda x: (x[1], -x[0][0]), reverse=True)
-    matched_pairs = select_best_pairs(prices, matched_pairs)
     return matched_pairs
 
-def select_best_pairs(prices, all_matches):
-
-    # Step 1: Build maps of discharge -> [charge options]
-    discharge_to_charges = defaultdict(list)
-    for charge, discharge in all_matches:
-        discharge_key = tuple(discharge)
-        discharge_to_charges[discharge_key].append(charge)
-
-    # Step 2: Sort discharges by:
-    # 1. Fewest matching charges
-    # 2. Highest discharge average price
-    sorted_discharges = sorted(
-        discharge_to_charges.keys(),
-        key=lambda d: (len(discharge_to_charges[d]), -sum(prices[i] for i in d) / len(d))
-    )
-
-    used_charges = set()
-    used_discharges = set()
-    selected_pairs = []
-
-    for discharge in sorted_discharges:
-        if tuple(discharge) in used_discharges:
-            continue
-
-        # Try to find first available charge
-        for charge in discharge_to_charges[discharge]:
-            charge_key = tuple(charge)
-            if charge_key in used_charges:
-                continue
-
-            # Found a valid unused pair
-            selected_pairs.append((charge, list(discharge)))
-            used_charges.add(charge_key)
-            used_discharges.add(tuple(discharge))
-            break  # move to next discharge
-
-    return selected_pairs
 
 async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
+    """Plan a day based on nordpool values."""
     _LOGGER.info("plan_day: %s", nordpool_values)
-    charge_hours = float(hass.data[DOMAIN]["config"].get('price_peak_nr_of_charge_hours', 2))
-    discharge_hours = float(hass.data[DOMAIN]["config"].get('price_peak_nr_of_discharge_hours', 2))
+    charge_hours = float(
+        hass.data[DOMAIN]["config"].get("price_peak_nr_of_charge_hours", 2)
+    )
+    discharge_hours = float(
+        hass.data[DOMAIN]["config"].get("price_peak_nr_of_discharge_hours", 2)
+    )
     prices = [x["value"] for x in nordpool_values]
-    charge_window_size = int(charge_hours*4)  # 2 hours * 4 (15 min intervals)
-    discharge_window_size = int(discharge_hours*4)
+    charge_window_size = int(charge_hours * 4)  # 2 hours * 4 (15 min intervals)
+    discharge_window_size = int(discharge_hours * 4)
     used_indices = set()
     discharge_period_indexes = []
 
     # Store all candidate windows with their sum and starting index
     discharge_candidates = []
     for i in range(len(prices) - discharge_window_size + 1):
-        window = prices[i:i + discharge_window_size]
+        window = prices[i : i + discharge_window_size]
         total_price = sum(window)
         discharge_candidates.append((total_price, i))
     discharge_candidates.sort(reverse=True, key=lambda x: x[0])
-    for total, start_idx in discharge_candidates:
+    for _, start_idx in discharge_candidates:
         # Check for overlap
         window_range = set(range(start_idx, start_idx + discharge_window_size))
         if used_indices.isdisjoint(window_range):
@@ -112,7 +180,15 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                             break
                 price = prices[start_idx - j]
                 used_indices.add(start_idx - j)
-            used_indices.update(range(max(0, start_idx-charge_window_size), min(len(prices), start_idx + discharge_window_size + charge_window_size)))
+            used_indices.update(
+                range(
+                    max(0, start_idx - charge_window_size),
+                    min(
+                        len(prices),
+                        start_idx + discharge_window_size + charge_window_size,
+                    ),
+                )
+            )
             j = 0
             price = prices[start_idx + discharge_window_size + j]
             while True:
@@ -137,8 +213,12 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
         expanded_end = min(len(prices), start_idx + discharge_window_size + context)
         expanded_window = prices[expanded_start:expanded_end]
 
-        sorted_indices = sorted(range(len(expanded_window)), key=lambda i: -expanded_window[i])
-        top_8_global = [expanded_start + i for i in sorted(sorted_indices[:discharge_window_size])]
+        sorted_indices = sorted(
+            range(len(expanded_window)), key=lambda i: -expanded_window[i]
+        )
+        top_8_global = [
+            expanded_start + i for i in sorted(sorted_indices[:discharge_window_size])
+        ]
         discharge_periods.append(top_8_global)
     _LOGGER.info("discharge_periods: %s", discharge_periods)
     charge_periods = []
@@ -148,11 +228,11 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
     # Store all candidate windows with their sum and starting index
     charge_candidates = []
     for i in range(len(prices) - charge_window_size + 1):
-        window = prices[i:i + charge_window_size]
+        window = prices[i : i + charge_window_size]
         total_price = sum(window)
         charge_candidates.append((total_price, i))
     charge_candidates.sort(reverse=False, key=lambda x: x[0])
-    for total, start_idx in charge_candidates:
+    for _, start_idx in charge_candidates:
         # Check for overlap
         window_range = set(range(start_idx, start_idx + charge_window_size))
         if used_indices.isdisjoint(window_range):
@@ -174,7 +254,15 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                             break
                 price = prices[start_idx - j]
                 used_indices.add(start_idx - j)
-            used_indices.update(range(max(0, start_idx-discharge_window_size), min(len(prices), start_idx + discharge_window_size + charge_window_size)))
+            used_indices.update(
+                range(
+                    max(0, start_idx - discharge_window_size),
+                    min(
+                        len(prices),
+                        start_idx + discharge_window_size + charge_window_size,
+                    ),
+                )
+            )
             j = 0
             if start_idx + charge_window_size < len(prices):
                 price = prices[start_idx + charge_window_size]
@@ -200,12 +288,80 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
         expanded_end = min(len(prices), start_idx + charge_window_size + context)
         expanded_window = prices[expanded_start:expanded_end]
 
-        sorted_indices = sorted(range(len(expanded_window)), key=lambda i: expanded_window[i])
-        top_8_global = [expanded_start + i for i in sorted(sorted_indices[:charge_window_size])]
+        sorted_indices = sorted(
+            range(len(expanded_window)), key=lambda i: expanded_window[i]
+        )
+        top_8_global = [
+            expanded_start + i for i in sorted(sorted_indices[:charge_window_size])
+        ]
         charge_periods.append(top_8_global)
     _LOGGER.info("charge_periods: %s", charge_periods)
     matched = match_charge_discharge_periods(prices, charge_periods, discharge_periods)
-    _LOGGER.info("matched charge/discharge periods: %s", matched)
+    slots = ["p" for _ in range(len(prices))]
+    for c, d in matched:
+        for i in c:
+            slots[i] = "c"
+        for i in d:
+            slots[i] = "d"
+    _LOGGER.info("slots: %s", slots)
+    schedule = [{}]
+    prev = None
+    for i, slot in enumerate(slots):
+        if slot == prev:
+            continue
+        prev = slot
+        if slot == "c":
+            schedule[-1]["end"] = nordpool_values[i]["start"]
+            schedule.append(
+                {
+                    "start": nordpool_values[i]["start"],
+                    "state": "charge",
+                    "soc": 100,
+                }
+            )
+        elif slot == "d":
+            schedule[-1]["end"] = nordpool_values[i]["start"]
+            schedule.append(
+                {
+                    "start": nordpool_values[i]["start"],
+                    "state": "discharge",
+                    "soc": 0,
+                }
+            )
+        else:
+            schedule[-1]["end"] = nordpool_values[i]["start"]
+            schedule.append(
+                {
+                    "start": nordpool_values[i]["start"],
+                    "state": "pause",
+                    "soc": 100,
+                }
+            )
+    schedule[-1]["end"] = nordpool_values[-1]["end"]
+    schedule.pop(0)
+    now = dt_utils.now()
+    # remove past hours
+    schedule = [x for x in schedule if x["end"] > now]
+    _LOGGER.info("schedule: %s", schedule)
+    index = 1
+    while True:
+        if hass.data[DOMAIN]["values"][f"slot_{index}_state"] == "off":
+            break
+        index += 1
+    for i, slot in enumerate(schedule):
+        hass.data[DOMAIN]["values"][f"slot_{index + i}_date_time_start"] = slot["start"]
+        hass.data[DOMAIN]["values"][f"slot_{index + i}_state"] = slot["state"]
+        hass.data[DOMAIN]["values"][f"slot_{index + i}_active"] = True
+        hass.data[DOMAIN]["values"][f"slot_{index + i}_soc"] = slot["soc"]
+    if len(schedule) > 0:
+        hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_date_time_start"] = (
+            schedule[-1]["end"]
+        )
+        hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_state"] = "off"
+        hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_active"] = False
+
+    _LOGGER.info("matched charge/discharge periods: %s", schedule)
+
 
 async def planner(hass: HomeAssistant, *args, **kwargs):
     """Run planner."""
@@ -255,8 +411,7 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
             "value": x["value"],
         }
         for x in days
-        if start_of_day
-           <= parse_datetime(x["start"], zone)
+        if start_of_day <= parse_datetime(x["start"], zone)
     ]
 
     await plan_day(hass, data, config)

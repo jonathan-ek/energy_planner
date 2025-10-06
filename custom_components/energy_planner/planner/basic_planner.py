@@ -29,7 +29,9 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
         x for x in nordpool_values if config["earliest_discharge"] <= x["start"]
     ]
     cheapest_hours = sorted(
-        sorted(charge_hours, key=lambda x: x["value"])[: int(config["nr_of_charge_hours"] * 4)],
+        sorted(charge_hours, key=lambda x: x["value"])[
+            : int(config["nr_of_charge_hours"] * 4)
+        ],
         key=lambda x: x["start"],
     )
     expensive_hours = sorted(

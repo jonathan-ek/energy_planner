@@ -11,6 +11,6 @@ __all__ = [
     "cheapest_hours_planner",
     "clear_passed_slots",
     "dynamic_planner",
-    "update_entities",
     "price_peak_planner",
+    "update_entities",
 ]
