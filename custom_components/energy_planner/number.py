@@ -112,6 +112,20 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
+                "id": "price_peak_efficiency_factor",
+                "name": "Inverter efficiency factor (%)",
+                "default": 85,
+                "min_val": 0,
+                "max_val": 100,
+                "step": 1,
+                "unit_of_measurement": PERCENTAGE,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
                 "id": "max_charge_current",
                 "name": "Max charge current",
                 "default": 16,

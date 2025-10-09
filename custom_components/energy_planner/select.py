@@ -57,6 +57,60 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 "data_store": "config",
             },
         ),
+        EnergyPlannerSelectEntity(
+            hass,
+            {
+                "id": "price_peak_planner_cheap_state",
+                "options": [
+                    "charge",
+                    "discharge",
+                    "sell",
+                    "sell-excess",
+                    "discard-excess",
+                    "pause",
+                ],
+                "default": "charge",
+                "name": "Price peak planner cheap hours state",
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerSelectEntity(
+            hass,
+            {
+                "id": "price_peak_planner_expensive_state",
+                "options": [
+                    "charge",
+                    "discharge",
+                    "sell",
+                    "sell-excess",
+                    "discard-excess",
+                    "pause",
+                ],
+                "default": "discharge",
+                "name": "Price peak planner expensive hours state",
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerSelectEntity(
+            hass,
+            {
+                "id": "price_peak_planner_inbetween_state",
+                "options": [
+                    "charge",
+                    "discharge",
+                    "sell",
+                    "sell-excess",
+                    "discard-excess",
+                    "pause",
+                ],
+                "default": "pause",
+                "name": "Price peak planner inbetween hours state",
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
     ]
 
     hass.data[DOMAIN][SELECT_ENTITIES] = selects
