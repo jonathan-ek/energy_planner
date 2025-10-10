@@ -19,7 +19,12 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def match_charge_discharge_periods(
-    prices, charge_periods, discharge_periods, price_peak_efficiency_factor
+    prices,
+    charge_periods,
+    discharge_periods,
+    price_peak_efficiency_factor,
+    energy_planner_network_cost,
+    energy_planner_network_compensation,
 ):
     """Match charge and discharge periods."""
     matched_pairs = []
@@ -109,7 +114,10 @@ def match_charge_discharge_periods(
             prev_index = i
             continue
         if t == "d":
-            if prev_price * price_peak_efficiency_factor < p:
+            if (prev_price * price_peak_efficiency_factor) - (
+                (energy_planner_network_cost - energy_planner_network_compensation)
+                * 12.5
+            ) < p:
                 matched_pairs.append((charge_periods[prev_index], discharge_periods[i]))
                 prev_price = None
                 prev_index = None
@@ -131,7 +139,12 @@ def match_charge_discharge_periods(
         charge_periods = [x for x in charge_periods if x]
         discharge_periods = [x for x in discharge_periods if x]
         matched_pairs = match_charge_discharge_periods(
-            prices, charge_periods, discharge_periods, price_peak_efficiency_factor
+            prices,
+            charge_periods,
+            discharge_periods,
+            price_peak_efficiency_factor,
+            energy_planner_network_cost,
+            energy_planner_network_compensation,
         )
 
     return matched_pairs
@@ -148,6 +161,12 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
     )
     price_peak_efficiency_factor = (
         float(hass.data[DOMAIN]["config"].get("price_peak_efficiency_factor", 85)) / 100
+    )
+    energy_planner_network_cost = float(
+        hass.data[DOMAIN]["config"].get("energy_planner_network_cost", 0.0)
+    )
+    energy_planner_network_compensation = float(
+        hass.data[DOMAIN]["config"].get("energy_planner_network_compensation", 0.0)
     )
     price_peak_planner_cheap_state = hass.data[DOMAIN]["config"].get(
         "price_peak_planner_cheap_state", "charge"
@@ -311,7 +330,12 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
         charge_periods.append(top_8_global)
     _LOGGER.info("charge_periods: %s", charge_periods)
     matched = match_charge_discharge_periods(
-        prices, charge_periods, discharge_periods, price_peak_efficiency_factor
+        prices,
+        charge_periods,
+        discharge_periods,
+        price_peak_efficiency_factor,
+        energy_planner_network_cost,
+        energy_planner_network_compensation,
     )
     slots = ["p" for _ in range(len(prices))]
     for c, d in matched:
