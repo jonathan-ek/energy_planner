@@ -173,7 +173,7 @@ async def async_setup(hass: HomeAssistant, config):
     update_schedule_timer = async_track_utc_time_change(
         hass,
         run_planner,
-        hour=(13 + int(tz_diff("Europe/Stockholm", "UTC"))) % 24,
+        hour=(15 + int(tz_diff("Europe/Stockholm", "UTC"))) % 24,
         minute=31,
         second=15,
     )
