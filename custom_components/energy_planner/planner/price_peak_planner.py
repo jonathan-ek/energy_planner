@@ -114,10 +114,11 @@ def match_charge_discharge_periods(
             prev_index = i
             continue
         if t == "d":
-            if (prev_price * price_peak_efficiency_factor) + (
+            _LOGGER.info("Comparing charge price %.4f and discharge price %.4f", prev_price, p)
+            if (prev_price * price_peak_efficiency_factor) * 1.25 + (
                 (energy_planner_network_cost - energy_planner_network_compensation)
-                * 12.5
-            ) < p:
+                * 10
+            ) < p * 1.25:
                 matched_pairs.append((charge_periods[prev_index], discharge_periods[i]))
                 prev_price = None
                 prev_index = None
