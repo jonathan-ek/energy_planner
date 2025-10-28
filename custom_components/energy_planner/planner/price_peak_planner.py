@@ -168,10 +168,10 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
         float(hass.data[DOMAIN]["config"].get("price_peak_efficiency_factor", 85)) / 100
     )
     energy_planner_network_cost = float(
-        hass.data[DOMAIN]["config"].get("energy_planner_network_cost", 0.0)
+        hass.data[DOMAIN]["config"].get("network_cost", 0.0)
     )
     energy_planner_network_compensation = float(
-        hass.data[DOMAIN]["config"].get("energy_planner_network_compensation", 0.0)
+        hass.data[DOMAIN]["config"].get("network_compensation", 0.0)
     )
     price_peak_planner_cheap_state = hass.data[DOMAIN]["config"].get(
         "price_peak_planner_cheap_state", "charge"
