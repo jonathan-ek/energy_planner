@@ -115,6 +115,10 @@ def match_charge_discharge_periods(
             continue
         if t == "d":
             _LOGGER.info("Comparing charge price %.4f and discharge price %.4f", prev_price, p)
+            _LOGGER.info("Left hand side part 1: %.4f", (prev_price * price_peak_efficiency_factor) * 1.25)
+            _LOGGER.info("Left hand side part 2: %.4f", (energy_planner_network_cost - energy_planner_network_compensation) * 10)
+            _LOGGER.info("Left hand side total: %.4f", (prev_price * price_peak_efficiency_factor) * 1.25 + (energy_planner_network_cost - energy_planner_network_compensation) * 10)
+            _LOGGER.info("Right hand side: %.4f", p * 1.25)
             if (prev_price * price_peak_efficiency_factor) * 1.25 + (
                 (energy_planner_network_cost - energy_planner_network_compensation)
                 * 10
