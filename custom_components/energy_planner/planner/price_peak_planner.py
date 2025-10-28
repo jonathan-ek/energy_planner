@@ -114,7 +114,7 @@ def match_charge_discharge_periods(
             prev_index = i
             continue
         if t == "d":
-            if (prev_price * price_peak_efficiency_factor) - (
+            if (prev_price * price_peak_efficiency_factor) + (
                 (energy_planner_network_cost - energy_planner_network_compensation)
                 * 12.5
             ) < p:
