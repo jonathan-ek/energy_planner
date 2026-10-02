@@ -119,7 +119,7 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 ## Commands
 
 ```bash
-make install        # pip install requirements.txt + requirements-test.txt
+make install        # uv sync (creates .venv from pyproject.toml + uv.lock)
 make test           # pytest tests/ -v
 make test-basic     # only tests/planner/test_basic_planner.py
 make lint           # ruff check custom_components/energy_planner/ tests/
@@ -127,7 +127,10 @@ make format         # ruff format
 ./local_deploy.sh   # deploy to local ha_demo and restart it
 ```
 
-- Python target is 3.12 (`ruff.toml`), HA pinned to `~=2025.1.4`.
+- Dependencies are managed with uv: runtime ones under `[project]` and test/lint
+  ones in the `dev` group of `pyproject.toml`, locked in `uv.lock`. Add with
+  `uv add <pkg>` or `uv add --dev <pkg>`; run tools with `uv run <cmd>`.
+- Python is 3.14 (`.python-version`, `ruff.toml`; required by HA), HA pinned to `~=2026.9.4`.
 - Ruff rule set is strict (`D`, `S`, `T20`, `N`, `RET`, `SIM`, …): public functions
   need docstrings and `print` is rejected.
 - pytest uses `asyncio_mode = auto` and `pytest-homeassistant-custom-component`.
@@ -136,7 +139,7 @@ make format         # ruff format
 - Only the basic planner has tests. The other planners, manual slots and
   `clear_passed_slots` are untested.
 - CI: `.github/workflows/validate.yml` (ruff, hassfest, HACS) and `tests.yml`
-  (pytest on 3.11/3.12 + ruff).
+  (pytest on 3.14 + ruff).
 
 ## Known quirks and pitfalls
 
