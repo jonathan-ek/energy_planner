@@ -11,6 +11,7 @@ from .utils import (
     reset,
     store_disable_state,
     restore_disable_state,
+    write_schedule,
 )
 from ..const import DOMAIN
 from homeassistant.util import dt as dt_utils
@@ -187,6 +188,9 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
     price_peak_planner_inbetween_state = hass.data[DOMAIN]["config"].get(
         "price_peak_planner_inbetween_state", "pause"
     )
+
+    max_soc = hass.data[DOMAIN]["config"].get("battery_max_soc", 100)
+    min_soc = hass.data[DOMAIN]["config"].get("battery_shutdown_soc", 20)
 
     prices = [x["value"] for x in nordpool_values]
     charge_window_size = int(charge_hours * 4)  # 2 hours * 4 (15 min intervals)
@@ -366,7 +370,7 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                 {
                     "start": nordpool_values[i]["start"],
                     "state": price_peak_planner_cheap_state,
-                    "soc": 100,
+                    "soc": max_soc,
                 }
             )
         elif slot == "d":
@@ -375,7 +379,7 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                 {
                     "start": nordpool_values[i]["start"],
                     "state": price_peak_planner_expensive_state,
-                    "soc": 0,
+                    "soc": min_soc,
                 }
             )
         else:
@@ -384,7 +388,7 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
                 {
                     "start": nordpool_values[i]["start"],
                     "state": price_peak_planner_inbetween_state,
-                    "soc": 100,
+                    "soc": max_soc,
                 }
             )
     schedule[-1]["end"] = nordpool_values[-1]["end"]
@@ -393,22 +397,7 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
     # remove past hours
     schedule = [x for x in schedule if x["end"] > now]
     _LOGGER.info("schedule: %s", schedule)
-    index = 1
-    while True:
-        if hass.data[DOMAIN]["values"][f"slot_{index}_state"] == "off":
-            break
-        index += 1
-    for i, slot in enumerate(schedule):
-        hass.data[DOMAIN]["values"][f"slot_{index + i}_date_time_start"] = slot["start"]
-        hass.data[DOMAIN]["values"][f"slot_{index + i}_state"] = slot["state"]
-        hass.data[DOMAIN]["values"][f"slot_{index + i}_active"] = True
-        hass.data[DOMAIN]["values"][f"slot_{index + i}_soc"] = slot["soc"]
-    if len(schedule) > 0:
-        hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_date_time_start"] = (
-            schedule[-1]["end"]
-        )
-        hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_state"] = "off"
-        hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_active"] = False
+    write_schedule(hass, schedule)
 
     _LOGGER.info("matched charge/discharge periods: %s", schedule)
 

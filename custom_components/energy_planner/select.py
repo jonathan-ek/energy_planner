@@ -3,7 +3,7 @@ import logging
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 
-from custom_components.energy_planner.const import DOMAIN, SELECT_ENTITIES
+from .const import DOMAIN, SLOT_COUNT, SELECT_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                     "enabled": True,
                 },
             )
-            for i in range(1, 50)
+            for i in range(1, SLOT_COUNT + 1)
         ],
         EnergyPlannerSelectEntity(
             hass,

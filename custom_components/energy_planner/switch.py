@@ -1,10 +1,9 @@
 import logging
-from email.policy import default
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 
-from custom_components.energy_planner.const import DOMAIN, SWITCH_ENTITIES
+from .const import DOMAIN, SLOT_COUNT, SWITCH_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -17,12 +16,12 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             hass,
             {
                 "id": f"slot_{i}_active",
-                default: False,
+                "default": False,
                 "name": f"Slot {i} active",
                 "enabled": True,
             },
         )
-        for i in range(1, 50)
+        for i in range(1, SLOT_COUNT + 1)
     ]
 
     hass.data[DOMAIN][SWITCH_ENTITIES] = switches

@@ -12,6 +12,7 @@ from ..const import (
     SELECT_ENTITIES,
     SWITCH_ENTITIES,
     NUMBER_ENTITIES,
+    SLOT_COUNT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ async def store_disable_state(hass: HomeAssistant):
     if "tmp" not in hass.data[DOMAIN]:
         hass.data[DOMAIN]["tmp"] = {}
     hass.data[DOMAIN]["tmp"]["disable_state"] = []
-    for i in range(1, 50):
+    for i in range(1, SLOT_COUNT + 1):
         if (
             hass.data[DOMAIN]["values"][f"slot_{i}_state"] != "off"
             and not hass.data[DOMAIN]["values"][f"slot_{i}_active"]
@@ -34,7 +35,7 @@ async def store_disable_state(hass: HomeAssistant):
                         hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"]
                     ),
                     "end": str(
-                        hass.data[DOMAIN]["values"][f"slot_{i + 1}_date_time_start"]
+                        hass.data[DOMAIN]["values"].get(f"slot_{i + 1}_date_time_start")
                     ),
                     "state": hass.data[DOMAIN]["values"][f"slot_{i}_state"],
                     "active": hass.data[DOMAIN]["values"][f"slot_{i}_active"],
@@ -50,7 +51,7 @@ async def restore_disable_state(hass: HomeAssistant):
         return
     if "disable_state" not in hass.data[DOMAIN]["tmp"]:
         return
-    for i in range(1, 49):
+    for i in range(1, SLOT_COUNT):
         for s in hass.data[DOMAIN]["tmp"]["disable_state"]:
             if (
                 str(hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"])
@@ -65,11 +66,37 @@ async def restore_disable_state(hass: HomeAssistant):
 async def reset(hass: HomeAssistant):
     """Reset planner."""
     _LOGGER.info("Resetting planner")
-    for i in range(1, 50):
+    for i in range(1, SLOT_COUNT + 1):
         hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"] = None
         hass.data[DOMAIN]["values"][f"slot_{i}_state"] = "off"
         hass.data[DOMAIN]["values"][f"slot_{i}_active"] = False
         hass.data[DOMAIN]["values"][f"slot_{i}_soc"] = 50
+
+
+def write_schedule(hass: HomeAssistant, schedule: list[dict]):
+    """Write schedule to the first free slots, followed by a terminating off slot."""
+    values = hass.data[DOMAIN]["values"]
+    index = 1
+    while index <= SLOT_COUNT and values[f"slot_{index}_state"] != "off":
+        index += 1
+    # The last slot is reserved for the terminating off slot
+    free_slots = max(SLOT_COUNT - index, 0)
+    if len(schedule) > free_slots:
+        _LOGGER.warning(
+            "Schedule has %s slots but only %s are free, dropping the last ones",
+            len(schedule),
+            free_slots,
+        )
+        schedule = schedule[:free_slots]
+    for i, slot in enumerate(schedule):
+        values[f"slot_{index + i}_date_time_start"] = slot["start"]
+        values[f"slot_{index + i}_state"] = slot["state"]
+        values[f"slot_{index + i}_soc"] = slot["soc"]
+        values[f"slot_{index + i}_active"] = True
+    if len(schedule) > 0:
+        values[f"slot_{index + len(schedule)}_date_time_start"] = schedule[-1]["end"]
+        values[f"slot_{index + len(schedule)}_state"] = "off"
+        values[f"slot_{index + len(schedule)}_active"] = False
 
 
 def parse_datetime(val, zone=None):
@@ -108,7 +135,7 @@ async def clear_passed_slots(hass: HomeAssistant):
         next_slot_start = dt_utils.parse_datetime(next_slot_start)
     if now > next_slot_start:
         # shift all slots one step back
-        for i in range(2, 50):
+        for i in range(2, SLOT_COUNT + 1):
             hass.data[DOMAIN]["values"][f"slot_{i - 1}_date_time_start"] = hass.data[
                 DOMAIN
             ]["values"].get(f"slot_{i}_date_time_start")

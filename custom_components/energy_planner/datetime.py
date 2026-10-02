@@ -5,7 +5,7 @@ from homeassistant.components.datetime import DateTimeEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.util import dt as dt_utils
 
-from custom_components.energy_planner.const import DOMAIN, DATE_TIME_ENTITIES
+from .const import DOMAIN, SLOT_COUNT, DATE_TIME_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 "enabled": True,
             },
         )
-        for i in range(1, 50)
+        for i in range(1, SLOT_COUNT + 1)
     ]
 
     hass.data[DOMAIN][DATE_TIME_ENTITIES] = datetimes

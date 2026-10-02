@@ -12,8 +12,8 @@ from homeassistant.core import (
 )
 from homeassistant.const import Platform
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.util import dt as dt_utils
 
-# from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import (
     async_track_utc_time_change,
     async_track_time_interval,
@@ -27,6 +27,7 @@ from .const import (
     SENSOR_ENTITIES,
     SELECT_ENTITIES,
     TIME_ENTITIES,
+    SLOT_COUNT,
 )
 from .planner import (
     basic_planner,
@@ -38,7 +39,6 @@ from .planner import (
     price_peak_planner,
 )
 from .store import async_save_to_store, async_load_from_store
-from .utils import tz_diff
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [
@@ -49,6 +49,9 @@ PLATFORMS = [
     Platform.SWITCH,
     Platform.TIME,
 ]
+# Nord Pool publishes the prices for the next day in Stockholm time
+NORDPOOL_TIME_ZONE = ZoneInfo("Europe/Stockholm")
+NORDPOOL_UPDATE_HOUR = 15
 
 
 async def async_setup_data_structure(hass: HomeAssistant):
@@ -69,13 +72,55 @@ async def async_setup_data_structure(hass: HomeAssistant):
         SENSOR_ENTITIES: {},
         SELECT_ENTITIES: {},
         "save": save,
-        "listeners": [],
     }
     hass.data[DOMAIN]["values"] = await async_load_from_store(hass, "values")
     hass.data[DOMAIN]["config"] = await async_load_from_store(hass, "config")
     hass.data[DOMAIN]["manual_slots"] = (
         await async_load_from_store(hass, "manual_slots") or []
     )
+    parse_stored_data(hass)
+
+
+def parse_stored_data(hass: HomeAssistant):
+    """Convert dates and times, which are stored as strings, back to objects."""
+    values = hass.data[DOMAIN]["values"]
+    for i in range(1, SLOT_COUNT + 1):
+        key = f"slot_{i}_date_time_start"
+        if type(values.get(key)) is str:
+            values[key] = dt_utils.parse_datetime(values[key])
+    config = hass.data[DOMAIN]["config"]
+    for key in ["earliest_charge_time", "earliest_discharge_time"]:
+        if type(config.get(key)) is str:
+            config[key] = dt.time.fromisoformat(config[key])
+    for slot in hass.data[DOMAIN]["manual_slots"]:
+        for key in ["start", "end"]:
+            if type(slot.get(key)) is str:
+                slot[key] = dt_utils.parse_datetime(slot[key])
+
+
+async def run_planner(hass: HomeAssistant) -> None:
+    """Run the selected planner."""
+    planner_state = hass.data[DOMAIN]["config"].get("planner_state", "basic")
+    if planner_state == "off":
+        _LOGGER.info("Planner is off")
+        return
+    if planner_state == "basic":
+        _LOGGER.info("Running basic planner")
+        await basic_planner(hass)
+        return
+    if planner_state == "cheapest hours":
+        _LOGGER.info("Running cheapest hours planner")
+        await cheapest_hours_planner(hass)
+        return
+    if planner_state == "price peak":
+        _LOGGER.info("Running price peak planner")
+        await price_peak_planner(hass)
+        return
+    if planner_state == "dynamic":
+        _LOGGER.info("Running dynamic planner")
+        await dynamic_planner(hass)
+        return
+    raise ValueError("Invalid planner state")
 
 
 async def async_setup(hass: HomeAssistant, config):
@@ -84,19 +129,15 @@ async def async_setup(hass: HomeAssistant, config):
         await async_setup_data_structure(hass)
 
     @callback
-    async def get_price_service(call: ServiceCall) -> None:
-        """Service to get the current price."""
-        pass
-        # client = async_get_clientsession(hass)
-
-    @callback
     async def add_slot_service(call: ServiceCall) -> None:
         """Service to add a slot."""
         try:
-            start_datetime = dt.datetime.fromisoformat(call.data.get("start"))
-            start_datetime = start_datetime.replace(tzinfo=ZoneInfo("Europe/Stockholm"))
-            end_datetime = dt.datetime.fromisoformat(call.data.get("end"))
-            end_datetime = end_datetime.replace(tzinfo=ZoneInfo("Europe/Stockholm"))
+            start_datetime = dt_utils.as_local(
+                dt.datetime.fromisoformat(call.data.get("start"))
+            )
+            end_datetime = dt_utils.as_local(
+                dt.datetime.fromisoformat(call.data.get("end"))
+            )
             state = call.data.get("state")
             soc = call.data.get("soc")
             if start_datetime > end_datetime:
@@ -123,37 +164,11 @@ async def async_setup(hass: HomeAssistant, config):
         _LOGGER.info("Received data: %s", call.data)
 
     @callback
-    async def run_planner(*args, **kwargs) -> None:
-        _LOGGER.info("Run planner args, %s", args)
-        _LOGGER.info("Run planner kwargs, %s", kwargs)
-        planner_state = hass.data[DOMAIN]["config"].get("planner_state", "basic")
-        if planner_state == "off":
-            _LOGGER.info("Planner is off")
-            return
-        if planner_state == "basic":
-            _LOGGER.info("Running basic planner")
-            await basic_planner(hass)
-            return
-        if planner_state == "cheapest hours":
-            _LOGGER.info("Running cheapest hours planner")
-            await cheapest_hours_planner(hass)
-            return
-        if planner_state == "price peak":
-            _LOGGER.info("Running price peak planner")
-            await price_peak_planner(hass)
-            return
-        if planner_state == "dynamic":
-            _LOGGER.info("Running dynamic planner")
-            await dynamic_planner(hass)
-            return
-        raise ValueError("Invalid planner state")
-
-    @callback
     async def run_planner_service(call: ServiceCall) -> None:
         """Service to run the planner."""
         _LOGGER.info("Running planner: %s", config)
         _LOGGER.info("Received planning data: %s", call.data)
-        await run_planner()
+        await run_planner(hass)
 
     @callback
     async def clear_manual_slots_service(call: ServiceCall) -> None:
@@ -170,27 +185,6 @@ async def async_setup(hass: HomeAssistant, config):
         DOMAIN, "clear_manual_slots", clear_manual_slots_service
     )
 
-    update_schedule_timer = async_track_utc_time_change(
-        hass,
-        run_planner,
-        hour=(15 + int(tz_diff("Europe/Stockholm", "UTC"))) % 24,
-        minute=31,
-        second=15,
-    )
-    hass.data[DOMAIN]["listeners"].append(update_schedule_timer)
-
-    @callback
-    async def check_schedule(*args, **kwargs):
-        _LOGGER.info("Checking schedule args, %s", args)
-        _LOGGER.info("Checking schedule kwargs, %s", kwargs)
-        await clear_passed_slots(hass)
-
-    check_schedule_timer = async_track_time_interval(
-        hass,
-        check_schedule,
-        dt.timedelta(minutes=1),
-    )
-    hass.data[DOMAIN]["listeners"].append(check_schedule_timer)
     # Return boolean to indicate that initialization was successful.
     return True
 
@@ -207,8 +201,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         await async_setup_data_structure(hass)
     hass.data[DOMAIN]["config"]["entry_id"] = entry.entry_id
     hass.data[DOMAIN]["config"]["nordpool_entity_id"] = entry.data["nordpool_entity_id"]
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    async def update_schedule(now: dt.datetime):
+        # Checked every hour to follow daylight saving changes
+        if now.astimezone(NORDPOOL_TIME_ZONE).hour != NORDPOOL_UPDATE_HOUR:
+            return
+        await run_planner(hass)
+
+    entry.async_on_unload(
+        async_track_utc_time_change(hass, update_schedule, minute=31, second=15)
+    )
+
+    async def check_schedule(now: dt.datetime):
+        await clear_passed_slots(hass)
+
+    entry.async_on_unload(
+        async_track_time_interval(hass, check_schedule, dt.timedelta(minutes=1))
     )
     return True
 
@@ -217,8 +226,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Unload a Modbus config entry."""
     _LOGGER.debug("init async_unload_entry")
     # Unload platforms associated with this integration
-    unload_ok = await hass.config_entries.async_forward_entry_unload(entry, DOMAIN)
-    if unload_ok:
-        for listener in hass.data[DOMAIN]["listeners"]:
-            listener()
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

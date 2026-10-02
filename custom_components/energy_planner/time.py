@@ -5,7 +5,7 @@ from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from custom_components.energy_planner.const import DOMAIN, TIME_ENTITIES
+from .const import DOMAIN, TIME_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
 

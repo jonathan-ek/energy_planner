@@ -9,9 +9,10 @@ from .utils import (
     update_entities,
     store_disable_state,
     restore_disable_state,
+    write_schedule,
 )
 from .manual_slots import add_manual_slots
-from .. import DOMAIN
+from ..const import DOMAIN
 from .nordpool_utils import fetch_nordpool_data, tzs
 
 from homeassistant.util import dt as dt_utils
@@ -73,22 +74,7 @@ async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
     # remove past hours
     schedule = [x for x in schedule if x["end"] > now]
     _LOGGER.info("schedule: %s", schedule)
-    index = 1
-    while True:
-        if hass.data[DOMAIN]["values"][f"slot_{index}_state"] == "off":
-            break
-        index += 1
-    for i, slot in enumerate(schedule):
-        hass.data[DOMAIN]["values"][f"slot_{index + i}_date_time_start"] = slot["start"]
-        hass.data[DOMAIN]["values"][f"slot_{index + i}_state"] = slot["state"]
-        hass.data[DOMAIN]["values"][f"slot_{index + i}_active"] = True
-        hass.data[DOMAIN]["values"][f"slot_{index + i}_soc"] = slot["soc"]
-    if len(schedule) > 0:
-        hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_date_time_start"] = (
-            schedule[-1]["end"]
-        )
-        hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_state"] = "off"
-        hass.data[DOMAIN]["values"][f"slot_{index + len(schedule)}_active"] = False
+    write_schedule(hass, schedule)
 
 
 async def planner(hass: HomeAssistant, *args, **kwargs):

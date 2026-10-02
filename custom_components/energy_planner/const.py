@@ -8,3 +8,6 @@ TIME_ENTITIES = "time_entities"
 SELECT_ENTITIES = "select_entities"
 
 VERSION_STORAGE = "1"
+
+# Number of slots in the schedule, numbered 1..SLOT_COUNT
+SLOT_COUNT = 49

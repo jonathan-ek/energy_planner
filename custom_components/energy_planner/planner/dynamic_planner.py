@@ -19,7 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from sqlalchemy.orm import Session, scoped_session, sessionmaker
 
-from custom_components.energy_planner import DOMAIN
+from ..const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 

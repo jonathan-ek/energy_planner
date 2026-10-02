@@ -3,7 +3,7 @@ import logging
 from homeassistant.helpers.json import JSONEncoder
 from homeassistant.helpers.storage import Store
 
-from custom_components.energy_planner.const import VERSION_STORAGE
+from .const import VERSION_STORAGE
 
 _LOGGER = logging.getLogger(__name__)
 

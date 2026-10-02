@@ -13,7 +13,7 @@ from homeassistant.components.sensor.const import (
     SensorStateClass,
 )
 
-from custom_components.energy_planner.const import DOMAIN, NUMBER_ENTITIES
+from .const import DOMAIN, SLOT_COUNT, NUMBER_ENTITIES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                     "data_store": "values",
                 },
             )
-            for i in range(1, 50)
+            for i in range(1, SLOT_COUNT + 1)
         ],
         EnergyPlannerNumberEntity(
             hass,

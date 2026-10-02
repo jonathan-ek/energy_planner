@@ -1,11 +1,10 @@
 import logging
-from zoneinfo import ZoneInfo
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_utils
 
 from .utils import parse_datetime
-from ..const import DOMAIN
+from ..const import DOMAIN, SLOT_COUNT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -13,7 +12,7 @@ _LOGGER = logging.getLogger(__name__)
 async def shift_slots_forward(hass: HomeAssistant, start_index: int, steps: int = 1):
     """Shift slots forward."""
     _LOGGER.info("Shifting slots")
-    for i in range(49 - steps, start_index - 1, -1):
+    for i in range(SLOT_COUNT - steps, start_index - 1, -1):
         # shift all slots one step forward
         hass.data[DOMAIN]["values"][f"slot_{i + steps}_date_time_start"] = (
             parse_datetime(hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"])
@@ -32,7 +31,7 @@ async def shift_slots_forward(hass: HomeAssistant, start_index: int, steps: int 
 async def shift_slots_back(hass: HomeAssistant, start_index: int, steps: int = 1):
     """Shift slots back."""
     _LOGGER.info("Shifting slots")
-    for i in range(start_index, 50 - steps, 1):
+    for i in range(start_index, SLOT_COUNT + 1 - steps, 1):
         hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"] = parse_datetime(
             hass.data[DOMAIN]["values"][f"slot_{i + steps}_date_time_start"]
         )
@@ -47,17 +46,20 @@ async def shift_slots_back(hass: HomeAssistant, start_index: int, steps: int = 1
         ]
 
 
-def localize_datetime(val):
-    """Localize datetime."""
-    return parse_datetime(val, ZoneInfo("Europe/Stockholm"))
+def slot_start(hass: HomeAssistant, index: int):
+    """Return the start of a slot in local time, None if unused or out of range."""
+    return parse_datetime(
+        hass.data[DOMAIN]["values"].get(f"slot_{index}_date_time_start"),
+        dt_utils.DEFAULT_TIME_ZONE,
+    )
 
 
 async def add_manual_slots(hass: HomeAssistant):
     """Add manual slots."""
     _LOGGER.info("Adding slot")
     for s in hass.data[DOMAIN]["manual_slots"]:
-        start = parse_datetime(s["start"], ZoneInfo("Europe/Stockholm"))
-        end = parse_datetime(s["end"], ZoneInfo("Europe/Stockholm"))
+        start = parse_datetime(s["start"], dt_utils.DEFAULT_TIME_ZONE)
+        end = parse_datetime(s["end"], dt_utils.DEFAULT_TIME_ZONE)
         if start >= end:
             continue
         if end <= dt_utils.now():
@@ -88,43 +90,27 @@ async def add_manual_slots(hass: HomeAssistant):
             soc = 50
         soc = max(min_soc, min(max_soc, soc))
 
+        used_slots = 0
+        while slot_start(hass, used_slots + 1) is not None:
+            used_slots += 1
+        # Adding a slot can take up to two new slots
+        if used_slots + 2 > SLOT_COUNT:
+            _LOGGER.warning("No free slots left, skipping manual slot %s", s)
+            continue
+
         start_index = 1
-        while True:
-            if hass.data[DOMAIN]["values"][
-                f"slot_{start_index}_date_time_start"
-            ] is None or (
-                parse_datetime(
-                    hass.data[DOMAIN]["values"][f"slot_{start_index}_date_time_start"],
-                    ZoneInfo("Europe/Stockholm"),
-                )
-                >= start
-            ):
-                break
+        while (
+            slot_start(hass, start_index) is not None
+            and slot_start(hass, start_index) < start
+        ):
             start_index += 1
         end_index = start_index
-        while True:
-            if hass.data[DOMAIN]["values"][
-                f"slot_{end_index}_date_time_start"
-            ] is None or (
-                parse_datetime(
-                    hass.data[DOMAIN]["values"][f"slot_{end_index}_date_time_start"],
-                    ZoneInfo("Europe/Stockholm"),
-                )
-                >= end
-            ):
-                break
+        while (
+            slot_start(hass, end_index) is not None
+            and slot_start(hass, end_index) < end
+        ):
             end_index += 1
-        end_is_end = (
-            (
-                parse_datetime(
-                    hass.data[DOMAIN]["values"][f"slot_{end_index}_date_time_start"],
-                    ZoneInfo("Europe/Stockholm"),
-                )
-                == end
-            )
-            if hass.data[DOMAIN]["values"][f"slot_{end_index}_date_time_start"]
-            else False
-        )
+        end_is_end = slot_start(hass, end_index) == end
         if start_index == end_index and not end_is_end:
             await shift_slots_forward(hass, start_index, 2)
             hass.data[DOMAIN]["values"][f"slot_{start_index}_date_time_start"] = start
