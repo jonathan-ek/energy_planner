@@ -145,10 +145,6 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
         raise ValueError("Nordpool data not found")
     earliest_charge = hass.data[DOMAIN]["config"].get("earliest_charge_time")
     earliest_discharge = hass.data[DOMAIN]["config"].get("earliest_discharge_time")
-    if type(earliest_charge) is str:
-        earliest_charge = dt.time.fromisoformat(earliest_charge)
-    if type(earliest_discharge) is str:
-        earliest_discharge = dt.time.fromisoformat(earliest_discharge)
     nr_of_charge_hours = float(
         hass.data[DOMAIN]["config"].get("basic_nr_of_charge_hours")
     )

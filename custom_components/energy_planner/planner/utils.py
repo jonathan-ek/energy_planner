@@ -63,14 +63,19 @@ async def restore_disable_state(hass: HomeAssistant):
     del hass.data[DOMAIN]["tmp"]["disable_state"]
 
 
+def clear_slot(hass: HomeAssistant, index: int):
+    """Set a slot to its unused state."""
+    hass.data[DOMAIN]["values"][f"slot_{index}_date_time_start"] = None
+    hass.data[DOMAIN]["values"][f"slot_{index}_state"] = "off"
+    hass.data[DOMAIN]["values"][f"slot_{index}_active"] = False
+    hass.data[DOMAIN]["values"][f"slot_{index}_soc"] = 50
+
+
 async def reset(hass: HomeAssistant):
     """Reset planner."""
     _LOGGER.info("Resetting planner")
     for i in range(1, SLOT_COUNT + 1):
-        hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"] = None
-        hass.data[DOMAIN]["values"][f"slot_{i}_state"] = "off"
-        hass.data[DOMAIN]["values"][f"slot_{i}_active"] = False
-        hass.data[DOMAIN]["values"][f"slot_{i}_soc"] = 50
+        clear_slot(hass, i)
 
 
 def write_schedule(hass: HomeAssistant, schedule: list[dict]):
@@ -131,8 +136,6 @@ async def clear_passed_slots(hass: HomeAssistant):
     next_slot_start = hass.data[DOMAIN]["values"].get("slot_2_date_time_start")
     if next_slot_start is None:
         return
-    if type(next_slot_start) is str:
-        next_slot_start = dt_utils.parse_datetime(next_slot_start)
     if now > next_slot_start:
         # shift all slots one step back
         for i in range(2, SLOT_COUNT + 1):
@@ -148,12 +151,10 @@ async def clear_passed_slots(hass: HomeAssistant):
             hass.data[DOMAIN]["values"][f"slot_{i - 1}_soc"] = hass.data[DOMAIN][
                 "values"
             ].get(f"slot_{i}_soc")
-        for s in hass.data[DOMAIN]["manual_slots"]:
-            end = s["end"]
-            if type(end) is str:
-                end = dt_utils.parse_datetime(s["end"])
-            if end < now:
-                hass.data[DOMAIN]["manual_slots"].remove(s)
+        clear_slot(hass, SLOT_COUNT)
+        hass.data[DOMAIN]["manual_slots"][:] = [
+            s for s in hass.data[DOMAIN]["manual_slots"] if s["end"] >= now
+        ]
 
         await update_entities(hass)
         await hass.data[DOMAIN]["save"]()

@@ -3,7 +3,6 @@ import logging
 
 from homeassistant.components.datetime import DateTimeEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.util import dt as dt_utils
 
 from .const import DOMAIN, SLOT_COUNT, DATE_TIME_ENTITIES
 
@@ -67,8 +66,6 @@ class EnergyPlannerDateTimeEntity(DateTimeEntity):
         self._attr_available = True
 
         value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
-        if type(value) is str:
-            value = dt_utils.parse_datetime(value)
         self._attr_native_value = value
         self.schedule_update_ha_state()
 

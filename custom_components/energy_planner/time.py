@@ -88,8 +88,6 @@ class EnergyPlannerTimeEntity(TimeEntity):
         self._attr_available = True
 
         value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
-        if type(value) is str:
-            value = dt.time.fromisoformat(value)
         self._attr_native_value = value
         self.schedule_update_ha_state()
 

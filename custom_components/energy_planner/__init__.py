@@ -24,7 +24,6 @@ from .const import (
     DATE_TIME_ENTITIES,
     NUMBER_ENTITIES,
     SWITCH_ENTITIES,
-    SENSOR_ENTITIES,
     SELECT_ENTITIES,
     TIME_ENTITIES,
     SLOT_COUNT,
@@ -45,7 +44,6 @@ PLATFORMS = [
     Platform.DATETIME,
     Platform.NUMBER,
     Platform.SELECT,
-    Platform.SENSOR,
     Platform.SWITCH,
     Platform.TIME,
 ]
@@ -69,7 +67,6 @@ async def async_setup_data_structure(hass: HomeAssistant):
         TIME_ENTITIES: {},
         NUMBER_ENTITIES: {},
         SWITCH_ENTITIES: {},
-        SENSOR_ENTITIES: {},
         SELECT_ENTITIES: {},
         "save": save,
     }
