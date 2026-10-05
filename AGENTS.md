@@ -11,11 +11,12 @@ outside the integration by scripts/automations (see `examples/`).
 | --- | --- |
 | `custom_components/energy_planner/__init__.py` | Setup, `hass.data` structure, services (`async_setup`), timers (`async_setup_entry`), planner dispatch (`run_planner`) |
 | `custom_components/energy_planner/planner/` | All planning logic (see below) |
-| `custom_components/energy_planner/{datetime,number,select,switch,time}.py` | Entity platforms (there is no sensor platform); each holds its entity definitions as dicts plus one generic entity class |
+| `custom_components/energy_planner/{datetime,number,select,switch,time}.py` | Entity platforms; each holds its entity definitions as dicts plus one generic entity class |
+| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`); they only read `hass.data[DOMAIN]["forecast"]` |
 | `custom_components/energy_planner/store.py` | Thin wrapper around HA `Store` (`.storage/energy_planner.<key>`) |
 | `custom_components/energy_planner/config_flow.py` | Single step: asks for `nordpool_entity_id` |
 | `custom_components/energy_planner/services.yaml`, `translations/en.json` | Service descriptions |
-| `tests/planner/test_basic_planner.py` | The only tests (basic planner). The `.md`/`.txt`/`ARCHITECTURE.py` files in `tests/` are documentation |
+| `tests/planner/` | Tests for the basic planner, the forecast functions and the forecast glue. The `.md`/`.txt`/`ARCHITECTURE.py` files in `tests/` are documentation |
 | `examples/` | Lovelace cards, `python_script`s and automations that consume the schedule |
 | `energy_planner_extras.yaml`, `add_slot_form.yml`, `Basic_config_card.yml` | HA package + cards for the manual "add slot" form |
 | `local_deploy.sh` | Copies the component into `~/projects/ha_demo/config` and restarts its docker compose |
@@ -24,11 +25,12 @@ outside the integration by scripts/automations (see `examples/`).
 
 | File | Role |
 | --- | --- |
-| `__init__.py` | Re-exports each module's `planner()` as `basic_planner`, `cheapest_hours_planner`, `price_peak_planner`, `dynamic_planner` |
+| `__init__.py` | Re-exports each module's `planner()` as `basic_planner`, `cheapest_hours_planner`, `price_peak_planner`, `dynamic_planner`, plus `async_update_forecast`. Note `planner.dynamic_planner` is then the function, not the module (tests use `importlib`) |
 | `basic_planner.py` | N cheapest quarters between earliest charge and earliest discharge time → charge; N most expensive after → discharge; rest pause |
 | `cheapest_hours_planner.py` | N cheapest quarters per calendar day → charge; everything else discharge |
 | `price_peak_planner.py` | Finds cheap/expensive windows and pairs them (`match_charge_discharge_periods`) only when the spread beats efficiency loss + network fees. Most complex and most recently changed |
-| `dynamic_planner.py` | WIP: only queries the recorder DB and logs, writes no schedule |
+| `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` only updates the forecast, it writes no schedule yet |
+| `forecast.py` | Pure forecast functions, no HA imports: quarter list (DST safe), load forecast per hour, PV integration of the `watts` forecast, PV calibration, weekend reserve |
 | `manual_slots.py` | `add_manual_slots` overlays user-added slots on the generated schedule, shifting slots forward/back |
 | `nordpool_utils.py` | `fetch_nordpool_data` (via the `nordpool.hourly` service, cached per date) and the area → timezone map `tzs` |
 | `utils.py` | `reset`, `clear_slot`, `write_schedule`, `store_disable_state`/`restore_disable_state`, `update_entities`, `clear_passed_slots`, `parse_datetime` |
@@ -75,7 +77,12 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   `cheapest_hours_nr_of_charge_hours`, `price_peak_nr_of_charge_hours`,
   `price_peak_nr_of_discharge_hours`, `price_peak_efficiency_factor` (%),
   `max_charge_current`, `max_discharge_current`, `battery_capacity` (Wh),
-  `battery_shutdown_soc`, `battery_max_soc`, `network_cost`, `network_compensation` (öre/kWh)
+  `battery_shutdown_soc`, `battery_max_soc`, `network_cost`, `network_compensation` (öre/kWh),
+  `forecast_weekend_reserve` (kWh, default 4), `forecast_reserve_start` /
+  `forecast_reserve_end` (h, default 18 / 22)
+- Forecast inputs (config store only, defaults in `const.py`): `forecast_load_sensor`,
+  `forecast_pv_sensor`, `forecast_ev_sensor`, `forecast_calendar`
+  (`calendar.energiplan`)
 
 ## Control flow
 
@@ -88,9 +95,81 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   for price peak) → `add_manual_slots` → `restore_disable_state` → `update_entities`
   → `save`.
 - **Services:** `add_slot` (appends to `manual_slots` and re-applies them),
-  `run_planner`, `clear_manual_slots`.
+  `run_planner`, `clear_manual_slots`, `update_forecast`.
+- **Forecast:** recalculated at :05 every hour (after the recorder compiles hourly
+  statistics), once after HA has started, by the `update_forecast` service and by
+  the dynamic planner. Errors are logged and do not stop the timers.
 - **Entities** are passive views: `update()` reads from `hass.data`, setters write
   back and call `save`.
+
+## Forecast
+
+Method and numbers come from a backtest on the real HA data (Oct 2026):
+
+- **Load** = `sensor.solis_s6_solis_household_load_power` hourly mean minus EV
+  charging (`sensor.ehwuhqtp_effekt`, planned separately). Forecast per local hour =
+  mean of (last 7 days' profile, last 4 same-type days' profile; same type =
+  workday/weekend), using only days before today, then split evenly into quarters.
+  About 24% hourly and 14% daily error. Quarter profiles, temperature and gradient
+  boosting gave no real improvement (district heating, so the load hardly depends on
+  temperature). Before profiling, hours more than 3.5 kWh above the median of the same
+  hour in the previous 14 days are capped (`cap_large_loads`): one-off loads like the
+  sauna come from the calendar or the reserve instead, so they are not counted twice.
+- **PV** = sum of Forecast.Solar `watts` (power at timestamps) integrated per quarter,
+  times `actual / forecast` over the last 14 days (actual: Solis
+  `total_pv_power` with Modbus glitches above 25 kW dropped; forecast: the planes'
+  `power_production_now` statistics). The ratio is limited to 0.3–2.5 and is 1.0 until
+  there are 5 kWh of forecast to compare with. Cuts the daily error from 28% to 17%.
+- **Planned loads** come from timed events in the local calendar
+  `calendar.energiplan` (recurring events work; all-day events are ignored). Energy:
+  `<n> kWh` in the title or description, otherwise the sum of defaults for activities
+  named in the title (`PLANNED_LOAD_DEFAULTS`: bastu 5, torktumlare 2.5, tvätt 1.5,
+  disk 1, gäster 4, elbil/ladda 20 kWh), otherwise the event is ignored. The energy is
+  spread evenly over the event, so the event should cover when the load runs.
+- **Reserve** = `forecast_weekend_reserve` spread over Sat/Sun
+  `forecast_reserve_start`–`forecast_reserve_end` (default 18–22, when the sauna
+  usually runs), for unplanned weekend load. Holidays are not detected.
+- Output: `hass.data[DOMAIN]["forecast"]` with parallel lists `starts`, `load`
+  (profile), `planned`, `reserve`, `pv` (kWh per quarter, all of today and tomorrow),
+  `planned_events`, and totals. `load_tomorrow` / `load_today_remaining` = profile +
+  planned (today counted from the current quarter); `base_tomorrow` and
+  `planned_tomorrow` split it. The sensors expose the lists as attributes, which are
+  kept out of the recorder. The Energi dashboard has a "Prognos" view
+  (ApexCharts) that draws them.
+
+## Household and tariff
+
+Background for the planner (from the owner, Oct 2026):
+
+- Location Linköping (58.38 N, 15.66 E), price area SE3, grid operator Tekniska verken.
+- Main heating is district heating (fjärrvärme, price in `sensor.fjarrvarme`,
+  öre/kWh). An air-to-air heat pump ("Hallen", MELCloud `climate.hallen`, energy
+  `sensor.hallen_energy`) can heat or cool part of the house when that is cheaper than
+  district heating; existing HA automations already compare spot price and the
+  estimated COP (`sensor.estimerad_verkningsgrad_luft_luft_varmepump`) with the
+  district heating price.
+- Electricity is bought at the quarter-hour spot price plus network fees.
+- Network tariff: Konsumtionsabonnemang, "Prislista alternativ" (time-differentiated),
+  prices from 2026-01-01 incl. VAT
+  (https://www.tekniskaverken.se/privat/elnat/priser-ersattningar):
+  - Transfer fee 18.0 öre/kWh day (06–23), 9.0 öre/kWh night (23–06).
+  - Energy tax 45.0 öre/kWh (incl. VAT) on bought energy.
+  - Power charge per month on the highest *hourly average* power, separately for day
+    (06–23) and night (23–06): day 23 kr/kW in summer (Apr–Oct) and 45 kr/kW in winter
+    (Nov–Mar); night 8 kr/kW summer, 12 kr/kW winter. One day peak and one night peak
+    per month. Example: an 8 kW sauna hour on a winter day costs 8 × 45 = 360 kr that
+    month, so shaving peaks with the battery is valuable.
+  - Main fuse 20 A: fixed fee 230 kr/month (three-phase 20 A is about 13.8 kW, a
+    practical ceiling for planned charging plus house load).
+- Selling: network compensation 7.20 öre/kWh in high-price periods (Mon–Fri 06–22,
+  Jan–Mar and Nov–Dec), 5.10 öre/kWh otherwise (from 2026-05-01), plus the spot price
+  from the electricity retailer. So selling earns spot + 5.10/7.20 öre, while buying
+  costs spot + transfer fee + energy tax (+ the power charge), a spread of roughly
+  50–60 öre/kWh: storing own solar for later use beats selling it unless the spot
+  price difference is large.
+- Large loads: electric sauna ~7 kW, ~4.6 kWh per session, mostly Sunday 19–21 on
+  about a quarter of Sundays. EV charger (Easee) 7–9 kW, rarely used.
+
 
 ## Domain facts worth knowing
 
@@ -136,8 +215,8 @@ make format         # ruff format
 - pytest uses `asyncio_mode = auto` and `pytest-homeassistant-custom-component`.
   Tests mock `hass` with `MagicMock`, patch `fetch_nordpool_data`, and freeze
   `dt_utils.now` at 2026-03-12 00:00 Stockholm time (autouse `fixed_now` fixture).
-- Only the basic planner has tests. The other planners, manual slots and
-  `clear_passed_slots` are untested.
+- The basic planner and the forecast have tests. The other planners, manual slots
+  and `clear_passed_slots` are untested.
 - CI: `.github/workflows/validate.yml` (ruff, hassfest, HACS) and `tests.yml`
   (pytest on 3.14 + ruff).
 
@@ -154,5 +233,6 @@ make format         # ruff format
 - The basic planner only plans the current day's window when tomorrow's prices
   exist or the window started yesterday; with `earliest_charge_time` at 00:00 it
   plans nothing for today until tomorrow's prices are published.
-- `dynamic_planner.py` is work in progress and writes no schedule.
+- `dynamic_planner.py` is work in progress: it produces the forecast but no
+  schedule yet.
 - Card labels and some example entity names are in Swedish.

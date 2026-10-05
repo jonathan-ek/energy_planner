@@ -18,6 +18,7 @@ from homeassistant.helpers.event import (
     async_track_utc_time_change,
     async_track_time_interval,
 )
+from homeassistant.helpers.start import async_at_started
 
 from .const import (
     DOMAIN,
@@ -29,6 +30,7 @@ from .const import (
     SLOT_COUNT,
 )
 from .planner import (
+    async_update_forecast,
     basic_planner,
     dynamic_planner,
     cheapest_hours_planner,
@@ -44,6 +46,7 @@ PLATFORMS = [
     Platform.DATETIME,
     Platform.NUMBER,
     Platform.SELECT,
+    Platform.SENSOR,
     Platform.SWITCH,
     Platform.TIME,
 ]
@@ -175,8 +178,13 @@ async def async_setup(hass: HomeAssistant, config):
         hass.data[DOMAIN]["manual_slots"] = []
         await hass.data[DOMAIN]["save"]()
 
+    async def update_forecast_service(call: ServiceCall) -> None:
+        """Service to recalculate the forecast."""
+        await async_update_forecast(hass)
+
     # Register our service with Home Assistant.
     hass.services.async_register(DOMAIN, "add_slot", add_slot_service)
+    hass.services.async_register(DOMAIN, "update_forecast", update_forecast_service)
     hass.services.async_register(DOMAIN, "run_planner", run_planner_service)
     hass.services.async_register(
         DOMAIN, "clear_manual_slots", clear_manual_slots_service
@@ -216,6 +224,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     entry.async_on_unload(
         async_track_time_interval(hass, check_schedule, dt.timedelta(minutes=1))
     )
+
+    async def update_forecast(*_):
+        # A failing forecast must not stop the timers
+        try:
+            await async_update_forecast(hass)
+        except Exception:
+            _LOGGER.exception("Failed to update the forecast")
+
+    # Every hour, after the recorder has compiled the hourly statistics, and once
+    # Home Assistant has started so Forecast.Solar is loaded
+    entry.async_on_unload(
+        async_track_utc_time_change(hass, update_forecast, minute=5, second=0)
+    )
+    entry.async_on_unload(async_at_started(hass, update_forecast))
     return True
 
 

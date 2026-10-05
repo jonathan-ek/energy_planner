@@ -43,6 +43,10 @@
     "clear_manual_slots": {
       "name": "Clear Manual slots",
       "description": "Clear the manual slots from the schedule"
+    },
+    "update_forecast": {
+      "name": "Update forecast",
+      "description": "Recalculate the load and PV forecast per quarter for today and tomorrow"
     }
   }
 }

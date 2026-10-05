@@ -182,6 +182,49 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
+                # Extra energy to keep for unplanned weekend load, Sat/Sun 16-20
+                "id": "forecast_weekend_reserve",
+                "name": "Weekend reserve",
+                "default": 4,
+                "min_val": 0,
+                "max_val": 20,
+                "step": 0.5,
+                "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                "id": "forecast_reserve_start",
+                "name": "Weekend reserve from",
+                "default": 18,
+                "min_val": 0,
+                "max_val": 23,
+                "step": 1,
+                "unit_of_measurement": UnitOfTime.HOURS,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                "id": "forecast_reserve_end",
+                "name": "Weekend reserve until",
+                "default": 22,
+                "min_val": 1,
+                "max_val": 24,
+                "step": 1,
+                "unit_of_measurement": UnitOfTime.HOURS,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
                 "id": "battery_max_soc",
                 "name": "Battery max SOC",
                 "default": 90,
