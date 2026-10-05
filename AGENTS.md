@@ -16,7 +16,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `custom_components/energy_planner/store.py` | Thin wrapper around HA `Store` (`.storage/energy_planner.<key>`) |
 | `custom_components/energy_planner/config_flow.py` | Single step: asks for `nordpool_entity_id` |
 | `custom_components/energy_planner/services.yaml`, `translations/en.json` | Service descriptions |
-| `tests/planner/` | Tests for the basic planner, the forecast functions and the forecast glue. The `.md`/`.txt`/`ARCHITECTURE.py` files in `tests/` are documentation |
+| `tests/planner/` | Tests for the basic planner, the price peak planner, the forecast functions and the forecast glue. The `.md`/`.txt`/`ARCHITECTURE.py` files in `tests/` are documentation |
 | `examples/` | Lovelace cards, `python_script`s and automations that consume the schedule |
 | `energy_planner_extras.yaml`, `add_slot_form.yml`, `Basic_config_card.yml` | HA package + cards for the manual "add slot" form |
 | `local_deploy.sh` | Copies the component into `~/projects/ha_demo/config` and restarts its docker compose |
@@ -28,7 +28,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `__init__.py` | Re-exports each module's `planner()` as `basic_planner`, `cheapest_hours_planner`, `price_peak_planner`, `dynamic_planner`, plus `async_update_forecast`. Note `planner.dynamic_planner` is then the function, not the module (tests use `importlib`) |
 | `basic_planner.py` | N cheapest quarters between earliest charge and earliest discharge time → charge; N most expensive after → discharge; rest pause |
 | `cheapest_hours_planner.py` | N cheapest quarters per calendar day → charge; everything else discharge |
-| `price_peak_planner.py` | Finds cheap/expensive windows and pairs them (`match_charge_discharge_periods`) only when the spread beats efficiency loss + network fees. Most complex and most recently changed |
+| `price_peak_planner.py` | `find_charge_periods` / `find_discharge_periods` pick the cheapest / most expensive windows (best first), `remove_overlaps` drops conflicts, `match_charge_discharge_periods` pairs them where `is_profitable` says the spread pays off, `build_schedule` turns pairs into slots. All pure and tested; `plan_day` is the HA glue |
 | `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` only updates the forecast, it writes no schedule yet |
 | `forecast.py` | Pure forecast functions, no HA imports: quarter list (DST safe), load forecast per hour, PV integration of the `watts` forecast, PV calibration, weekend reserve |
 | `manual_slots.py` | `add_manual_slots` overlays user-added slots on the generated schedule, shifting slots forward/back |
@@ -77,7 +77,9 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   `cheapest_hours_nr_of_charge_hours`, `price_peak_nr_of_charge_hours`,
   `price_peak_nr_of_discharge_hours`, `price_peak_efficiency_factor` (%),
   `max_charge_current`, `max_discharge_current`, `battery_capacity` (Wh),
-  `battery_shutdown_soc`, `battery_max_soc`, `network_cost`, `network_compensation` (öre/kWh),
+  `battery_shutdown_soc`, `battery_max_soc`, `network_cost` (öre/kWh incl. VAT paid on
+  bought energy: transfer fee + energy tax, ~63 here), `network_compensation` (öre/kWh
+  received when selling, ~5 here),
   `forecast_weekend_reserve` (kWh, default 4), `forecast_reserve_start` /
   `forecast_reserve_end` (h, default 18 / 22)
 - Forecast inputs (config store only, defaults in `const.py`): `forecast_load_sensor`,
@@ -178,8 +180,13 @@ Background for the planner (from the owner, Oct 2026):
 - Area and currency are parsed from the Nord Pool entity id by position:
   `entity_id.split("_")[2]` and `[3]` (e.g. `sensor.nordpool_kwh_se3_sek_…`).
 - Requires the `nordpool` custom integration for the `nordpool.hourly` service.
-- Price values are per MWh. In `price_peak_planner`, `* 1.25` is VAT and `* 10`
-  converts the öre/kWh network fees to the same unit.
+- Nord Pool prices are SEK/MWh excluding VAT; the network settings are öre/kWh
+  including VAT (`* 1.25` adds VAT, `* 10` converts öre/kWh to SEK/MWh).
+- Price peak cost model (`is_profitable`): a delivered kWh costs
+  `(charge price * 1.25 + network cost) / efficiency`. Used at home
+  (`discharge`) it is worth `discharge price * 1.25 + network cost`, so the fees only
+  count on the losses; sold (`sell`, `sell-excess`) it is worth
+  `discharge price + network compensation` (no VAT for private sellers).
 - A planning "day" in the basic planner runs from earliest charge time to the next
   earliest charge time, not midnight to midnight, so it pulls in yesterday's prices.
 
@@ -215,8 +222,8 @@ make format         # ruff format
 - pytest uses `asyncio_mode = auto` and `pytest-homeassistant-custom-component`.
   Tests mock `hass` with `MagicMock`, patch `fetch_nordpool_data`, and freeze
   `dt_utils.now` at 2026-03-12 00:00 Stockholm time (autouse `fixed_now` fixture).
-- The basic planner and the forecast have tests. The other planners, manual slots
-  and `clear_passed_slots` are untested.
+- The basic and price peak planners and the forecast have tests. The cheapest hours
+  planner, manual slots and `clear_passed_slots` are untested.
 - CI: `.github/workflows/validate.yml` (ruff, hassfest, HACS) and `tests.yml`
   (pytest on 3.14 + ruff).
 

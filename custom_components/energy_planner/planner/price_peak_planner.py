@@ -18,37 +18,73 @@ from homeassistant.util import dt as dt_utils
 
 _LOGGER = logging.getLogger(__name__)
 
+# Nord Pool prices are SEK/MWh excluding VAT, the network settings are öre/kWh
+# including VAT (1 öre/kWh = 10 SEK/MWh)
+VAT = 1.25
+ORE_PER_KWH_IN_SEK_PER_MWH = 10
+# Expensive-hour states where the discharged energy is sold instead of used at home
+SELLING_STATES = ("sell", "sell-excess")
+
+
+def is_profitable(
+    charge_price,
+    discharge_price,
+    efficiency,
+    network_cost,
+    network_compensation,
+    sells,
+):
+    """Return whether storing energy from charge_price for discharge_price pays off.
+
+    Buying costs the spot price with VAT plus the network cost (transfer fee and
+    energy tax), and 1 / efficiency kWh has to be bought per kWh delivered. A
+    discharged kWh is worth the purchase it replaces when it is used at home, or the
+    spot price plus the network compensation when it is sold (private sellers get no
+    VAT). For use at home the network cost is paid either way, so only the part lost
+    in the battery counts.
+    """
+    fees = network_cost * ORE_PER_KWH_IN_SEK_PER_MWH
+    cost = (charge_price * VAT + fees) / efficiency
+    if sells:
+        value = discharge_price + network_compensation * ORE_PER_KWH_IN_SEK_PER_MWH
+    else:
+        value = discharge_price * VAT + fees
+    return value > cost
+
+
+def remove_overlaps(size, charge_periods, discharge_periods):
+    """Drop periods that overlap a better ranked one; returns the remaining lists.
+
+    Charge and discharge periods are taken in turn by rank. A dropped period leaves
+    no marks behind.
+    """
+    used = [False] * size
+    charge_periods = list(charge_periods)
+    discharge_periods = list(discharge_periods)
+    for i in range(max(len(charge_periods), len(discharge_periods))):
+        for periods in (charge_periods, discharge_periods):
+            if i >= len(periods):
+                continue
+            if any(used[j] for j in periods[i]):
+                periods[i] = []
+            else:
+                for j in periods[i]:
+                    used[j] = True
+    return [x for x in charge_periods if x], [x for x in discharge_periods if x]
+
 
 def match_charge_discharge_periods(
-    prices,
-    charge_periods,
-    discharge_periods,
-    price_peak_efficiency_factor,
-    energy_planner_network_cost,
-    energy_planner_network_compensation,
+    prices, charge_periods, discharge_periods, profitable
 ):
-    """Match charge and discharge periods."""
-    matched_pairs = []
-    slots = [0] * len(prices)
+    """Pair each discharge period with an earlier charge period where it pays off.
 
-    # remove overlapping periods
-    for i in range(max(len(charge_periods), len(discharge_periods))):
-        if i < len(charge_periods):
-            charge_period = charge_periods[i]
-            for j in charge_period:
-                if slots[j] != 0:
-                    charge_periods[i] = []
-                    break
-                slots[j] += 1
-        if i < len(discharge_periods):
-            discharge_period = discharge_periods[i]
-            for j in discharge_period:
-                if slots[j] != 0:
-                    discharge_periods[i] = []
-                    break
-                slots[j] -= 1
-    charge_periods = [x for x in charge_periods if x]
-    discharge_periods = [x for x in discharge_periods if x]
+    The periods are ranked best first. profitable(charge_price, discharge_price) tells
+    whether a pair pays off. Returns a list of (charge indexes, discharge indexes).
+    """
+    matched_pairs = []
+    charge_periods, discharge_periods = remove_overlaps(
+        len(prices), charge_periods, discharge_periods
+    )
     slots = [0] * len(prices)
     for cp, c in enumerate(charge_periods):
         for i in c:
@@ -58,9 +94,8 @@ def match_charge_discharge_periods(
             slots[i] -= dp + 1
     to_remove = []
     last_period = None
+    # Of two charge (or discharge) periods in a row, keep the better ranked one
     for i in range(len(slots)):
-        if i == 0:
-            continue
         if slots[i] > 0 and slots[i] != last_period:
             if last_period is None:
                 last_period = slots[i]
@@ -110,37 +145,26 @@ def match_charge_discharge_periods(
     prev_index = None
     to_remove = []
     for p, t, i in slots:
-        if prev_price is None:
+        if t == "c":
             prev_price = p
             prev_index = i
             continue
-        if t == "d":
-            if (prev_price * price_peak_efficiency_factor) * 1.25 + (
-                (energy_planner_network_cost - energy_planner_network_compensation) * 10
-            ) < p * 1.25:
-                new_dp = [
-                    x
-                    for x in discharge_periods[i]
-                    if (prev_price * price_peak_efficiency_factor) * 1.25
-                    + (
-                        energy_planner_network_cost
-                        - energy_planner_network_compensation
-                    )
-                    * 10
-                    < prices[x] * 1.25
-                ]
-                matched_pairs.append((charge_periods[prev_index], new_dp))
-                prev_price = None
-                prev_index = None
-            else:
-                if i > prev_index:
-                    to_remove.append((i, "d"))
-                else:
-                    to_remove.append((prev_index, "c"))
-                break
-        elif t == "c":
-            prev_price = p
-            prev_index = i
+        if prev_index is None:
+            # Nothing charged before this discharge period
+            continue
+        # Only the quarters that pay off on their own
+        new_dp = [x for x in discharge_periods[i] if profitable(prev_price, prices[x])]
+        if profitable(prev_price, p) and new_dp:
+            matched_pairs.append((charge_periods[prev_index], new_dp))
+            prev_price = None
+            prev_index = None
+            continue
+        # Drop the worse ranked of the two (higher rank number) and try again
+        if i > prev_index:
+            to_remove.append((i, "d"))
+        else:
+            to_remove.append((prev_index, "c"))
+        break
     if len(to_remove) > 0:
         for r, t in to_remove:
             if t == "d":
@@ -150,256 +174,245 @@ def match_charge_discharge_periods(
         charge_periods = [x for x in charge_periods if x]
         discharge_periods = [x for x in discharge_periods if x]
         matched_pairs = match_charge_discharge_periods(
-            prices,
-            charge_periods,
-            discharge_periods,
-            price_peak_efficiency_factor,
-            energy_planner_network_cost,
-            energy_planner_network_compensation,
+            prices, charge_periods, discharge_periods, profitable
         )
 
     return matched_pairs
 
 
-async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
-    """Plan a day based on nordpool values."""
-    _LOGGER.info("plan_day: %s", nordpool_values)
-    charge_hours = float(
-        hass.data[DOMAIN]["config"].get("price_peak_nr_of_charge_hours", 2)
-    )
-    discharge_hours = float(
-        hass.data[DOMAIN]["config"].get("price_peak_nr_of_discharge_hours", 2)
-    )
-    price_peak_efficiency_factor = (
-        float(hass.data[DOMAIN]["config"].get("price_peak_efficiency_factor", 85)) / 100
-    )
-    energy_planner_network_cost = float(
-        hass.data[DOMAIN]["config"].get("network_cost", 0.0)
-    )
-    energy_planner_network_compensation = float(
-        hass.data[DOMAIN]["config"].get("network_compensation", 0.0)
-    )
-    price_peak_planner_cheap_state = hass.data[DOMAIN]["config"].get(
-        "price_peak_planner_cheap_state", "charge"
-    )
-    price_peak_planner_expensive_state = hass.data[DOMAIN]["config"].get(
-        "price_peak_planner_expensive_state", "discharge"
-    )
-    price_peak_planner_inbetween_state = hass.data[DOMAIN]["config"].get(
-        "price_peak_planner_inbetween_state", "pause"
-    )
+# Quarters around a window searched for its best quarters
+CONTEXT = 2
 
-    max_soc = hass.data[DOMAIN]["config"].get("battery_max_soc", 100)
-    min_soc = hass.data[DOMAIN]["config"].get("battery_shutdown_soc", 20)
 
-    prices = [x["value"] for x in nordpool_values]
-    charge_window_size = int(charge_hours * 4)  # 2 hours * 4 (15 min intervals)
-    discharge_window_size = int(discharge_hours * 4)
+def _best_quarters(prices, start_idx, size, highest):
+    """Return the size best quarters around a window, in time order."""
+    expanded_start = max(0, start_idx - CONTEXT)
+    expanded_end = min(len(prices), start_idx + size + CONTEXT)
+    window = prices[expanded_start:expanded_end]
+    ranked = sorted(
+        range(len(window)), key=lambda i: -window[i] if highest else window[i]
+    )
+    return [expanded_start + i for i in sorted(ranked[:size])]
+
+
+def find_discharge_periods(prices, charge_window_size, discharge_window_size):
+    """Return the most expensive non-overlapping windows, best first."""
+    if discharge_window_size <= 0 or len(prices) < discharge_window_size:
+        return []
     used_indices = set()
     discharge_period_indexes = []
-
-    # Store all candidate windows with their sum and starting index
-    discharge_candidates = []
-    for i in range(len(prices) - discharge_window_size + 1):
-        window = prices[i : i + discharge_window_size]
-        total_price = sum(window)
-        discharge_candidates.append((total_price, i))
-    discharge_candidates.sort(reverse=True, key=lambda x: x[0])
-    for _, start_idx in discharge_candidates:
-        # Check for overlap
+    candidates = [
+        (sum(prices[i : i + discharge_window_size]), i)
+        for i in range(len(prices) - discharge_window_size + 1)
+    ]
+    candidates.sort(reverse=True, key=lambda x: x[0])
+    for _, start_idx in candidates:
         window_range = set(range(start_idx, start_idx + discharge_window_size))
-        if used_indices.isdisjoint(window_range):
-            # Mark this window's indices as used and
-            # block discharge hours before and after charge period
-            j = 0
-            price = prices[start_idx]
-            while True:
-                j += 1
-                if start_idx - j < 0:
+        if not used_indices.isdisjoint(window_range):
+            continue
+        # Block the price slope leading up to the peak
+        j = 0
+        price = prices[start_idx]
+        while True:
+            j += 1
+            if start_idx - j < 0:
+                break
+            if prices[start_idx - j] > price:
+                if start_idx - j - 1 < 0:
                     break
-                if prices[start_idx - j] > price:
-                    if start_idx - j - 1 < 0:
+                if prices[start_idx - j - 1] > price:
+                    if start_idx - j - 2 < 0:
                         break
-                    if prices[start_idx - j - 1] > price:
-                        if start_idx - j - 2 < 0:
-                            break
-                        if prices[start_idx - j - 2] > price:
-                            break
-                price = prices[start_idx - j]
-                used_indices.add(start_idx - j)
-            used_indices.update(
-                range(
-                    max(0, start_idx - charge_window_size),
-                    min(
-                        len(prices),
-                        start_idx + discharge_window_size + charge_window_size,
-                    ),
-                )
+                    if prices[start_idx - j - 2] > price:
+                        break
+            price = prices[start_idx - j]
+            used_indices.add(start_idx - j)
+        # Block a charge window on each side of the peak
+        used_indices.update(
+            range(
+                max(0, start_idx - charge_window_size),
+                min(
+                    len(prices),
+                    start_idx + discharge_window_size + charge_window_size,
+                ),
             )
+        )
+        # Block the price slope after the peak
+        end = start_idx + discharge_window_size
+        if end < len(prices):
             j = 0
-            price = prices[start_idx + discharge_window_size + j]
+            price = prices[end]
             while True:
                 j += 1
-                if start_idx + discharge_window_size + j >= len(prices):
+                if end + j >= len(prices):
                     break
-                if prices[start_idx + discharge_window_size + j] > price:
-                    if start_idx + discharge_window_size + j + 1 >= len(prices):
+                if prices[end + j] > price:
+                    if end + j + 1 >= len(prices):
                         break
-                    if prices[start_idx + discharge_window_size + j + 1] > price:
-                        if start_idx + discharge_window_size + j + 2 >= len(prices):
+                    if prices[end + j + 1] > price:
+                        if end + j + 2 >= len(prices):
                             break
-                        if prices[start_idx + discharge_window_size + j + 2] > price:
+                        if prices[end + j + 2] > price:
                             break
-                price = prices[start_idx + discharge_window_size + j]
-                used_indices.add(start_idx + discharge_window_size + j)
-            discharge_period_indexes.append(start_idx)
-    context = 2  # 1 hour context to find top 8 prices
-    discharge_periods = []
-    for start_idx in discharge_period_indexes:
-        expanded_start = max(0, start_idx - context)
-        expanded_end = min(len(prices), start_idx + discharge_window_size + context)
-        expanded_window = prices[expanded_start:expanded_end]
+                price = prices[end + j]
+                used_indices.add(end + j)
+        discharge_period_indexes.append(start_idx)
+    return [
+        _best_quarters(prices, start_idx, discharge_window_size, highest=True)
+        for start_idx in discharge_period_indexes
+    ]
 
-        sorted_indices = sorted(
-            range(len(expanded_window)), key=lambda i: -expanded_window[i]
-        )
-        top_8_global = [
-            expanded_start + i for i in sorted(sorted_indices[:discharge_window_size])
-        ]
-        discharge_periods.append(top_8_global)
-    _LOGGER.info("discharge_periods: %s", discharge_periods)
-    charge_periods = []
+
+def find_charge_periods(prices, charge_window_size, discharge_window_size):
+    """Return the cheapest non-overlapping windows, best first."""
+    if charge_window_size <= 0 or len(prices) < charge_window_size:
+        return []
     used_indices = set()
     charge_period_indexes = []
-
-    # Store all candidate windows with their sum and starting index
-    charge_candidates = []
-    for i in range(len(prices) - charge_window_size + 1):
-        window = prices[i : i + charge_window_size]
-        total_price = sum(window)
-        charge_candidates.append((total_price, i))
-    charge_candidates.sort(reverse=False, key=lambda x: x[0])
-    for _, start_idx in charge_candidates:
-        # Check for overlap
+    candidates = [
+        (sum(prices[i : i + charge_window_size]), i)
+        for i in range(len(prices) - charge_window_size + 1)
+    ]
+    candidates.sort(key=lambda x: x[0])
+    for _, start_idx in candidates:
         window_range = set(range(start_idx, start_idx + charge_window_size))
-        if used_indices.isdisjoint(window_range):
-            # Mark this window's indices as used and
-            # block discharge hours before and after charge period
+        if not used_indices.isdisjoint(window_range):
+            continue
+        # Block the price slope leading down to the dip
+        j = 0
+        price = prices[start_idx]
+        while True:
+            j += 1
+            if start_idx - j < 0:
+                break
+            if prices[start_idx - j] < price:
+                if start_idx - j - 1 < 0:
+                    break
+                if prices[start_idx - j - 1] < price:
+                    if start_idx - j - 2 < 0:
+                        break
+                    if prices[start_idx - j - 2] < price:
+                        break
+            price = prices[start_idx - j]
+            used_indices.add(start_idx - j)
+        # Block a discharge window on each side of the dip
+        used_indices.update(
+            range(
+                max(0, start_idx - discharge_window_size),
+                min(
+                    len(prices),
+                    start_idx + discharge_window_size + charge_window_size,
+                ),
+            )
+        )
+        # Block the price slope after the dip
+        end = start_idx + charge_window_size
+        if end < len(prices):
             j = 0
-            price = prices[start_idx]
+            price = prices[end]
             while True:
                 j += 1
-                if start_idx - j < 0:
+                if end + j >= len(prices):
                     break
-                if prices[start_idx - j] < price:
-                    if start_idx - j - 1 < 0:
+                if prices[end + j] < price:
+                    if end + j + 1 >= len(prices):
                         break
-                    if prices[start_idx - j - 1] < price:
-                        if start_idx - j - 2 < 0:
+                    if prices[end + j + 1] < price:
+                        if end + j + 2 >= len(prices):
                             break
-                        if prices[start_idx - j - 2] < price:
+                        if prices[end + j + 2] < price:
                             break
-                price = prices[start_idx - j]
-                used_indices.add(start_idx - j)
-            used_indices.update(
-                range(
-                    max(0, start_idx - discharge_window_size),
-                    min(
-                        len(prices),
-                        start_idx + discharge_window_size + charge_window_size,
-                    ),
-                )
-            )
-            j = 0
-            if start_idx + charge_window_size < len(prices):
-                price = prices[start_idx + charge_window_size]
-                while True:
-                    j += 1
-                    if start_idx + charge_window_size + j >= len(prices):
-                        break
-                    if prices[start_idx + charge_window_size + j] < price:
-                        if start_idx + charge_window_size + j + 1 >= len(prices):
-                            break
-                        if prices[start_idx + charge_window_size + j + 1] < price:
-                            if start_idx + charge_window_size + j + 2 >= len(prices):
-                                break
-                            if prices[start_idx + charge_window_size + j + 2] < price:
-                                break
-                    price = prices[start_idx + charge_window_size + j]
-                    used_indices.add(start_idx + charge_window_size + j)
-            charge_period_indexes.append(start_idx)
-    context = 2  # 1 hour context to find top 8 prices
-    charge_periods = []
-    for start_idx in charge_period_indexes:
-        expanded_start = max(0, start_idx - context)
-        expanded_end = min(len(prices), start_idx + charge_window_size + context)
-        expanded_window = prices[expanded_start:expanded_end]
+                price = prices[end + j]
+                used_indices.add(end + j)
+        charge_period_indexes.append(start_idx)
+    return [
+        _best_quarters(prices, start_idx, charge_window_size, highest=False)
+        for start_idx in charge_period_indexes
+    ]
 
-        sorted_indices = sorted(
-            range(len(expanded_window)), key=lambda i: expanded_window[i]
-        )
-        top_8_global = [
-            expanded_start + i for i in sorted(sorted_indices[:charge_window_size])
-        ]
-        charge_periods.append(top_8_global)
-    _LOGGER.info("charge_periods: %s", charge_periods)
-    matched = match_charge_discharge_periods(
-        prices,
-        charge_periods,
-        discharge_periods,
-        price_peak_efficiency_factor,
-        energy_planner_network_cost,
-        energy_planner_network_compensation,
-    )
-    slots = ["p" for _ in range(len(prices))]
+
+def build_schedule(nordpool_values, matched, states, max_soc, min_soc):
+    """Turn matched periods into schedule slots, merging equal neighbours.
+
+    states is (cheap, expensive, inbetween) state.
+    """
+    if not nordpool_values:
+        return []
+    cheap_state, expensive_state, inbetween_state = states
+    slots = ["p" for _ in range(len(nordpool_values))]
     for c, d in matched:
         for i in c:
             slots[i] = "c"
         for i in d:
             slots[i] = "d"
-    _LOGGER.info("slots: %s", slots)
-    schedule = [{}]
+    kinds = {
+        "c": (cheap_state, max_soc),
+        "d": (expensive_state, min_soc),
+        "p": (inbetween_state, max_soc),
+    }
+    schedule = []
     prev = None
     for i, slot in enumerate(slots):
         if slot == prev:
             continue
         prev = slot
-        if slot == "c":
+        if schedule:
             schedule[-1]["end"] = nordpool_values[i]["start"]
-            schedule.append(
-                {
-                    "start": nordpool_values[i]["start"],
-                    "state": price_peak_planner_cheap_state,
-                    "soc": max_soc,
-                }
-            )
-        elif slot == "d":
-            schedule[-1]["end"] = nordpool_values[i]["start"]
-            schedule.append(
-                {
-                    "start": nordpool_values[i]["start"],
-                    "state": price_peak_planner_expensive_state,
-                    "soc": min_soc,
-                }
-            )
-        else:
-            schedule[-1]["end"] = nordpool_values[i]["start"]
-            schedule.append(
-                {
-                    "start": nordpool_values[i]["start"],
-                    "state": price_peak_planner_inbetween_state,
-                    "soc": max_soc,
-                }
-            )
+        state, soc = kinds[slot]
+        schedule.append(
+            {"start": nordpool_values[i]["start"], "state": state, "soc": soc}
+        )
     schedule[-1]["end"] = nordpool_values[-1]["end"]
-    schedule.pop(0)
+    return schedule
+
+
+async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
+    """Plan a day based on nordpool values."""
+    _LOGGER.info("plan_day: %s", nordpool_values)
+    settings = hass.data[DOMAIN]["config"]
+    charge_hours = float(settings.get("price_peak_nr_of_charge_hours", 2))
+    discharge_hours = float(settings.get("price_peak_nr_of_discharge_hours", 2))
+    efficiency = float(settings.get("price_peak_efficiency_factor", 85)) / 100
+    network_cost = float(settings.get("network_cost", 0.0))
+    network_compensation = float(settings.get("network_compensation", 0.0))
+    states = (
+        settings.get("price_peak_planner_cheap_state", "charge"),
+        settings.get("price_peak_planner_expensive_state", "discharge"),
+        settings.get("price_peak_planner_inbetween_state", "pause"),
+    )
+    max_soc = settings.get("battery_max_soc", 100)
+    min_soc = settings.get("battery_shutdown_soc", 20)
+
+    def profitable(charge_price, discharge_price):
+        return is_profitable(
+            charge_price,
+            discharge_price,
+            efficiency,
+            network_cost,
+            network_compensation,
+            sells=states[1] in SELLING_STATES,
+        )
+
+    prices = [x["value"] for x in nordpool_values]
+    charge_window_size = int(charge_hours * 4)  # quarters
+    discharge_window_size = int(discharge_hours * 4)
+    discharge_periods = find_discharge_periods(
+        prices, charge_window_size, discharge_window_size
+    )
+    _LOGGER.info("discharge_periods: %s", discharge_periods)
+    charge_periods = find_charge_periods(
+        prices, charge_window_size, discharge_window_size
+    )
+    _LOGGER.info("charge_periods: %s", charge_periods)
+    matched = match_charge_discharge_periods(
+        prices, charge_periods, discharge_periods, profitable
+    )
+    schedule = build_schedule(nordpool_values, matched, states, max_soc, min_soc)
     now = dt_utils.now()
     # remove past hours
     schedule = [x for x in schedule if x["end"] > now]
     _LOGGER.info("schedule: %s", schedule)
     write_schedule(hass, schedule)
-
-    _LOGGER.info("matched charge/discharge periods: %s", schedule)
 
 
 async def planner(hass: HomeAssistant, *args, **kwargs):
