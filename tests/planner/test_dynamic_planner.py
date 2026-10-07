@@ -2,7 +2,10 @@
 
 import datetime as dt
 import importlib
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import aiohttp
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -78,6 +81,7 @@ async def test_update_forecast(mock_hass):
             return_value=[(watts, FORECAST_NOW)],
         ),
         patch.object(dynamic_planner, "_hourly_means", return_value=statistics()),
+        patch.object(dynamic_planner, "_solar_planes", return_value=(None, [])),
         patch.object(dynamic_planner, "_calendar_events", return_value=[]),
     ):
         await dynamic_planner.async_update_forecast(mock_hass)
@@ -106,6 +110,7 @@ async def test_update_forecast_without_forecast_solar(mock_hass):
         patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
         patch.object(dynamic_planner, "_forecast_solar_sources", return_value=[]),
         patch.object(dynamic_planner, "_hourly_means", return_value=statistics()),
+        patch.object(dynamic_planner, "_solar_planes", return_value=(None, [])),
         patch.object(dynamic_planner, "_calendar_events", return_value=[]),
     ):
         await dynamic_planner.async_update_forecast(mock_hass)
@@ -134,6 +139,7 @@ async def test_update_forecast_with_planned_loads(mock_hass):
         patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
         patch.object(dynamic_planner, "_forecast_solar_sources", return_value=[]),
         patch.object(dynamic_planner, "_hourly_means", return_value=statistics()),
+        patch.object(dynamic_planner, "_solar_planes", return_value=(None, [])),
         patch.object(
             dynamic_planner, "_calendar_events", return_value=[sauna, dentist]
         ),
@@ -154,6 +160,7 @@ async def test_calendar_failure_does_not_stop_forecast(mock_hass):
         patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
         patch.object(dynamic_planner, "_forecast_solar_sources", return_value=[]),
         patch.object(dynamic_planner, "_hourly_means", return_value=statistics()),
+        patch.object(dynamic_planner, "_solar_planes", return_value=(None, [])),
         patch.object(
             dynamic_planner, "_calendar_events", side_effect=RuntimeError("boom")
         ),
@@ -162,3 +169,112 @@ async def test_calendar_failure_does_not_stop_forecast(mock_hass):
     result = mock_hass.data[DOMAIN]["forecast"]
     assert result["planned_tomorrow"] == 0
     assert result["load_tomorrow"] == pytest.approx(24.0)
+
+
+def open_meteo_forecast():
+    """Latest and day-before forecast in kW per UTC hour, as _open_meteo_pv returns."""
+    tomorrow = dt.datetime.combine(NOW.date() + dt.timedelta(days=1), dt.time(0), TZ)
+    latest = {
+        (tomorrow + dt.timedelta(hours=h)).astimezone(dt.UTC): kw
+        for h, kw in zip(range(10, 14), [0, 4, 4, 0], strict=True)
+    }
+    previous = {}
+    for hour in hours(14):
+        if 6 <= hour.astimezone(TZ).hour < 18:
+            previous[hour] = 2.0
+    return latest, previous
+
+
+async def test_pv_from_open_meteo(mock_hass):
+    """Test that Open-Meteo is used and calibrated against actual production."""
+    with (
+        patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
+        patch.object(dynamic_planner, "_forecast_solar_sources", return_value=[]),
+        patch.object(dynamic_planner, "_hourly_means", return_value=statistics()),
+        patch.object(dynamic_planner, "_calendar_events", return_value=[]),
+        patch.object(
+            dynamic_planner, "_solar_planes", return_value=((58.4, 15.6), [(27, 75, 6)])
+        ),
+        patch.object(
+            dynamic_planner, "_open_meteo_pv", return_value=open_meteo_forecast()
+        ),
+    ):
+        await dynamic_planner.async_update_forecast(mock_hass)
+    result = mock_hass.data[DOMAIN]["forecast"]
+    assert result["pv_source"] == "open-meteo"
+    # Actual 3 kW where the day-before forecast said 2 kW
+    assert result["pv_calibration"] == pytest.approx(1.5)
+    assert result["pv_tomorrow_uncalibrated"] == pytest.approx(8.0)
+    assert result["pv_tomorrow"] == pytest.approx(12.0)
+
+
+async def test_pv_falls_back_to_forecast_solar(mock_hass):
+    """Test that Forecast.Solar is used when Open-Meteo fails."""
+    tomorrow = NOW.date() + dt.timedelta(days=1)
+    watts = {
+        dt.datetime.combine(tomorrow, dt.time(10), TZ): 0,
+        dt.datetime.combine(tomorrow, dt.time(12), TZ): 4000,
+        dt.datetime.combine(tomorrow, dt.time(14), TZ): 0,
+    }
+    with (
+        patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
+        patch.object(
+            dynamic_planner,
+            "_forecast_solar_sources",
+            return_value=[(watts, FORECAST_NOW)],
+        ),
+        patch.object(dynamic_planner, "_hourly_means", return_value=statistics()),
+        patch.object(dynamic_planner, "_calendar_events", return_value=[]),
+        patch.object(
+            dynamic_planner, "_solar_planes", return_value=((58.4, 15.6), [(27, 75, 6)])
+        ),
+        patch.object(
+            dynamic_planner,
+            "_open_meteo_pv",
+            side_effect=aiohttp.ClientError("unreachable"),
+        ),
+    ):
+        await dynamic_planner.async_update_forecast(mock_hass)
+    result = mock_hass.data[DOMAIN]["forecast"]
+    assert result["pv_source"] == "forecast.solar"
+    assert result["pv_tomorrow"] == pytest.approx(12.0)
+
+
+def test_solar_planes_from_forecast_solar():
+    """Test reading location and planes from the Forecast.Solar entries."""
+    with_subentries = MagicMock(data={"latitude": 58.4, "longitude": 15.6}, options={})
+    with_subentries.get_subentries_of_type.return_value = [
+        SimpleNamespace(data={"declination": 27, "azimuth": 75, "modules_power": 6000})
+    ]
+    old_style = MagicMock(
+        data={"latitude": 58.4, "longitude": 15.6},
+        options={"declination": 3, "azimuth": 345, "modules_power": 5000},
+    )
+    old_style.get_subentries_of_type.return_value = []
+    no_location = MagicMock(data={}, options={})
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [
+        no_location,
+        with_subentries,
+        old_style,
+    ]
+    location, planes = dynamic_planner._solar_planes(hass)
+    assert location == (58.4, 15.6)
+    assert planes == [(27.0, 75.0, 6.0), (3.0, 345.0, 5.0)]
+
+
+async def test_fetch_open_meteo_request():
+    """Test the Open-Meteo request parameters."""
+    response = MagicMock()
+    response.json = AsyncMock(return_value={"hourly": {"time": []}})
+    session = MagicMock()
+    session.get.return_value.__aenter__ = AsyncMock(return_value=response)
+    session.get.return_value.__aexit__ = AsyncMock(return_value=None)
+    hourly = await dynamic_planner._fetch_open_meteo(session, 58.4, 15.6, 27, 75)
+    assert hourly == {"time": []}
+    params = session.get.call_args.kwargs["params"]
+    assert params["azimuth"] == -105
+    assert params["tilt"] == 27
+    assert params["models"] == "metno_seamless,ecmwf_ifs025,icon_seamless"
+    assert "global_tilted_irradiance_previous_day1" in params["hourly"]
+    assert params["past_days"] == dynamic_planner.CALIBRATION_DAYS

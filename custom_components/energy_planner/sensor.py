@@ -24,7 +24,12 @@ EXTRA_ATTRIBUTES = {
         "planned_tomorrow",
         "planned_events",
     ),
-    "pv_forecast": ("pv_today_remaining", "pv_tomorrow_uncalibrated", "pv_calibration"),
+    "pv_forecast": (
+        "pv_today_remaining",
+        "pv_tomorrow_uncalibrated",
+        "pv_calibration",
+        "pv_source",
+    ),
 }
 
 

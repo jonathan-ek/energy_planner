@@ -1,11 +1,13 @@
 import datetime as dt
 import logging
 
+import aiohttp
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_utils
 
 from . import forecast
@@ -24,6 +26,9 @@ HISTORY_DAYS = 35
 CALIBRATION_DAYS = 14
 # Hourly PV means above this are Modbus glitches
 PV_MAX_KW = 25
+# Returns the latest forecast and the forecast made the day before, in one request
+OPEN_METEO_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
+OPEN_METEO_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
 async def _hourly_means(hass: HomeAssistant, statistic_ids, start, end):
@@ -64,6 +69,73 @@ def _forecast_solar_sources(hass: HomeAssistant):
         )
         sources.append((watts, now_entity))
     return sources
+
+
+def _solar_planes(hass: HomeAssistant):
+    """Return the location and the planes (tilt, compass azimuth, kWp).
+
+    Taken from the Forecast.Solar configuration, so the planes are only set up once.
+    """
+    location = None
+    planes = []
+    for entry in hass.config_entries.async_entries("forecast_solar"):
+        latitude = entry.data.get("latitude")
+        longitude = entry.data.get("longitude")
+        if latitude is None or longitude is None:
+            continue
+        location = location or (latitude, longitude)
+        settings = [sub.data for sub in entry.get_subentries_of_type("plane")]
+        if not settings and "declination" in entry.options:
+            settings = [entry.options]  # before planes became subentries
+        planes.extend(
+            (
+                float(plane["declination"]),
+                float(plane["azimuth"]),
+                float(plane["modules_power"]) / 1000,
+            )
+            for plane in settings
+        )
+    return location, planes
+
+
+async def _fetch_open_meteo(session, latitude, longitude, tilt, azimuth):
+    """Fetch tilted irradiance and temperature for one plane: past 14 days + 2 days."""
+    variables = [
+        "global_tilted_irradiance",
+        "global_tilted_irradiance_previous_day1",
+        "temperature_2m",
+        "temperature_2m_previous_day1",
+    ]
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "tilt": tilt,
+        "azimuth": forecast.open_meteo_azimuth(azimuth),
+        "hourly": ",".join(variables),
+        "models": ",".join(forecast.OPEN_METEO_MODELS),
+        "past_days": CALIBRATION_DAYS,
+        "forecast_days": 2,
+        "timezone": "UTC",
+    }
+    async with session.get(
+        OPEN_METEO_URL, params=params, timeout=OPEN_METEO_TIMEOUT
+    ) as response:
+        response.raise_for_status()
+        data = await response.json()
+    return data["hourly"]
+
+
+async def _open_meteo_pv(hass: HomeAssistant, location, planes):
+    """Return (latest, day-before) PV power forecast in kW per UTC hour, all planes."""
+    session = async_get_clientsession(hass)
+    latest, previous = {}, {}
+    for tilt, azimuth, kwp in planes:
+        hourly = await _fetch_open_meteo(session, *location, tilt, azimuth)
+        plane_latest, plane_previous = forecast.open_meteo_plane_power(hourly, kwp)
+        for total, plane in ((latest, plane_latest), (previous, plane_previous)):
+            for hour, kw in plane.items():
+                total[hour] = total.get(hour, 0.0) + kw
+    return latest, previous
 
 
 async def _calendar_events(hass: HomeAssistant, entity_id, start, end):
@@ -166,16 +238,32 @@ async def async_update_forecast(hass: HomeAssistant):
         [(start, stop, kwh) for start, stop, kwh, _ in planned_loads], quarters
     )
 
+    # PV: Open-Meteo, or Forecast.Solar if that fails. Both are scaled by the
+    # actual / forecast ratio of the last two weeks
+    since = now - dt.timedelta(days=CALIBRATION_DAYS)
+    actual = {
+        hour: kw
+        for hour, kw in means.get(pv_id, {}).items()
+        if hour >= since and 0 <= kw <= PV_MAX_KW
+    }
     pv = None
     calibration = None
+    raw = None
     raw_totals = {}
-    if sources:
-        since = now - dt.timedelta(days=CALIBRATION_DAYS)
-        actual = {
-            hour: kw
-            for hour, kw in means.get(pv_id, {}).items()
-            if hour >= since and 0 <= kw <= PV_MAX_KW
-        }
+    pv_source = None
+    location, planes = _solar_planes(hass)
+    if location and planes:
+        try:
+            latest, previous = await _open_meteo_pv(hass, location, planes)
+        except (aiohttp.ClientError, TimeoutError, KeyError, ValueError) as err:
+            _LOGGER.warning("Open-Meteo failed, using Forecast.Solar: %s", err)
+        else:
+            calibration = forecast.pv_calibration(
+                actual, {hour: kw for hour, kw in previous.items() if hour >= since}
+            )
+            raw = forecast.pv_quarters(forecast.hourly_power_to_watts(latest), quarters)
+            pv_source = "open-meteo"
+    if raw is None and sources:
         predicted = {}
         for entity in forecast_ids:
             for hour, kw in means.get(entity, {}).items():
@@ -186,6 +274,8 @@ async def async_update_forecast(hass: HomeAssistant):
         for watts, _ in sources:
             plane = forecast.pv_quarters(watts, quarters)
             raw = [a + b for a, b in zip(raw, plane, strict=True)]
+        pv_source = "forecast.solar"
+    if raw is not None:
         raw_totals = _daily_totals(quarters, raw, current)
         pv = [value * calibration for value in raw]
 
@@ -230,11 +320,13 @@ async def async_update_forecast(hass: HomeAssistant):
         if tomorrow in raw_totals
         else None,
         "pv_calibration": None if calibration is None else round(calibration, 3),
+        "pv_source": pv_source,
     }
     _LOGGER.info(
-        "Forecast tomorrow: load %s kWh, PV %s kWh (calibration %s)",
+        "Forecast tomorrow: load %s kWh, PV %s kWh (%s, calibration %s)",
         hass.data[DOMAIN]["forecast"]["load_tomorrow"],
         hass.data[DOMAIN]["forecast"]["pv_tomorrow"],
+        pv_source,
         hass.data[DOMAIN]["forecast"]["pv_calibration"],
     )
     for sensor in hass.data[DOMAIN].get(FORECAST_SENSORS, []):

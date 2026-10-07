@@ -195,3 +195,50 @@ def test_planned_quarters_spreads_by_overlap():
     # Parts outside the forecast range are dropped
     late = (start + dt.timedelta(minutes=30), start + dt.timedelta(minutes=90), 6.0)
     assert sum(forecast.planned_quarters([late], quarters)) == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize(
+    ("compass", "expected"),
+    [(75, -105), (256, 76), (345, 165), (180, 0), (0, -180)],
+)
+def test_open_meteo_azimuth(compass, expected):
+    """Test compass (0 = north) to Open-Meteo (0 = south) azimuth."""
+    assert forecast.open_meteo_azimuth(compass) == expected
+
+
+def test_plane_power():
+    """Test peak power and the loss from hot cells."""
+    assert forecast.plane_power(1000, 6) == pytest.approx(6.0)
+    # Cells at 25 C: no loss
+    assert forecast.plane_power(1000, 6, temperature=0) == pytest.approx(6.0)
+    # Cells at 45 C: 8% loss
+    assert forecast.plane_power(1000, 6, temperature=20) == pytest.approx(5.52)
+    assert forecast.plane_power(0, 6, temperature=20) == 0
+
+
+def test_open_meteo_plane_power():
+    """Test the hour shift, the model average and the day-before forecast."""
+    hourly = {
+        "time": ["2026-07-01T11:00", "2026-07-01T12:00"],
+        "global_tilted_irradiance_metno_seamless": [400.0, None],
+        "global_tilted_irradiance_ecmwf_ifs025": [600.0, 800.0],
+        "global_tilted_irradiance_previous_day1_ecmwf_ifs025": [200.0, None],
+    }
+    latest, previous = forecast.open_meteo_plane_power(hourly, 10)
+    ten = dt.datetime(2026, 7, 1, 10, tzinfo=dt.UTC)
+    # 11:00 is the mean of 10:00-11:00; missing values are skipped
+    assert latest == {
+        ten: pytest.approx(5.0),
+        ten + dt.timedelta(hours=1): pytest.approx(8.0),
+    }
+    assert previous == {ten: pytest.approx(2.0)}
+
+
+def test_hourly_power_to_watts_keeps_energy():
+    """Test that hourly means placed mid-hour integrate to the same energy."""
+    ten = dt.datetime(2026, 7, 1, 10, tzinfo=dt.UTC)
+    hourly = {ten + dt.timedelta(hours=i): kw for i, kw in enumerate([0, 4, 4, 0])}
+    watts = forecast.hourly_power_to_watts(hourly)
+    assert watts[ten + dt.timedelta(minutes=90)] == 4000
+    quarters = forecast.quarter_starts(ten, ten + dt.timedelta(hours=4))
+    assert sum(forecast.pv_quarters(watts, quarters)) == pytest.approx(8.0)

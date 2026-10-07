@@ -117,11 +117,19 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   temperature). Before profiling, hours more than 3.5 kWh above the median of the same
   hour in the previous 14 days are capped (`cap_large_loads`): one-off loads like the
   sauna come from the calendar or the reserve instead, so they are not counted twice.
-- **PV** = sum of Forecast.Solar `watts` (power at timestamps) integrated per quarter,
-  times `actual / forecast` over the last 14 days (actual: Solis
-  `total_pv_power` with Modbus glitches above 25 kW dropped; forecast: the planes'
-  `power_production_now` statistics). The ratio is limited to 0.3–2.5 and is 1.0 until
-  there are 5 kWh of forecast to compare with. Cuts the daily error from 28% to 17%.
+- **PV** = Open-Meteo `global_tilted_irradiance` per panel plane (planes, kWp and
+  location read from the Forecast.Solar config, `_solar_planes`), averaged over the
+  models in `OPEN_METEO_MODELS` (MET Nordic, ECMWF, ICON), derated for cell
+  temperature, summed over planes, then interpolated to quarters from mid-hour points
+  (keeps the hourly energy). One request per plane to the previous-runs API returns the
+  latest forecast and the forecast made the day before for the last 14 days. Open-Meteo
+  hourly values are means of the hour *before* the timestamp. Scaled by
+  `actual / day-before forecast` over the last 14 days (actual: Solis `total_pv_power`
+  with glitches above 25 kW dropped), limited to 0.3–2.5, 1.0 until 5 kWh of forecast
+  exist. Day-ahead backtest (448 days): 0.63 kWh hourly, 11% daily error
+  (Forecast.Solar with the same correction: 1.02 kWh, 17%). If Open-Meteo fails,
+  Forecast.Solar `watts` with its `power_production_now` history is used instead;
+  `pv_source` says which.
 - **Planned loads** come from timed events in the local calendar
   `calendar.energiplan` (recurring events work; all-day events are ignored). Energy:
   `<n> kWh` in the title or description, otherwise the sum of defaults for activities

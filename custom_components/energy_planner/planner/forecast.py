@@ -3,8 +3,12 @@
 Backtested on a year of data (see AGENTS.md): blending a 7-day hourly profile with
 a profile of the last same-type days (workday / weekend) gave the best day-ahead
 consumption forecast, and splitting the hour evenly into quarters is as good as any
-quarter profile. Forecast.Solar tracks the weather well but its scale drifts with
-the season, so it is scaled by the actual/forecast ratio of the last two weeks.
+quarter profile.
+
+PV comes from Open-Meteo's tilted irradiance per panel plane, averaged over three
+weather models (day-ahead backtest: 11% daily error against 17% for Forecast.Solar).
+Forecast.Solar is the fallback. Either is scaled by the actual/forecast ratio of the
+last two weeks, which absorbs the season, shading and snow.
 
 Large one-off loads (sauna, washing) are not forecast from the profile: they are
 capped in the history and added back from calendar events (planned loads) or covered
@@ -24,6 +28,11 @@ PROFILE_MIN_DAYS = 4
 SAME_TYPE_DAYS = 4  # same-type days in the day-type profile
 SAME_TYPE_MIN_DAYS = 2
 SAME_TYPE_LOOKBACK_DAYS = 35
+
+# Open-Meteo weather models to average. Adding GFS did not improve the backtest
+OPEN_METEO_MODELS = ("metno_seamless", "ecmwf_ifs025", "icon_seamless")
+# Power loss per °C of cell temperature above 25 °C
+TEMPERATURE_COEFFICIENT = 0.004
 
 # PV calibration settings
 CALIBRATION_MIN_FORECAST_KWH = 5.0
@@ -239,3 +248,63 @@ def planned_quarters(
             if overlap > 0:
                 result[i] += kwh * overlap / duration
     return result
+
+
+def open_meteo_azimuth(compass: float) -> float:
+    """Convert a compass azimuth (0 = north) to Open-Meteo's (0 = south)."""
+    return compass % 360 - 180
+
+
+def plane_power(
+    irradiance: float, kwp: float, temperature: float | None = None
+) -> float:
+    """Mean power (kW) of a panel plane from tilted irradiance (W/m²).
+
+    Hot cells produce less, about TEMPERATURE_COEFFICIENT per °C above 25 °C. The cell
+    temperature is estimated as air temperature plus 25 °C at 1000 W/m².
+    """
+    kw = kwp * irradiance / 1000
+    if temperature is not None:
+        cell = temperature + 25 * irradiance / 1000
+        kw *= 1 - TEMPERATURE_COEFFICIENT * (cell - 25)
+    return max(kw, 0.0)
+
+
+def open_meteo_plane_power(
+    hourly: dict, kwp: float, models: tuple[str, ...] = OPEN_METEO_MODELS
+) -> tuple[dict[dt.datetime, float], dict[dt.datetime, float]]:
+    """Return (latest forecast, forecast from the day before) in kW per UTC hour start.
+
+    hourly is Open-Meteo's "hourly" block with global_tilted_irradiance,
+    temperature_2m and their _previous_day1 variants per model, in UTC. Its values are
+    means over the hour before the timestamp, so they are moved back one hour. The
+    models are averaged, skipping missing values.
+    """
+
+    def ensemble(variable, i):
+        values = [
+            series[i]
+            for model in models
+            if (series := hourly.get(f"{variable}_{model}")) is not None
+            and series[i] is not None
+        ]
+        return mean(values) if values else None
+
+    latest, previous = {}, {}
+    for i, time in enumerate(hourly["time"]):
+        hour = dt.datetime.fromisoformat(time).replace(tzinfo=dt.UTC) - dt.timedelta(
+            hours=1
+        )
+        for target, suffix in ((latest, ""), (previous, "_previous_day1")):
+            irradiance = ensemble(f"global_tilted_irradiance{suffix}", i)
+            if irradiance is None:
+                continue
+            temperature = ensemble(f"temperature_2m{suffix}", i)
+            target[hour] = plane_power(irradiance, kwp, temperature)
+    return latest, previous
+
+
+def hourly_power_to_watts(hourly_kw: dict[dt.datetime, float]) -> dict:
+    """Place hourly mean power (kW) mid-hour, in W, as input for pv_quarters."""
+    half = dt.timedelta(minutes=30)
+    return {hour + half: kw * 1000 for hour, kw in hourly_kw.items()}
