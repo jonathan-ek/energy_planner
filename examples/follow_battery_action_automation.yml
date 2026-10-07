@@ -3,8 +3,9 @@
 # Safety switch: create a toggle helper input_boolean.follow_battery_action
 # ("Följ batteriplanen"). While it is on this automation controls the inverter, so
 # add the condition "input_boolean.follow_battery_action is off" to the old
-# "Update battery action" automation, or disable it. Turning the toggle off and the
-# old automation back on returns to the previous behaviour.
+# "Update battery action" automation and the "Peak +/-" automations (peak shaving
+# replaces them), or disable them. Turning the toggle off turns peak shaving off and
+# returns to the previous behaviour.
 #
 # The script only writes settings that changed, so it can run every minute.
 alias: Follow battery action
@@ -20,12 +21,26 @@ triggers:
     entity_id:
       - input_boolean.follow_battery_action
     to: "on"
-conditions:
-  - condition: state
-    entity_id: input_boolean.follow_battery_action
-    state: "on"
+  - trigger: state
+    entity_id:
+      - input_boolean.follow_battery_action
+    to: "off"
+    id: stopped
 actions:
-  - action: python_script.follow_battery_action
-    metadata: {}
-    data: {}
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: stopped
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.solis_s6_eh1p_peak_shaving_mode
+      - conditions:
+          - condition: state
+            entity_id: input_boolean.follow_battery_action
+            state: "on"
+        sequence:
+          - action: python_script.follow_battery_action
+            metadata: {}
+            data: {}
 mode: single

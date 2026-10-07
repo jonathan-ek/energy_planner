@@ -13,6 +13,10 @@ the tariff and the battery, choose per quarter one of the modes the inverter can
   covers the load when PV does not (the slot state `sell-excess`). Exporting surplus
   now and storing later surplus avoids the battery losses of `sell`. With a full
   battery `self_use` exports the surplus too, and wins the tie.
+- `discard_excess`: like `self_use`, but PV surplus the battery cannot take is
+  curtailed instead of exported (the slot state `discard-excess`, the inverter's
+  feed-in limit). Pays when the export price (spot plus the network compensation)
+  is negative.
 - `sell`: the battery discharges at full power, the surplus is exported.
 
 Dynamic programming over the state of charge finds the cheapest modes for given
@@ -42,7 +46,7 @@ import numpy as np
 from .tariff import PowerCharge, Tariff, charged_peak, import_limit
 
 QUARTER_HOURS = 0.25
-MODES = ("self_use", "hold", "sell_excess", "charge", "sell")
+MODES = ("self_use", "hold", "sell_excess", "discard_excess", "charge", "sell")
 SOC_STEPS = 101
 TARGET_STEP_KW = 0.5
 # SEK per kWh above the household's import limit: higher than any price, so it is
@@ -133,8 +137,8 @@ def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh):
         stored = np.minimum(np.minimum(room, power), surplus + max(grid_room, 0.0))
         grid = demand - surplus + stored
         return soc + stored * eta, np.maximum(grid, 0.0), np.maximum(-grid, 0.0)
-    # self_use and hold store the PV surplus, sell_excess exports it; hold only
-    # covers the load above the target
+    # self_use, hold and discard_excess store the PV surplus, sell_excess exports
+    # it; hold only covers the load above the target
     stored = np.minimum(
         np.minimum(room, power), 0.0 if mode == "sell_excess" else surplus
     )
@@ -142,7 +146,9 @@ def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh):
     out = np.minimum(available, min(covered, power))
     grid = demand - out - (surplus - stored)
     next_soc = soc + stored * eta - out / eta
-    return next_soc, np.maximum(grid, 0.0), np.maximum(-grid, 0.0)
+    # discard_excess curtails the surplus the battery cannot take
+    exported = np.maximum(-grid, 0.0) * (mode != "discard_excess")
+    return next_soc, np.maximum(grid, 0.0), exported
 
 
 def _quarter_cost(inputs: _Inputs, index: int, grid_import, grid_export, caps):

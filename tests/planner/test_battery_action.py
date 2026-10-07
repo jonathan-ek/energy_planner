@@ -71,8 +71,9 @@ def test_sell_current_is_limited():
     ("mode", "state", "soc"),
     [
         ("self_use", "discharge", None),
-        ("hold", "pause", 90),
+        ("hold", "pause", 50),
         ("sell_excess", "sell-excess", 15),
+        ("discard_excess", "discard-excess", None),
     ],
 )
 def test_other_modes(mode, state, soc):

@@ -25,6 +25,7 @@ SLOT_STATES = {
     "self_use": "discharge",
     "hold": "pause",
     "sell_excess": "sell-excess",
+    "discard_excess": "discard-excess",
     "charge": "charge",
     "sell": "sell",
 }
@@ -35,7 +36,7 @@ SLOT_MODES = {
     "sell": "sell",
     "sell-excess": "sell_excess",
     "pause": "hold",
-    "discard-excess": "self_use",
+    "discard-excess": "discard_excess",
 }
 STALE_AFTER = dt.timedelta(minutes=30)
 QUARTER = dt.timedelta(minutes=15)
@@ -132,7 +133,8 @@ def plan_action(
     elif mode == "sell_excess":
         extra["soc"] = round(battery.min_soc)
     elif mode == "hold":
-        extra["soc"] = round(battery.max_soc)
+        # What the plan expects to keep (less if it shaves peaks)
+        extra["soc"] = round(target_soc)
     return _action(
         SLOT_STATES[mode],
         "plan",

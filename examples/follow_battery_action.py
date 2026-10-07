@@ -11,10 +11,13 @@
 # only change when the action does. Fallbacks to self-use have hysteresis, so the
 # inverter does not switch back and forth around a threshold.
 #
-# Not done yet: `pause` (the plan's `hold`) keeps the battery but falls back to
-# self-use while the grid import is above the import target; charging at the import
-# target is approximated by the planned current. The inverter's peak shaving
-# (number.solis_s6_eh1p_peak_max_usable_grid_power) may do both better.
+# When the action has an import target (the battery plan's `charge` and `hold`), the
+# inverter's peak shaving does the work: grid import up to the max usable grid power
+# charges the battery up to the baseline SOC, and the battery covers the load above
+# it. Peak shaving only works while no time-of-use window is active, so the windows
+# are turned off first. A manual `charge` or `pause` slot has no import target and
+# uses the time-of-use windows instead. The "Peak +/-" automations (slot 1) should be
+# off while this runs, peak shaving replaces them.
 
 # DO NOT COPY the following section, it is only used to prevent errors in the IDE
 from homeassistant.core import HomeAssistant
@@ -38,9 +41,11 @@ DISCHARGE_SOC = "number.solis_s6_eh1p_grid_time_of_use_discharge_cut_off_soc_slo
 DISCHARGE_START = "time.solis_s6_eh1p_grid_time_of_use_discharge_start_slot_6"
 DISCHARGE_END = "time.solis_s6_eh1p_grid_time_of_use_discharge_end_slot_6"
 FEED_IN_LIMIT = "switch.solis_s6_eh1p_grid_feed_in_power_limit_switch"
+PEAK_SHAVING = "switch.solis_s6_eh1p_peak_shaving_mode"
+PEAK_GRID_POWER = "number.solis_s6_eh1p_peak_max_usable_grid_power"  # W
+PEAK_BASELINE_SOC = "number.solis_s6_eh1p_peak_baseline_soc"  # %
 
 BATTERY_SOC = "sensor.solis_s6_solis_battery_soc"
-GRID_POWER = "sensor.solis_s6_solis_meter_total_active_power"  # + sell, - buy (W)
 PV_POWER = "sensor.solis_s6_solis_total_pv_power"  # W
 HOUSE_POWER = "sensor.solis_s6_solis_household_load_power"  # W
 
@@ -66,7 +71,11 @@ def get_float(entity_id, default=0.0):
 
 
 def set_number(entity_id, value):
-    """Set a number entity if it has another value."""
+    """Set a number entity, within its range, if it has another value."""
+    state = hass.states.get(entity_id)
+    if state is not None:
+        value = max(value, state.attributes.get("min", value))
+        value = min(value, state.attributes.get("max", value))
     if abs(get_float(entity_id, -1000.0) - value) < 0.01:
         return
     logger.info("Setting %s to %s", entity_id, value)
@@ -112,21 +121,31 @@ soc = attributes.get("soc")
 current = attributes.get("current_a") or 0
 end = window_end(attributes.get("until"))
 
-charging = get_state(CHARGE_END)[:5] != OFF
 discharging = get_state(DISCHARGE_END)[:5] != OFF
-grid_import = -get_float(GRID_POWER)
 battery_soc = get_float(BATTERY_SOC)
 
 charge = None  # (current, soc) for the charge window, None: off
 discharge = None  # (current, soc) for the discharge window, None: off
+peak = None  # (max grid power W, baseline soc) for peak shaving, None: off
+target = attributes.get("import_target_kw")
+grid_limit = None if target is None else int(round(target * 10)) * 100  # W
 
 if state == "charge" and soc is not None:
-    charge = (current, soc)
+    if grid_limit is not None:
+        # Charge from PV and the grid up to the import target
+        peak = (grid_limit, soc)
+    else:
+        charge = (current, soc)
 elif state == "pause":
-    # Keep the battery, but let it cover the load above the import target
-    target = attributes.get("import_target_kw")
-    limit = None if target is None else target * 1000
-    if limit is None or grid_import < limit - (HYSTERESIS if not charging else 0):
+    if grid_limit is not None:
+        # Keep the battery, it only covers the load above the import target. The
+        # baseline is not raised above the battery's SOC, so it does not charge from
+        # the grid; it is only lowered when it is above it.
+        baseline = int(get_float(PEAK_BASELINE_SOC, 100.0))
+        if baseline > battery_soc:
+            baseline = int(battery_soc)
+        peak = (grid_limit, baseline)
+    else:
         charge = (0, soc if soc is not None else 100)
 elif state == "sell" and soc is not None:
     # Self-use once the battery is down to the target
@@ -138,22 +157,30 @@ elif state == "sell-excess" and soc is not None:
     if surplus > (0 if discharging else HYSTERESIS):
         discharge = (0, soc)
 
+# Turn off what is not used first, so two modes are never active together
+if charge is None:
+    set_time(CHARGE_START, OFF)
+    set_time(CHARGE_END, OFF)
+if discharge is None:
+    set_time(DISCHARGE_START, OFF)
+    set_time(DISCHARGE_END, OFF)
+if peak is None:
+    set_switch(PEAK_SHAVING, False)
+
 if charge is not None:
     set_number(CHARGE_CURRENT, charge[0])
     set_number(CHARGE_SOC, charge[1])
     set_time(CHARGE_START, OFF)
     set_time(CHARGE_END, end)
-else:
-    set_time(CHARGE_START, OFF)
-    set_time(CHARGE_END, OFF)
-
 if discharge is not None:
     set_number(DISCHARGE_CURRENT, discharge[0])
     set_number(DISCHARGE_SOC, discharge[1])
     set_time(DISCHARGE_START, OFF)
     set_time(DISCHARGE_END, end)
-else:
-    set_time(DISCHARGE_START, OFF)
-    set_time(DISCHARGE_END, OFF)
+if peak is not None:
+    set_number(PEAK_GRID_POWER, peak[0])
+    set_number(PEAK_BASELINE_SOC, peak[1])
+    set_switch(PEAK_SHAVING, True)
 
+# Curtail the PV surplus instead of exporting it (negative export price)
 set_switch(FEED_IN_LIMIT, state == "discard-excess")

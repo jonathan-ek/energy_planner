@@ -31,7 +31,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `cheapest_hours_planner.py` | N cheapest quarters per calendar day → charge; everything else discharge |
 | `price_peak_planner.py` | `find_charge_periods` / `find_discharge_periods` pick the cheapest / most expensive windows (best first), `remove_overlaps` drops conflicts, `match_charge_discharge_periods` pairs them where `is_profitable` says the spread pays off, `build_schedule` turns pairs into slots. All pure and tested; `plan_day` is the HA glue |
 | `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` updates the forecast and the plan and writes one `auto` slot to the plan's end, with manual slots laid over it |
-| `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
+| `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `discard_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
 | `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `expected_soc` |
 | `battery_action.py` | Pure: `resolve` turns slot 1 and the plan into the action now (slot state, source, SOC, current, import target, until), mode ↔ slot state maps |
 | `tariff.py` | Pure grid tariff model: `Tariff` with `buy_fee` / `sell_fee` (öre/kWh) and `power_cost` (kr), parsed from a dict by `tariff_from_dict`, presets in `TARIFF_PRESETS`, the household's `import_limit`. Format in the module docstring |
@@ -192,10 +192,14 @@ planners the plan is a preview and ignores them.
   above the quarter's target, like the "Peak +/-" automations), `sell_excess` (PV
   surplus goes to the grid instead of the battery, slot state `sell-excess`: worth it
   while prices fall during the day and the battery will fill later anyway; a full
-  battery exports in `self_use`, which wins ties), `charge` (from PV and grid up to
-  the import target), `sell` (full discharge to the grid).
+  battery exports in `self_use`, which wins ties), `discard_excess` (like `self_use`,
+  but surplus the battery cannot take is curtailed, slot state `discard-excess`: when
+  the export price, spot plus the network compensation, is negative; the plan also
+  empties the battery before such hours when that pays), `charge` (from PV and grid
+  up to the import target), `sell` (full discharge to the grid).
   Slot states (`battery_action.SLOT_STATES`): `self_use` → `discharge`, `hold` →
-  `pause`, `sell_excess` → `sell-excess`, `charge` → `charge`, `sell` → `sell`.
+  `pause`, `sell_excess` → `sell-excess`, `discard_excess` → `discard-excess`,
+  `charge` → `charge`, `sell` → `sell`.
 - Mode changes cost `SWITCH_COST` (0.05 SEK): the dynamic program's state is the SOC
   and the previous mode, and the first quarter's previous mode is the one the last
   plan has for now, so a recalculation only changes the running mode when that pays.
@@ -220,10 +224,12 @@ planners the plan is a preview and ignores them.
 - Battery: capacity, shutdown/max SOC, charge/discharge current × the live voltage
   (`battery_voltage_sensor`), SOC (`battery_soc_sensor`), round-trip efficiency
   `price_peak_efficiency_factor`. About 1 s per day of quarters, run in the executor.
-- Not done yet: making the inverter follow the import target while charging and in
-  `hold` (candidates: Solis peak shaving
-  `number.solis_s6_eh1p_peak_max_usable_grid_power` with force charge allowed under
-  peak shaving, or adjusting the charge current like the "Peak +/-" automations).
+- The inverter follows the import target while charging and in `hold` with Solis peak
+  shaving (`examples/follow_battery_action.py`; works while no time-of-use window is
+  active): `number.solis_s6_eh1p_peak_max_usable_grid_power` = the import target, and
+  `number.solis_s6_eh1p_peak_baseline_soc` = the SOC to charge to (for `hold` at most
+  the live SOC, so it does not charge from the grid). Below the max grid power the
+  inverter charges up to the baseline; above it the battery covers the load.
 
 ## Household and tariff
 

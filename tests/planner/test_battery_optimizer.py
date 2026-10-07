@@ -217,6 +217,35 @@ def test_full_battery_exports_in_self_use():
     assert sum(plan.grid_export) == pytest.approx(16.0)
 
 
+NEGATIVE_AT_11 = [-100.0 if 11 <= s.hour < 12 else 300.0 for s in STARTS]
+
+
+def test_negative_export_price_discards_the_surplus():
+    """Test that surplus a full battery cannot take is curtailed, not exported."""
+    # -100 SEK/MWh + 5 öre/kWh: exporting costs 5 öre/kWh 11-12, earns 35 öre else
+    stuck = opt.Battery(2.0, 20.0, 20.0, 0.0, 0.0, 0.81)  # can neither charge nor sell
+    plan = opt.optimize(
+        STARTS, NEGATIVE_AT_11, [0.0] * 96, PV_MIDDAY, stuck, tariff.flat_tariff(60, 5)
+    )
+    assert hours(plan, 11, 12) == {"discard_excess"}
+    assert hours(plan, 10, 11) | hours(plan, 12, 14) == {"self_use"}
+    assert sum(plan.grid_export) == pytest.approx(12.0)
+
+
+def test_negative_export_price_makes_room():
+    """Test that a full battery is emptied before PV exported at a loss."""
+    plan = opt.optimize(
+        STARTS,
+        NEGATIVE_AT_11,
+        [0.0] * 96,
+        PV_MIDDAY,
+        lossy_battery(20.0),
+        tariff.flat_tariff(60, 5),
+    )
+    assert "sell" in hours(plan, 10, 11)
+    assert sum(plan.grid_export[11 * 4 : 12 * 4]) == 0.0
+
+
 def test_sells_at_a_price_spike():
     """Test that a full battery is sold into a spike worth more than later use."""
     prices = [8000.0 if s.hour == 18 else 300.0 for s in STARTS]
