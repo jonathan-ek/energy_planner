@@ -13,7 +13,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `custom_components/energy_planner/planner/` | All planning logic (see below) |
 | `custom_components/energy_planner/button.py` | `button.energy_planner_update_battery_plan`, recalculates the battery plan |
 | `custom_components/energy_planner/{datetime,number,select,switch,time}.py` | Entity platforms; each holds its entity definitions as dicts plus one generic entity class |
-| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`) `sensor.energy_planner_battery_plan` and `sensor.energy_planner_battery_action` (what the inverter should do now, `battery_plan.current_action`); they only read `hass.data` |
+| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`) `sensor.energy_planner_battery_plan`, `sensor.energy_planner_battery_action` (what the inverter should do now, `battery_plan.current_action`) and the heat pump sensors `heat_pump_cop`, `district_heating_price`, `heat_pump_saving` (`heating.heat_pump_economy`); they only read `hass.data` |
 | `custom_components/energy_planner/store.py` | Thin wrapper around HA `Store` (`.storage/energy_planner.<key>`) |
 | `custom_components/energy_planner/config_flow.py` | Setup asks for `nordpool_entity_id`; the options flow chooses the grid tariff (flat, a preset or custom YAML) |
 | `custom_components/energy_planner/services.yaml`, `translations/en.json` | Service descriptions |
@@ -34,6 +34,8 @@ outside the integration by scripts/automations (see `examples/`).
 | `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `discard_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
 | `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `expected_soc` |
 | `battery_action.py` | Pure: `resolve` turns slot 1 and the plan into the action now (slot state, source, SOC, current, import target, until), mode ↔ slot state maps |
+| `heat_pump.py` | Pure heat pump economy: COP curve per outdoor temperature (`COP_CURVES`), district heating price per month (`DISTRICT_HEATING_PRESETS`), `evaluate` compares a kWh of heat from both. See "Heat pump" |
+| `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price now (`hass.data[DOMAIN]["prices"]`, stored by the battery plan), the tariff and the plan's export now |
 | `tariff.py` | Pure grid tariff model: `Tariff` with `buy_fee` / `sell_fee` (öre/kWh) and `power_cost` (kr), parsed from a dict by `tariff_from_dict`, presets in `TARIFF_PRESETS`, the household's `import_limit`. Format in the module docstring |
 | `forecast.py` | Pure forecast functions, no HA imports: quarter list (DST safe), load forecast per hour, PV integration of the `watts` forecast, PV calibration, weekend reserve |
 | `manual_slots.py` | `add_manual_slots` overlays user-added slots on the generated schedule, shifting slots forward/back |
@@ -96,7 +98,9 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 - Forecast inputs (config store only, defaults in `const.py`): `forecast_load_sensor`,
   `forecast_pv_sensor`, `forecast_ev_sensor`, `forecast_calendar`
   (`calendar.energiplan`); battery plan inputs `battery_soc_sensor`,
-  `battery_voltage_sensor`, `grid_import_sensor`
+  `battery_voltage_sensor`, `grid_import_sensor`; heat pump inputs
+  `outdoor_temperature_sensor` (`sensor.gw1100a_outdoor_temperature`),
+  `heat_pump_model` (`msz_ap42`), `district_heating` (`tekniska_verken_2026`)
 
 ## Control flow
 
@@ -230,6 +234,34 @@ planners the plan is a preview and ignores them.
   `number.solis_s6_eh1p_peak_baseline_soc` = the SOC to charge to (for `hold` at most
   the live SOC, so it does not charge from the grid). Below the max grid power the
   inverter charges up to the baseline; above it the battery covers the load.
+
+## Heat pump
+
+The air-to-air heat pump (`climate.hallen`, Mitsubishi MSZ-AP42VG) should only heat
+when that is cheaper than district heating. `heat_pump.evaluate` compares a kWh of
+heat: district heating at the season's energy price against electricity / COP.
+`sensor.energy_planner_heat_pump_saving` is district heating minus heat pump heat
+(öre per kWh of heat, positive: run the heat pump), with the COP, prices and
+`break_even_spot` in the attributes. Updated every minute.
+
+- COP: the service manual's curves at the compressor's rated frequency, defrost
+  included (OBH789, 9-1): about 3.0 from −15 to +5 °C, 3.6 at +7, 4.05 at +16; below
+  −15 °C the heat pump does not run (`None`). Conservative: at low output the COP is
+  higher (SCOP 4.7). The owner chose the conservative curve.
+- District heating, Tekniska verken 2026 incl. VAT: 99.7 öre/kWh Dec–Feb, 76.7 Mar,
+  Apr, Oct, Nov, 13.0 May–Sep. The annual fee (1 350 kr + 370 kr per MWh used
+  Dec–Feb, at least 6 900 kr) adds nothing per kWh here: the owner uses below 15 MWh
+  in Dec–Feb (2026: Jan 2.53, Feb 2.42 MWh, from the bills). These sensors
+  replace the MQTT feed (`sensor.fjarrvarme`, stuck since 2025) and the old heat pump
+  automations, removed in Oct 2026.
+- Electricity: spot × 1.25 + `tariff.buy_fee`, or, for the part the battery plan
+  exports this quarter (`HEAT_PUMP_INPUT_KW` 1 kW), spot + `tariff.sell_fee`. Power
+  charges are not included.
+- Break-even with COP 3: spot about 134 öre/kWh in Oct–Nov and Mar–Apr, 189 in
+  Dec–Feb; in summer only exported solar pays.
+- Next: an example automation that switches `climate.hallen` on the saving with a
+  margin and a minimum run time, then the heat pump as a flexible load in the battery
+  plan (cheap hours, solar surplus, power peaks and the import limit).
 
 ## Household and tariff
 

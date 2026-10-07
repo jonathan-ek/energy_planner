@@ -31,3 +31,8 @@ DEFAULT_BATTERY_VOLTAGE_SENSOR = "sensor.solis_s6_solis_battery_voltage"
 # hourly changes this month give the power peaks already paid for
 DEFAULT_GRID_IMPORT_SENSOR = "sensor.matarstallning_aktiv_energi_uttag"
 PLAN_SENSORS = "plan_sensors"
+
+# Heat pump economy (planner/heat_pump.py), can be overridden in the config store
+DEFAULT_OUTDOOR_TEMPERATURE_SENSOR = "sensor.gw1100a_outdoor_temperature"
+DEFAULT_HEAT_PUMP_MODEL = "msz_ap42"
+DEFAULT_DISTRICT_HEATING = "tekniska_verken_2026"

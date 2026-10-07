@@ -218,12 +218,14 @@ def _peak_label(tariff, key: str) -> dict:
 
 async def async_update_plan(hass: HomeAssistant) -> None:
     """Optimize the battery from the current quarter to the last known price."""
+    prices = await _prices(hass)
+    # Also read by the heat pump sensors (heating.py)
+    hass.data[DOMAIN]["prices"] = prices
     forecast = hass.data[DOMAIN].get("forecast")
     battery = _battery(hass)
     if not forecast or battery is None or battery.max_kwh <= battery.min_kwh:
         _LOGGER.info("No forecast or battery state, skipping the battery plan")
         return
-    prices = await _prices(hass)
     now = dt_utils.now()
     current = now.replace(minute=now.minute - now.minute % 15, second=0, microsecond=0)
 
