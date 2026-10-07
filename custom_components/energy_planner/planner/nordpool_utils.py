@@ -198,7 +198,12 @@ async def fetch_single_day(
             return_response=True,
         )
     except Exception:
-        _LOGGER.error(
+        # Future prices are fetched hourly by the battery plan and are only
+        # published in the afternoon, so failing to get them is expected
+        log = (
+            _LOGGER.debug if date > dt_utils.now().date().isoformat() else _LOGGER.error
+        )
+        log(
             "Failed to fetch nordpool data for %s %s %s",
             nordpool_currency,
             nordpool_area,
