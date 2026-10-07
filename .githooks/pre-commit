@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Run the code quality checks before every commit.
+# Enable the hooks with: git config core.hooksPath .githooks
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh"

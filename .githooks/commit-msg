@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Require Conventional Commits: <type>[(scope)][!]: <description>
+# https://www.conventionalcommits.org/en/v1.0.0/
+
+subject=$(head -n 1 "$1")
+types="build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test"
+
+# Commits made by git itself
+if [[ $subject =~ ^(Merge|Revert\ \"|fixup!|squash!|amend!) ]]; then
+    exit 0
+fi
+if [[ $subject =~ ^($types)(\([a-z0-9._/-]+\))?!?:\ [^[:space:]] ]]; then
+    exit 0
+fi
+echo "Commit message does not follow Conventional Commits:" >&2
+echo "    $subject" >&2
+echo "Expected: <type>[(scope)][!]: <description>, type one of: ${types//|/, }" >&2
+echo "Example:  feat(forecast): add Open-Meteo PV forecast" >&2
+exit 1

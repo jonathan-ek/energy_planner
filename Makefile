@@ -1,4 +1,4 @@
-.PHONY: help install test test-verbose test-coverage test-cov-html clean lint format check
+.PHONY: help install hooks test test-verbose test-coverage test-cov-html clean lint format check
 
 # Default target
 help:
@@ -7,6 +7,7 @@ help:
 	@echo ""
 	@echo "Available targets:"
 	@echo "  make install       - Install dependencies"
+	@echo "  make hooks         - Enable the git hooks (checks + Conventional Commits)"
 	@echo "  make test          - Run all tests"
 	@echo "  make test-verbose  - Run tests with verbose output"
 	@echo "  make test-coverage - Run tests with coverage report"
@@ -15,7 +16,7 @@ help:
 	@echo "  make test-watch    - Run tests in watch mode (auto-rerun)"
 	@echo "  make lint          - Run ruff linter"
 	@echo "  make format        - Format code with ruff"
-	@echo "  make check         - Run lint + tests"
+	@echo "  make check         - Run all checks: ruff check, ruff format, ty, tests"
 	@echo "  make clean         - Clean test artifacts"
 	@echo ""
 
@@ -69,7 +70,12 @@ format:
 	uv run ruff format tests/
 
 # Run checks (lint + test)
-check: lint test
+check:
+	scripts/check.sh
+
+# Enable the git hooks in .githooks
+hooks:
+	git config core.hooksPath .githooks
 
 # Clean test artifacts
 clean:

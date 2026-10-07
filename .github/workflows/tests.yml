@@ -48,8 +48,6 @@ jobs:
     - name: Install dependencies
       run: uv sync --locked
     
-    - name: Lint with ruff
-      run: |
-        uv run ruff check custom_components/
-        uv run ruff check tests/
+    - name: Code quality checks (ruff check, ruff format, ty, tests)
+      run: scripts/check.sh
 

@@ -217,6 +217,8 @@ make install        # uv sync (creates .venv from pyproject.toml + uv.lock)
 make test           # pytest tests/ -v
 make test-basic     # only tests/planner/test_basic_planner.py
 make lint           # ruff check custom_components/energy_planner/ tests/
+make check          # all checks: scripts/check.sh
+make hooks          # enable the git hooks
 make format         # ruff format
 ./local_deploy.sh   # deploy to local ha_demo and restart it
 ```
@@ -234,6 +236,21 @@ make format         # ruff format
   planner, manual slots and `clear_passed_slots` are untested.
 - CI: `.github/workflows/validate.yml` (ruff, hassfest, HACS) and `tests.yml`
   (pytest on 3.14 + ruff).
+
+## Before committing
+
+- `scripts/check.sh` must pass: `ruff check`, `ruff format --diff`, `ty check` and the
+  tests, on `custom_components` and `tests` (`make check` runs it too, and so does CI).
+  Fix the code rather than silencing a check; if an ignore is unavoidable, explain it in
+  a comment (see `store.py`).
+- Commit messages follow Conventional Commits
+  (https://www.conventionalcommits.org/en/v1.0.0/): `<type>[(scope)][!]: <description>`
+  with type one of `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`, `ci`,
+  `chore`, `style`, `revert`, e.g. `feat(forecast): add Open-Meteo PV forecast`. Use the
+  body for the why.
+- Git hooks in `.githooks/` enforce both: `pre-commit` runs `scripts/check.sh`,
+  `commit-msg` checks the message format. Enable them once per clone with
+  `make hooks` (`git config core.hooksPath .githooks`).
 
 ## Known quirks and pitfalls
 
