@@ -11,6 +11,15 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_utils
 
 from . import forecast
+from .battery_plan import async_request_plan
+from .manual_slots import add_manual_slots
+from .utils import (
+    reset,
+    restore_disable_state,
+    store_disable_state,
+    update_entities,
+    write_schedule,
+)
 from ..const import (
     DOMAIN,
     DEFAULT_FORECAST_CALENDAR,
@@ -415,5 +424,24 @@ async def async_update_forecast(hass: HomeAssistant):
 
 
 async def planner(hass: HomeAssistant, *args, **kwargs):
-    """Planner (WIP): only produces the forecast so far, no schedule."""
+    """Follow the battery plan: one `auto` slot from now to the plan's end.
+
+    The plan is recalculated every quarter, so it is not written to the slots; the
+    `auto` slot makes sensor.energy_planner_battery_action follow it. Manual slots are
+    laid over it as with the other planners.
+    """
     await async_update_forecast(hass)
+    await async_request_plan(hass, "dynamic planner")
+    plan = hass.data[DOMAIN].get("plan")
+    if not plan or not plan.get("starts"):
+        _LOGGER.warning("No battery plan, the dynamic planner writes no schedule")
+        return
+    start = dt.datetime.fromisoformat(plan["starts"][0])
+    end = dt.datetime.fromisoformat(plan["starts"][-1]) + dt.timedelta(minutes=15)
+    await store_disable_state(hass)
+    await reset(hass)
+    write_schedule(hass, [{"start": start, "end": end, "state": "auto", "soc": 50}])
+    await add_manual_slots(hass)
+    await restore_disable_state(hass)
+    await update_entities(hass)
+    await hass.data[DOMAIN]["save"]()

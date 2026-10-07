@@ -1,0 +1,31 @@
+# Runs examples/follow_battery_action.py (copy it to config/python_scripts/).
+#
+# Safety switch: create a toggle helper input_boolean.follow_battery_action
+# ("Följ batteriplanen"). While it is on this automation controls the inverter, so
+# add the condition "input_boolean.follow_battery_action is off" to the old
+# "Update battery action" automation, or disable it. Turning the toggle off and the
+# old automation back on returns to the previous behaviour.
+#
+# The script only writes settings that changed, so it can run every minute.
+alias: Follow battery action
+description: ""
+triggers:
+  - trigger: time_pattern
+    minutes: /1
+  - trigger: state
+    entity_id:
+      - sensor.energy_planner_battery_action
+    # Attributes too (target SOC, current, until), not only the state
+  - trigger: state
+    entity_id:
+      - input_boolean.follow_battery_action
+    to: "on"
+conditions:
+  - condition: state
+    entity_id: input_boolean.follow_battery_action
+    state: "on"
+actions:
+  - action: python_script.follow_battery_action
+    metadata: {}
+    data: {}
+mode: single

@@ -1,9 +1,12 @@
-"""Battery plan (dry run): runs the optimizer on the forecast, prices and tariff.
+"""Battery plan: runs the optimizer on the forecast, prices and tariff.
 
-The plan is only published (`hass.data[DOMAIN]["plan"]`, shown by
-`sensor.energy_planner_battery_plan`); nothing is written to the schedule yet.
+The plan is published in `hass.data[DOMAIN]["plan"]` (shown by
+`sensor.energy_planner_battery_plan`). It controls nothing by itself: an `auto` slot
+makes `sensor.energy_planner_battery_action` follow it (see battery_action.py), and
+an inverter script follows that sensor.
 """
 
+import asyncio
 import datetime as dt
 import functools
 import logging
@@ -20,6 +23,7 @@ from ..const import (
     DOMAIN,
     PLAN_SENSORS,
 )
+from .battery_action import QUARTER, SLOT_MODES, BatteryState, Slot, resolve
 from .battery_optimizer import QUARTER_HOURS, Battery, Limit, optimize
 from .nordpool_utils import fetch_nordpool_data
 from .utils import get_tariff
@@ -102,6 +106,106 @@ def _battery(hass: HomeAssistant) -> Battery | None:
     )
 
 
+def _forced(hass: HomeAssistant, starts) -> list[str | None]:
+    """Return the mode of the manual slot covering each quarter (None: no slot).
+
+    Only with the dynamic planner, when the plan is what runs: otherwise the plan is a
+    preview, and a long manual slot (e.g. self-use for weeks) would make it useless.
+    """
+    if hass.data[DOMAIN]["config"].get("planner_state") != "dynamic":
+        return [None] * len(starts)
+    forced: list[str | None] = []
+    for start in starts:
+        mode = None
+        for slot in hass.data[DOMAIN].get("manual_slots", []):
+            if slot["start"] <= start < slot["end"]:
+                mode = SLOT_MODES.get(slot["state"], mode)
+        forced.append(mode)
+    return forced
+
+
+def _planned_mode(hass: HomeAssistant, moment: dt.datetime) -> str | None:
+    """Return the mode the current plan has for the quarter containing `moment`."""
+    plan = hass.data[DOMAIN].get("plan") or {}
+    for start, mode in zip(plan.get("starts", []), plan.get("modes", []), strict=True):
+        begin = dt.datetime.fromisoformat(start)
+        if begin <= moment < begin + QUARTER:
+            return mode
+    return None
+
+
+def expected_soc(hass: HomeAssistant, moment: dt.datetime) -> float | None:
+    """Return the SOC % the plan expects at `moment`, None if it does not cover it."""
+    plan = hass.data[DOMAIN].get("plan") or {}
+    previous = None
+    for start, soc in zip(plan.get("starts", []), plan.get("soc", []), strict=True):
+        begin = dt.datetime.fromisoformat(start)
+        if begin <= moment < begin + QUARTER:
+            if previous is None:
+                return soc
+            share = (moment - begin) / QUARTER
+            return previous + (soc - previous) * share
+        previous = soc
+    return None
+
+
+def current_action(hass: HomeAssistant) -> dict:
+    """Return the action now, from slot 1 and the battery plan."""
+    config = hass.data[DOMAIN]["config"]
+    values = hass.data[DOMAIN]["values"]
+    slot = None
+    if values.get("slot_1_date_time_start") is not None:
+        slot = Slot(
+            state=values.get("slot_1_state", "off"),
+            active=bool(values.get("slot_1_active")),
+            start=values.get("slot_1_date_time_start"),
+            end=values.get("slot_2_date_time_start"),
+            soc=float(values.get("slot_1_soc") or 0),
+        )
+    soc = _state_float(
+        hass, config.get("battery_soc_sensor", DEFAULT_BATTERY_SOC_SENSOR)
+    )
+    voltage = _state_float(
+        hass, config.get("battery_voltage_sensor", DEFAULT_BATTERY_VOLTAGE_SENSOR)
+    )
+    battery = BatteryState(
+        soc=soc or 0.0,
+        voltage=voltage or 0.0,
+        capacity_kwh=float(config.get("battery_capacity", 0)) / 1000,
+        min_soc=float(config.get("battery_shutdown_soc", 10)),
+        max_soc=float(config.get("battery_max_soc", 90)),
+        max_charge_a=float(config.get("max_charge_current", 0)),
+        max_discharge_a=float(config.get("max_discharge_current", 0)),
+    )
+    return resolve(slot, hass.data[DOMAIN].get("plan"), dt_utils.now(), battery)
+
+
+def write_plan_sensors(hass: HomeAssistant) -> None:
+    """Update the plan and action sensors."""
+    for sensor in hass.data[DOMAIN].get(PLAN_SENSORS, []):
+        if hasattr(sensor, "resolve"):
+            sensor.resolve()
+        sensor.async_write_ha_state()
+
+
+async def async_request_plan(hass: HomeAssistant, reason: str) -> None:
+    """Recalculate the plan now, or once more after a running calculation."""
+    data = hass.data[DOMAIN]
+    lock = data.setdefault("plan_lock", asyncio.Lock())
+    if lock.locked():
+        data["plan_pending"] = reason
+        return
+    async with lock:
+        while reason:
+            data["plan_pending"] = None
+            _LOGGER.debug("Updating the battery plan: %s", reason)
+            try:
+                await async_update_plan(hass)
+            except Exception:
+                _LOGGER.exception("Failed to update the battery plan")
+            reason = data.get("plan_pending")
+
+
 def _peak_label(tariff, key: str) -> dict:
     index, month = key.split(":")
     charge = tariff.power_charges[int(index)]
@@ -155,7 +259,17 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     )
     plan = await hass.async_add_executor_job(
         functools.partial(
-            optimize, starts, price_list, load, pv, battery, tariff, limit, history
+            optimize,
+            starts,
+            price_list,
+            load,
+            pv,
+            battery,
+            tariff,
+            limit,
+            history,
+            forced=_forced(hass, starts),
+            current_mode=_planned_mode(hass, now),
         )
     )
 
@@ -193,5 +307,4 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         plan.wear_cost,
         plan.power_cost,
     )
-    for sensor in hass.data[DOMAIN].get(PLAN_SENSORS, []):
-        sensor.async_write_ha_state()
+    write_plan_sensors(hass)

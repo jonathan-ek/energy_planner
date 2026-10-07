@@ -15,12 +15,14 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_utils
 
 from homeassistant.helpers.event import (
+    async_track_state_change_event,
     async_track_utc_time_change,
     async_track_time_interval,
 )
 from homeassistant.helpers.start import async_at_started
 
 from .const import (
+    DEFAULT_BATTERY_SOC_SENSOR,
     DOMAIN,
     DATE_TIME_ENTITIES,
     NUMBER_ENTITIES,
@@ -30,8 +32,10 @@ from .const import (
     SLOT_COUNT,
 )
 from .planner import (
+    async_request_plan,
     async_update_forecast,
-    async_update_plan,
+    expected_soc,
+    write_plan_sensors,
     basic_planner,
     dynamic_planner,
     cheapest_hours_planner,
@@ -43,6 +47,26 @@ from .planner import (
 from .store import async_save_to_store, async_load_from_store
 
 _LOGGER = logging.getLogger(__name__)
+
+# Settings that change the battery plan: recalculate it when they change
+PLAN_SETTINGS = (
+    "battery_capacity",
+    "battery_shutdown_soc",
+    "battery_max_soc",
+    "battery_wear_cost",
+    "max_charge_current",
+    "max_discharge_current",
+    "price_peak_efficiency_factor",
+    "network_cost",
+    "network_compensation",
+    "grid_import_limit",
+    "grid_import_limit_start",
+    "grid_import_limit_end",
+)
+# Recalculate the plan when the actual SOC is this many % from the plan
+SOC_DRIFT = 5.0
+# ... but not more often than this
+SOC_DRIFT_INTERVAL = dt.timedelta(minutes=5)
 PLATFORMS = [
     Platform.BUTTON,
     Platform.DATETIME,
@@ -163,6 +187,7 @@ async def async_setup(hass: HomeAssistant, config):
         await add_manual_slots(hass)
         await update_entities(hass)
         await hass.data[DOMAIN]["save"]()
+        await async_request_plan(hass, "manual slot added")
         _LOGGER.info("Received data: %s", call.data)
 
     @callback
@@ -179,6 +204,7 @@ async def async_setup(hass: HomeAssistant, config):
         _LOGGER.info("Received planning data: %s", call.data)
         hass.data[DOMAIN]["manual_slots"] = []
         await hass.data[DOMAIN]["save"]()
+        await async_request_plan(hass, "manual slots cleared")
 
     async def update_forecast_service(call: ServiceCall) -> None:
         """Service to recalculate the forecast."""
@@ -186,7 +212,7 @@ async def async_setup(hass: HomeAssistant, config):
 
     async def update_battery_plan_service(call: ServiceCall) -> None:
         """Service to recalculate the battery plan."""
-        await async_update_plan(hass)
+        await async_request_plan(hass, "service")
 
     # Register our service with Home Assistant.
     hass.services.async_register(DOMAIN, "add_slot", add_slot_service)
@@ -220,6 +246,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     async def options_updated(hass: HomeAssistant, entry: ConfigEntry):
         # Read by get_tariff, no reload needed
         hass.data[DOMAIN]["options"] = dict(entry.options)
+        await async_request_plan(hass, "tariff changed")
 
     entry.async_on_unload(entry.add_update_listener(options_updated))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -236,6 +263,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     async def check_schedule(now: dt.datetime):
         await clear_passed_slots(hass)
+        # The action follows slot 1 and the plan's current quarter
+        write_plan_sensors(hass)
 
     entry.async_on_unload(
         async_track_time_interval(hass, check_schedule, dt.timedelta(minutes=1))
@@ -248,10 +277,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         except Exception:
             _LOGGER.exception("Failed to update the forecast")
             return
-        try:
-            await async_update_plan(hass)
-        except Exception:
-            _LOGGER.exception("Failed to update the battery plan")
+        await async_request_plan(hass, "forecast updated")
 
     # Every hour, after the recorder has compiled the hourly statistics, and once
     # Home Assistant has started so Forecast.Solar is loaded
@@ -259,7 +285,84 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         async_track_utc_time_change(hass, update_forecast, minute=5, second=0)
     )
     entry.async_on_unload(async_at_started(hass, update_forecast))
+
+    async def update_plan(now: dt.datetime):
+        await async_request_plan(hass, "new quarter")
+
+    # Every quarter, just after it starts, with the current SOC
+    entry.async_on_unload(
+        async_track_utc_time_change(hass, update_plan, minute="/15", second=30)
+    )
+    _track_plan_triggers(hass, entry)
     return True
+
+
+def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Recalculate the plan on new prices, settings and SOC drift."""
+    config = hass.data[DOMAIN]["config"]
+
+    async def prices_changed(event: Event[EventStateChangedData]):
+        old, new = event.data["old_state"], event.data["new_state"]
+        if (
+            new is not None
+            and new.attributes.get("tomorrow_valid")
+            and not (old is not None and old.attributes.get("tomorrow_valid"))
+        ):
+            await async_request_plan(hass, "tomorrow's prices")
+
+    nordpool = config.get("nordpool_entity_id")
+    if nordpool:
+        entry.async_on_unload(
+            async_track_state_change_event(hass, nordpool, prices_changed)
+        )
+
+    async def setting_changed(event: Event[EventStateChangedData]):
+        old, new = event.data["old_state"], event.data["new_state"]
+        if old is not None and new is not None and old.state != new.state:
+            await async_request_plan(hass, f"{event.data['entity_id']} changed")
+
+    entry.async_on_unload(
+        async_track_state_change_event(
+            hass,
+            [f"number.{DOMAIN}_{key}" for key in PLAN_SETTINGS],
+            setting_changed,
+        )
+    )
+
+    async def soc_changed(event: Event[EventStateChangedData]):
+        new = event.data["new_state"]
+        try:
+            soc = float(new.state) if new is not None else None
+        except ValueError:
+            return
+        now = dt_utils.now()
+        expected = expected_soc(hass, now)
+        if soc is None or expected is None or abs(soc - expected) < SOC_DRIFT:
+            return
+        plan = hass.data[DOMAIN].get("plan") or {}
+        updated = plan.get("updated")
+        if updated and now - dt.datetime.fromisoformat(updated) < SOC_DRIFT_INTERVAL:
+            return
+        await async_request_plan(hass, f"SOC {soc} %, planned {expected:.0f} %")
+
+    entry.async_on_unload(
+        async_track_state_change_event(
+            hass,
+            config.get("battery_soc_sensor", DEFAULT_BATTERY_SOC_SENSOR),
+            soc_changed,
+        )
+    )
+
+    async def slot_changed(event: Event[EventStateChangedData]):
+        write_plan_sensors(hass)
+
+    entry.async_on_unload(
+        async_track_state_change_event(
+            hass,
+            [f"select.{DOMAIN}_slot_1_state", f"switch.{DOMAIN}_slot_1_active"],
+            slot_changed,
+        )
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):

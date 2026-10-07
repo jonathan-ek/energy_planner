@@ -5,6 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
 
 from .const import DOMAIN, FORECAST_SENSORS, PLAN_SENSORS
+from .planner.battery_plan import current_action
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     _LOGGER.info("Setting up sensor platform")
     sensors = [EnergyPlannerForecastSensor(hass, key) for key in SENSORS]
     hass.data[DOMAIN][FORECAST_SENSORS] = sensors
-    plan_sensors = [EnergyPlannerPlanSensor(hass)]
+    plan_sensors = [EnergyPlannerPlanSensor(hass), EnergyPlannerActionSensor(hass)]
     hass.data[DOMAIN][PLAN_SENSORS] = plan_sensors
     async_add_devices([*sensors, *plan_sensors])
     return True
@@ -131,3 +132,42 @@ class EnergyPlannerPlanSensor(SensorEntity):
         if not plan:
             return None
         return {key: value for key, value in plan.items() if key != "mode"}
+
+
+class EnergyPlannerActionSensor(SensorEntity):
+    """What the battery should do now: slot 1, or the battery plan for `auto`.
+
+    The state is a slot state; the attributes say where it comes from and what the
+    inverter needs (target SOC, current, import target, until). See
+    planner/battery_action.py.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_name = "Battery action"
+    _attr_icon = "mdi:battery-arrow-up-outline"
+
+    def __init__(self, hass):
+        """Initialize the action sensor."""
+        self._hass = hass
+        self.entity_id = f"sensor.{DOMAIN}_battery_action"
+        self._attr_unique_id = f"{DOMAIN}_battery_action"
+        self._action: dict = {}
+
+    def resolve(self) -> None:
+        """Resolve the action now; write_plan_sensors calls it before each write."""
+        self._action = current_action(self._hass)
+
+    async def async_added_to_hass(self) -> None:
+        """Resolve the action when the sensor is added."""
+        self.resolve()
+
+    @property
+    def native_value(self):
+        """Return the slot state to run now."""
+        return self._action.get("state")
+
+    @property
+    def extra_state_attributes(self):
+        """Return the details of the action."""
+        return {key: value for key, value in self._action.items() if key != "state"}

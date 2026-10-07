@@ -119,3 +119,69 @@ async def test_no_battery_state(mock_hass):
     """Test that a missing SOC sensor skips the plan."""
     with patch.dict(STATES, clear=True):
         assert await run(mock_hass) is None
+
+
+async def test_manual_slot_is_planned_around(mock_hass):
+    """Test that a manual sell slot forces the plan's mode in its quarters."""
+    mock_hass.data[DOMAIN]["config"]["planner_state"] = "dynamic"
+    start = dt.datetime(2026, 1, 14, 18, tzinfo=TZ)
+    mock_hass.data[DOMAIN]["manual_slots"] = [
+        {
+            "start": start,
+            "end": start + dt.timedelta(hours=1),
+            "state": "sell",
+            "soc": 20,
+        }
+    ]
+    plan = await run(mock_hass)
+    modes = dict(zip(plan["starts"], plan["modes"], strict=True))
+    hour = [modes[(start + dt.timedelta(minutes=15 * i)).isoformat()] for i in range(4)]
+    assert hour == ["sell"] * 4
+    # A preview with another planner is not forced
+    mock_hass.data[DOMAIN]["config"]["planner_state"] = "off"
+    plan = await run(mock_hass)
+    modes = dict(zip(plan["starts"], plan["modes"], strict=True))
+    hour = [modes[(start + dt.timedelta(minutes=15 * i)).isoformat()] for i in range(4)]
+    assert hour != ["sell"] * 4
+
+
+async def test_running_mode_is_passed_on(mock_hass):
+    """Test that the next calculation knows the mode running now."""
+    await run(mock_hass)
+    first = mock_hass.data[DOMAIN]["plan"]["modes"][0]
+    with patch.object(
+        battery_plan, "optimize", wraps=battery_plan.optimize
+    ) as optimize:
+        await run(mock_hass)
+    assert optimize.call_args.kwargs["current_mode"] == first
+
+
+async def test_requests_during_a_run_are_coalesced(mock_hass):
+    """Test that requests while the plan is calculated give one more run."""
+    calls = []
+
+    async def update(hass):
+        calls.append(1)
+        if len(calls) == 1:
+            await battery_plan.async_request_plan(hass, "second")
+            await battery_plan.async_request_plan(hass, "third")
+
+    with patch.object(battery_plan, "async_update_plan", update):
+        await battery_plan.async_request_plan(mock_hass, "first")
+    assert len(calls) == 2
+
+
+async def test_current_action_follows_an_auto_slot(mock_hass):
+    """Test the action sensor's value for an auto slot."""
+    await run(mock_hass)
+    mock_hass.data[DOMAIN]["values"] = {
+        "slot_1_date_time_start": NOW - dt.timedelta(hours=1),
+        "slot_1_state": "auto",
+        "slot_1_active": True,
+        "slot_1_soc": 50,
+        "slot_2_date_time_start": NOW + dt.timedelta(days=1),
+    }
+    with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
+        result = battery_plan.current_action(mock_hass)
+    assert result["source"] == "plan"
+    assert result["mode"] == mock_hass.data[DOMAIN]["plan"]["modes"][0]

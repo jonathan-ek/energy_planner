@@ -30,7 +30,10 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                     #   Fallback: -
                     # Pause = save battery for later use (C, max, 0 A)
                     #   Fallback: -
+                    # Auto = follow the battery plan, see
+                    #   sensor.energy_planner_battery_action
                     "options": [
+                        "auto",
                         "charge",
                         "discharge",
                         "sell",

@@ -13,12 +13,12 @@ outside the integration by scripts/automations (see `examples/`).
 | `custom_components/energy_planner/planner/` | All planning logic (see below) |
 | `custom_components/energy_planner/button.py` | `button.energy_planner_update_battery_plan`, recalculates the battery plan |
 | `custom_components/energy_planner/{datetime,number,select,switch,time}.py` | Entity platforms; each holds its entity definitions as dicts plus one generic entity class |
-| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`) and `sensor.energy_planner_battery_plan`; they only read `hass.data[DOMAIN]["forecast"]` / `["plan"]` |
+| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`) `sensor.energy_planner_battery_plan` and `sensor.energy_planner_battery_action` (what the inverter should do now, `battery_plan.current_action`); they only read `hass.data` |
 | `custom_components/energy_planner/store.py` | Thin wrapper around HA `Store` (`.storage/energy_planner.<key>`) |
 | `custom_components/energy_planner/config_flow.py` | Setup asks for `nordpool_entity_id`; the options flow chooses the grid tariff (flat, a preset or custom YAML) |
 | `custom_components/energy_planner/services.yaml`, `translations/en.json` | Service descriptions |
 | `tests/planner/` | Tests for the basic planner, the price peak planner, the forecast functions and the forecast glue. The `.md`/`.txt`/`ARCHITECTURE.py` files in `tests/` are documentation |
-| `examples/` | Lovelace cards, `python_script`s and automations that consume the schedule |
+| `examples/` | Lovelace cards, `python_script`s and automations that consume the schedule; `follow_battery_action.py` + `_automation.yml` follow the action sensor and only write changed settings |
 | `energy_planner_extras.yaml`, `add_slot_form.yml`, `Basic_config_card.yml` | HA package + cards for the manual "add slot" form |
 | `local_deploy.sh` | Copies the component into `~/projects/ha_demo/config` and restarts its docker compose |
 
@@ -30,9 +30,10 @@ outside the integration by scripts/automations (see `examples/`).
 | `basic_planner.py` | N cheapest quarters between earliest charge and earliest discharge time → charge; N most expensive after → discharge; rest pause |
 | `cheapest_hours_planner.py` | N cheapest quarters per calendar day → charge; everything else discharge |
 | `price_peak_planner.py` | `find_charge_periods` / `find_discharge_periods` pick the cheapest / most expensive windows (best first), `remove_overlaps` drops conflicts, `match_charge_discharge_periods` pairs them where `is_profitable` says the spread pays off, `build_schedule` turns pairs into slots. All pure and tested; `plan_day` is the HA glue |
-| `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` only updates the forecast, it writes no schedule yet |
+| `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` updates the forecast and the plan and writes one `auto` slot to the plan's end, with manual slots laid over it |
 | `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
-| `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores `hass.data[DOMAIN]["plan"]` (dry run, writes no schedule) |
+| `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `expected_soc` |
+| `battery_action.py` | Pure: `resolve` turns slot 1 and the plan into the action now (slot state, source, SOC, current, import target, until), mode ↔ slot state maps |
 | `tariff.py` | Pure grid tariff model: `Tariff` with `buy_fee` / `sell_fee` (öre/kWh) and `power_cost` (kr), parsed from a dict by `tariff_from_dict`, presets in `TARIFF_PRESETS`, the household's `import_limit`. Format in the module docstring |
 | `forecast.py` | Pure forecast functions, no HA imports: quarter list (DST safe), load forecast per hour, PV integration of the `watts` forecast, PV calibration, weekend reserve |
 | `manual_slots.py` | `add_manual_slots` overlays user-added slots on the generated schedule, shifting slots forward/back |
@@ -63,7 +64,7 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 | Key | Platform | Notes |
 | --- | --- | --- |
 | `slot_{i}_date_time_start` | `datetime` | tz-aware; stored as ISO string, parsed back on load by `parse_stored_data` |
-| `slot_{i}_state` | `select` | `charge`, `discharge`, `sell`, `sell-excess`, `discard-excess`, `pause`, `off` |
+| `slot_{i}_state` | `select` | `auto` (follow the battery plan), `charge`, `discharge`, `sell`, `sell-excess`, `discard-excess`, `pause`, `off` |
 | `slot_{i}_soc` | `number` | target SOC % |
 | `slot_{i}_active` | `switch` | user can disable a slot |
 
@@ -113,7 +114,12 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 - **Forecast:** recalculated at :05 every hour (after the recorder compiles hourly
   statistics), once after HA has started, by the `update_forecast` service and by
   the dynamic planner. Errors are logged and do not stop the timers.
-- **Battery plan:** recalculated right after each timed forecast update.
+- **Battery plan:** recalculated every quarter (:00:30, :15:30, …), after each timed
+  forecast update, and when tomorrow's prices arrive (`tomorrow_valid`), a plan setting
+  (`PLAN_SETTINGS` in `__init__.py`) or the tariff changes, manual slots change, or the
+  SOC is `SOC_DRIFT` (5) % from the plan (at most every 5 min). All go through
+  `async_request_plan`. The action sensor is rewritten every minute and when slot 1
+  changes.
 - **Entities** are passive views: `update()` reads from `hass.data`, setters write
   back and call `save`.
 
@@ -169,8 +175,15 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
 
 ## Battery plan
 
-`battery_optimizer.optimize` (dry run so far: published as
-`sensor.energy_planner_battery_plan`, nothing is written to the slots):
+`battery_optimizer.optimize`, published as `sensor.energy_planner_battery_plan`.
+The plan is not written to the slots, because it changes every quarter. Instead the
+dynamic planner writes one `auto` slot, and `sensor.energy_planner_battery_action`
+resolves what to do now (`battery_action.resolve`): a running slot with a real state
+(manual, or from another planner) wins; an `auto` slot follows the plan (self-use if
+the plan is older than 30 min or ends); otherwise self-use. An inverter script follows
+the action sensor (`examples/follow_battery_action.py`). With the dynamic planner, manual
+slots are also forced into the plan (`forced`), so it plans around them; with the other
+planners the plan is a preview and ignores them.
 
 - Horizon: the current quarter until the last quarter with both a price and a load
   forecast. Load = forecast profile + planned + reserve; PV = forecast.
@@ -181,8 +194,13 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   while prices fall during the day and the battery will fill later anyway; a full
   battery exports in `self_use`, which wins ties), `charge` (from PV and grid up to
   the import target), `sell` (full discharge to the grid).
-  Slot states for later: `self_use` → `discharge`, `hold` → `pause`, `sell_excess` →
-  `sell-excess`, `charge` → `charge`, `sell` → `sell`.
+  Slot states (`battery_action.SLOT_STATES`): `self_use` → `discharge`, `hold` →
+  `pause`, `sell_excess` → `sell-excess`, `charge` → `charge`, `sell` → `sell`.
+- Mode changes cost `SWITCH_COST` (0.05 SEK): the dynamic program's state is the SOC
+  and the previous mode, and the first quarter's previous mode is the one the last
+  plan has for now, so a recalculation only changes the running mode when that pays.
+  Modes that do the same in a quarter (`sell` with an empty battery and
+  `sell_excess`) are named after the simplest.
 - Costs: import at `spot * 1.25 + tariff.buy_fee`, export at `spot +
   tariff.sell_fee`, import above `grid_import_limit` at `LIMIT_PENALTY` (20 SEK/kWh, so
   only when unavoidable), battery wear `battery_wear_cost` per kWh taken out of the
@@ -202,8 +220,8 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
 - Battery: capacity, shutdown/max SOC, charge/discharge current × the live voltage
   (`battery_voltage_sensor`), SOC (`battery_soc_sensor`), round-trip efficiency
   `price_peak_efficiency_factor`. About 1 s per day of quarters, run in the executor.
-- Not done yet: writing the plan to the slots, and making the inverter follow the
-  import target while charging (candidates: Solis peak shaving
+- Not done yet: making the inverter follow the import target while charging and in
+  `hold` (candidates: Solis peak shaving
   `number.solis_s6_eh1p_peak_max_usable_grid_power` with force charge allowed under
   peak shaving, or adjusting the charge current like the "Peak +/-" automations).
 
@@ -343,6 +361,4 @@ make format         # ruff format
 - The basic planner only plans the current day's window when tomorrow's prices
   exist or the window started yesterday; with `earliest_charge_time` at 00:00 it
   plans nothing for today until tomorrow's prices are published.
-- `dynamic_planner.py` is work in progress: it produces the forecast but no
-  schedule yet.
 - Card labels and some example entity names are in Swedish.

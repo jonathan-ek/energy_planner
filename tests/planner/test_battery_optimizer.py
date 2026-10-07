@@ -197,7 +197,7 @@ def lossy_battery(soc_kwh):
 
 
 def test_pv_surplus_is_exported_while_prices_fall():
-    """Test that a nearly full battery exports the surplus now and stores it later."""
+    """Test that a nearly full battery exports the surplus while the price is high."""
     prices = [1200.0 if 10 <= s.hour < 12 else 1000.0 for s in STARTS]
     plan = opt.optimize(
         STARTS, prices, [0.0] * 96, PV_MIDDAY, lossy_battery(18.0), NO_FEES
@@ -206,7 +206,6 @@ def test_pv_surplus_is_exported_while_prices_fall():
     # Too small a difference to cover the losses of emptying the battery
     assert "sell" not in plan.modes
     assert plan.soc[12 * 4 - 1] == pytest.approx(18.0)
-    assert plan.soc[14 * 4 - 1] == pytest.approx(20.0)
 
 
 def test_full_battery_exports_in_self_use():
@@ -258,6 +257,55 @@ def test_no_hoarding_before_a_cheap_night():
     assert plan.soc[22 * 4 - 1] == pytest.approx(2.0)
     # Nor bought at the end just to be kept: it can be bought when it is needed
     assert "charge" not in plan.modes
+
+
+def test_no_flip_flop_for_small_differences():
+    """Test that modes worth a few öre more are not switched to every quarter."""
+    # Exporting the surplus is worth 1 öre/kWh more every other quarter
+    prices = [1010.0 if i % 2 else 1000.0 for i in range(96)]
+    plan = opt.optimize(
+        STARTS, prices, [0.0] * 96, PV_MIDDAY, lossy_battery(18.0), NO_FEES
+    )
+    changes = sum(a != b for a, b in zip(plan.modes, plan.modes[1:], strict=False))
+    assert changes <= 2
+
+
+def test_current_mode_is_kept_when_nearly_as_good():
+    """Test that a recalculated plan keeps the running mode unless switching pays."""
+    pv = [1.0 if 10 <= s.hour < 14 else 0.0 for s in STARTS]
+    starts, prices = STARTS[40:], [1000.0] * 56
+    free = opt.optimize(
+        starts, prices, [0.0] * 56, pv[40:], lossy_battery(19.9), NO_FEES
+    )
+    kept = opt.optimize(
+        starts,
+        prices,
+        [0.0] * 56,
+        pv[40:],
+        lossy_battery(19.9),
+        NO_FEES,
+        current_mode="sell_excess",
+    )
+    assert free.modes[0] == "self_use"
+    assert kept.modes[0] == "sell_excess"
+
+
+def test_forced_modes_are_used():
+    """Test that a manual slot's mode is planned around."""
+    forced = [None] * 96
+    forced[18 * 4 : 19 * 4] = ["sell"] * 4
+    plan = opt.optimize(
+        STARTS,
+        [500.0] * 96,
+        [0.0] * 96,
+        NO_PV,
+        battery(soc_kwh=20.0),
+        NO_FEES,
+        forced=forced,
+    )
+    assert hours(plan, 18, 19) == {"sell"}
+    # Not worth it at a flat price, but the slot says so: 10 kW for an hour
+    assert plan.soc[18 * 4 - 1] - plan.soc[19 * 4 - 1] == pytest.approx(10.0)
 
 
 def test_month_share():

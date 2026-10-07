@@ -48,6 +48,9 @@ TARGET_STEP_KW = 0.5
 # SEK per kWh above the household's import limit: higher than any price, so it is
 # only broken when the battery cannot cover the load
 LIMIT_PENALTY = 20.0
+# SEK per mode change: a plan recalculated every quarter would otherwise flip
+# between modes that differ by a few öre, and each change is written to the inverter
+SWITCH_COST = 0.05
 # Quarters at the end of the horizon whose cheapest price values the energy left
 END_WINDOW = 96
 
@@ -106,6 +109,8 @@ class _Inputs:
     limit: np.ndarray  # kWh per quarter, inf if no limit
     battery: Battery
     end_price: float  # SEK per kWh left in the battery at the end, wear deducted
+    forced: Sequence[str | None]  # a mode the quarter must use, e.g. a manual slot
+    current_mode: str | None  # the mode running now, changing it costs SWITCH_COST
 
 
 def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh):
@@ -155,47 +160,78 @@ def _wear(battery: Battery, soc, next_soc):
     return np.maximum(soc - next_soc, 0.0) * battery.wear_cost
 
 
+def _allowed(inputs: _Inputs, index: int) -> list[int]:
+    """Return the indexes in MODES the quarter may use (one if it is forced)."""
+    forced = inputs.forced[index]
+    return [MODES.index(forced)] if forced else list(range(len(MODES)))
+
+
 def _optimize(inputs: _Inputs, targets: list[float], caps: list[list[tuple]]):
-    """Run the dynamic program for fixed import targets; return per quarter results."""
+    """Run the dynamic program for fixed import targets; return per quarter results.
+
+    The state is the state of charge and the previous quarter's mode (the last row:
+    none), so that changing mode can cost `SWITCH_COST`.
+    """
     battery = inputs.battery
     grid = np.linspace(battery.min_kwh, battery.max_kwh, SOC_STEPS)
     count = len(inputs.starts)
-    value = -(grid - battery.min_kwh) * inputs.end_price
+    rows = len(MODES) + 1
+    switch = np.full((rows, len(MODES)), SWITCH_COST)
+    for mode in range(len(MODES)):
+        switch[mode, mode] = 0.0
+    switch[-1, :] = 0.0
+    value = np.tile(-(grid - battery.min_kwh) * inputs.end_price, (rows, 1))
     values = [value]
     for index in range(count - 1, -1, -1):
-        best = np.full(SOC_STEPS, np.inf)
-        for mode in MODES:
-            soc, imp, exp = _step(inputs, index, mode, grid, targets[index])
-            total = (
+        totals = np.full((len(MODES), SOC_STEPS), np.inf)
+        for mode in _allowed(inputs, index):
+            soc, imp, exp = _step(inputs, index, MODES[mode], grid, targets[index])
+            totals[mode] = (
                 _quarter_cost(inputs, index, imp, exp, caps[index])
                 + _wear(battery, grid, soc)
-                + np.interp(soc, grid, values[-1])
+                + np.interp(soc, grid, values[-1][mode])
             )
-            best = np.minimum(best, total)
-        values.append(best)
+        # Best over the modes for each previous mode
+        values.append(np.min(totals[None, :, :] + switch[:, :, None], axis=1))
     values.reverse()
 
-    # Forward pass from the actual state of charge
+    # Forward pass from the actual state of charge and the mode running now
     soc = np.array([min(max(battery.soc_kwh, battery.min_kwh), battery.max_kwh)])
+    previous = MODES.index(inputs.current_mode) if inputs.current_mode else rows - 1
     modes, socs, imports, exports = [], [], [], []
+    switches = 0
     for index in range(count):
         candidates = []
-        for mode in MODES:
-            next_soc, imp, exp = _step(inputs, index, mode, soc, targets[index])
+        for mode in _allowed(inputs, index):
+            next_soc, imp, exp = _step(inputs, index, MODES[mode], soc, targets[index])
             total = float(
                 _quarter_cost(inputs, index, imp, exp, caps[index])[0]
                 + _wear(battery, soc, next_soc)[0]
-                + np.interp(next_soc, grid, values[index + 1])[0]
+                + np.interp(next_soc, grid, values[index + 1][mode])[0]
+                + switch[previous, mode]
             )
             candidates.append((total, mode, next_soc, imp, exp))
         # Small tie margin: the first (simplest) mode wins when costs are equal
         lowest = min(c[0] for c in candidates)
         _, mode, soc, imp, exp = next(c for c in candidates if c[0] <= lowest + 1e-9)
-        modes.append(mode)
+        # Modes that do the same this quarter (e.g. `sell` with an empty battery and
+        # `sell_excess`) are named after the simplest one, so the inverter does not
+        # run a mode the plan does not need
+        mode = next(
+            c[1]
+            for c in candidates
+            if all(
+                abs(float(x[0]) - float(y[0])) < 1e-9
+                for x, y in ((c[2], soc), (c[3], imp), (c[4], exp))
+            )
+        )
+        switches += switch[previous, mode] > 0
+        previous = mode
+        modes.append(MODES[mode])
         socs.append(float(soc[0]))
         imports.append(float(imp[0]))
         exports.append(float(exp[0]))
-    return modes, socs, imports, exports
+    return modes, socs, imports, exports, switches
 
 
 def _hourly(starts: Sequence[dt.datetime], kwh: Sequence[float]):
@@ -233,12 +269,16 @@ def optimize(
     tariff: Tariff,
     limit: Limit | None = None,
     history: Mapping[dt.datetime, float] | None = None,
+    forced: Sequence[str | None] | None = None,
+    current_mode: str | None = None,
 ) -> Plan:
     """Return the cheapest plan.
 
     `starts` are local quarter starts; `prices` spot SEK/MWh excl. VAT; `load` and
     `pv` kWh per quarter; `history` the hourly mean grid import (kW, keyed by local
-    hour start) so far this month, which sets the peaks already paid for.
+    hour start) so far this month, which sets the peaks already paid for; `forced`
+    a mode per quarter that must be used (None: free); `current_mode` the mode the
+    battery runs now, so a recalculated plan only changes it when it pays.
     """
     history = dict(history or {})
     limit = limit or Limit()
@@ -274,7 +314,17 @@ def optimize(
         if len(buy)
         else 0.0
     )
-    inputs = _Inputs(starts, net, buy, sell, limit_kwh, battery, end_price)
+    inputs = _Inputs(
+        starts,
+        net,
+        buy,
+        sell,
+        limit_kwh,
+        battery,
+        end_price,
+        tuple(forced) if forced else (None,) * len(starts),
+        current_mode,
+    )
 
     # The power charges in the horizon, per month, and the peak already reached
     charges: dict[str, tuple[int, PowerCharge, float]] = {}
@@ -316,7 +366,7 @@ def optimize(
                     for k in keys
                 ]
             )
-        modes, socs, imports, exports = _optimize(inputs, targets, caps)
+        modes, socs, imports, exports, switches = _optimize(inputs, targets, caps)
         energy = float(np.dot(imports, buy) - np.dot(exports, sell))
         first = min(max(battery.soc_kwh, battery.min_kwh), battery.max_kwh)
         wear = sum(
@@ -349,7 +399,12 @@ def optimize(
             end_value,
             excess,
             peaks,
-            energy + wear + amortized - end_value + excess * LIMIT_PENALTY,
+            energy
+            + wear
+            + amortized
+            - end_value
+            + excess * LIMIT_PENALTY
+            + switches * SWITCH_COST,
         )
 
     # Coordinate search over the import targets, starting at the peaks already paid

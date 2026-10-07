@@ -6,7 +6,7 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN
-from .planner import async_update_plan
+from .planner import async_request_plan
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,4 +32,4 @@ class EnergyPlannerUpdatePlanButton(ButtonEntity):
 
     async def async_press(self) -> None:
         """Recalculate the battery plan."""
-        await async_update_plan(self._hass)
+        await async_request_plan(self._hass, "button")
