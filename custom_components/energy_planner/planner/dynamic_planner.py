@@ -101,7 +101,10 @@ def _solar_planes(
 
 
 async def _fetch_open_meteo(session, latitude, longitude, tilt, azimuth):
-    """Fetch tilted irradiance and temperature for one plane: past 14 days + 2 days."""
+    """Fetch tilted irradiance and temperature for one plane: past 15 days + 2 days.
+
+    15 days, so yesterday's forecast can be calibrated on the 14 days before it.
+    """
     variables = [
         "global_tilted_irradiance",
         "global_tilted_irradiance_previous_day1",
@@ -115,7 +118,7 @@ async def _fetch_open_meteo(session, latitude, longitude, tilt, azimuth):
         "azimuth": forecast.open_meteo_azimuth(azimuth),
         "hourly": ",".join(variables),
         "models": ",".join(forecast.OPEN_METEO_MODELS),
-        "past_days": CALIBRATION_DAYS,
+        "past_days": CALIBRATION_DAYS + 1,
         "forecast_days": 2,
         "timezone": "UTC",
     }
@@ -201,6 +204,28 @@ async def _planned_loads(hass: HomeAssistant, calendar_id, start, end):
     return planned
 
 
+def _day_total(hourly, start, end):
+    """Sum hourly kWh from start to end, None if more than an hour is missing."""
+    start_utc, end_utc = start.astimezone(dt.UTC), end.astimezone(dt.UTC)
+    values = [kw for hour, kw in hourly.items() if start_utc <= hour < end_utc]
+    if len(values) < (end_utc - start_utc) / dt.timedelta(hours=1) - 1:
+        return None
+    return round(sum(values), 2)
+
+
+def _list_total(values):
+    """Sum a per-quarter list, None if it has no values."""
+    if values is None or all(v is None for v in values):
+        return None
+    return round(sum(v for v in values if v is not None), 2)
+
+
+def _rounded(values):
+    return (
+        None if values is None else [None if v is None else round(v, 3) for v in values]
+    )
+
+
 def _daily_totals(quarters, values, since):
     """Sum per local date, counting only quarters from since."""
     totals = {}
@@ -224,9 +249,14 @@ async def async_update_forecast(hass: HomeAssistant):
 
     now = dt_utils.now()
     today = now.date()
+    yesterday = today - dt.timedelta(days=1)
     end = dt_utils.start_of_local_day(today + dt.timedelta(days=2))
     quarters = forecast.quarter_starts(dt_utils.start_of_local_day(), end)
     current = forecast.quarter_starts(now, now + forecast.QUARTER)[0]
+    # Yesterday's forecast is rebuilt as it was: the load profile only uses earlier
+    # days and the PV uses the forecast Open-Meteo made the day before
+    yesterday_start = dt_utils.start_of_local_day(yesterday)
+    yesterday_quarters = forecast.quarter_starts(yesterday_start, quarters[0])
 
     sources = _forecast_solar_sources(hass)
     forecast_ids = [entity for _, entity in sources if entity]
@@ -239,32 +269,41 @@ async def async_update_forecast(hass: HomeAssistant):
 
     # House load without EV charging, which is planned separately
     ev = means.get(ev_id, {})
+    house = {
+        hour: max(kw - max(ev.get(hour, 0.0), 0.0), 0.0)
+        for hour, kw in means.get(load_id, {}).items()
+    }
     history = {}
-    for hour, kw in means.get(load_id, {}).items():
+    for hour, kw in house.items():
         local = dt_utils.as_local(hour)
-        history[(local.date(), local.hour)] = max(kw - max(ev.get(hour, 0.0), 0.0), 0.0)
+        history[(local.date(), local.hour)] = kw
     # One-off large loads are added back from the calendar or covered by the reserve
     history = forecast.cap_large_loads(history)
     load = forecast.load_quarters(history, quarters, today)
+    yesterday_load = forecast.load_quarters(history, yesterday_quarters, yesterday)
     reserve = forecast.reserve_quarters(
         quarters,
         float(config.get("forecast_weekend_reserve", 4)),
         int(config.get("forecast_reserve_start", 18)),
         int(config.get("forecast_reserve_end", 22)),
     )
-    planned_loads = await _planned_loads(hass, calendar_id, quarters[0], end)
-    planned = forecast.planned_quarters(
-        [(start, stop, kwh) for start, stop, kwh, _ in planned_loads], quarters
-    )
+    planned_loads = await _planned_loads(hass, calendar_id, yesterday_start, end)
+    planned_energy = [(start, stop, kwh) for start, stop, kwh, _ in planned_loads]
+    planned = forecast.planned_quarters(planned_energy, quarters)
+    yesterday_planned = forecast.planned_quarters(planned_energy, yesterday_quarters)
+    yesterday_expected = [
+        None if base is None else base + extra
+        for base, extra in zip(yesterday_load, yesterday_planned, strict=True)
+    ]
 
     # PV: Open-Meteo, or Forecast.Solar if that fails. Both are scaled by the
     # actual / forecast ratio of the last two weeks
     since = now - dt.timedelta(days=CALIBRATION_DAYS)
-    actual = {
-        hour: kw
-        for hour, kw in means.get(pv_id, {}).items()
-        if hour >= since and 0 <= kw <= PV_MAX_KW
+    pv_actual = {
+        hour: kw for hour, kw in means.get(pv_id, {}).items() if 0 <= kw <= PV_MAX_KW
     }
+    actual = {hour: kw for hour, kw in pv_actual.items() if hour >= since}
+    yesterday_pv = None
     pv = None
     calibration = None
     raw = None
@@ -282,6 +321,21 @@ async def async_update_forecast(hass: HomeAssistant):
             )
             raw = forecast.pv_quarters(forecast.hourly_power_to_watts(latest), quarters)
             pv_source = "open-meteo"
+            # Yesterday: the day-before forecast, calibrated on the 14 days before it
+            window = (
+                yesterday_start - dt.timedelta(days=CALIBRATION_DAYS),
+                yesterday_start,
+            )
+            yesterday_calibration = forecast.pv_calibration(
+                {h: kw for h, kw in pv_actual.items() if window[0] <= h < window[1]},
+                {h: kw for h, kw in previous.items() if window[0] <= h < window[1]},
+            )
+            yesterday_pv = [
+                value * yesterday_calibration
+                for value in forecast.pv_quarters(
+                    forecast.hourly_power_to_watts(previous), yesterday_quarters
+                )
+            ]
     if raw is None and sources:
         predicted = {}
         for entity in forecast_ids:
@@ -324,6 +378,7 @@ async def async_update_forecast(hass: HomeAssistant):
                 "kwh": kwh,
             }
             for start, stop, kwh, summary in planned_loads
+            if stop > quarters[0]
         ],
         "load_today_remaining": total(today),
         "load_tomorrow": total(tomorrow),
@@ -340,6 +395,13 @@ async def async_update_forecast(hass: HomeAssistant):
         else None,
         "pv_calibration": None if calibration is None else round(calibration, 3),
         "pv_source": pv_source,
+        "yesterday_starts": [q.isoformat() for q in yesterday_quarters],
+        "yesterday_load": _rounded(yesterday_expected),
+        "yesterday_pv": _rounded(yesterday_pv),
+        "yesterday_load_kwh": _list_total(yesterday_expected),
+        "yesterday_load_actual_kwh": _day_total(house, yesterday_start, quarters[0]),
+        "yesterday_pv_kwh": _list_total(yesterday_pv),
+        "yesterday_pv_actual_kwh": _day_total(pv_actual, yesterday_start, quarters[0]),
     }
     _LOGGER.info(
         "Forecast tomorrow: load %s kWh, PV %s kWh (%s, calibration %s)",

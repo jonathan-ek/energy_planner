@@ -146,6 +146,13 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   `planned_tomorrow` split it. The sensors expose the lists as attributes, which are
   kept out of the recorder. The Energi dashboard has a "Prognos" view
   (ApexCharts) that draws them.
+- **Yesterday's forecast** is rebuilt on every update instead of stored: the load
+  profile only uses earlier days and the calendar still has yesterday's events, and the
+  PV forecast is Open-Meteo's day-before run (`previous`, hence `past_days` 15)
+  calibrated on the 14 days before yesterday (empty with the Forecast.Solar fallback).
+  Output: `yesterday_starts`, `yesterday_load` (profile + planned), `yesterday_pv` and
+  the totals `yesterday_{load,pv}_kwh` / `yesterday_{load,pv}_actual_kwh` (actual load
+  without EV). The totals are recorded, so forecast accuracy builds up in history.
 
 ## Household and tariff
 

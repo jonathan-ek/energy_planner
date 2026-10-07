@@ -13,9 +13,13 @@ SENSORS = {
     "load_forecast": (
         "Load forecast tomorrow",
         "load_tomorrow",
-        ("load", "planned", "reserve"),
+        ("load", "planned", "reserve", "yesterday_starts", "yesterday_load"),
     ),
-    "pv_forecast": ("PV forecast tomorrow", "pv_tomorrow", ("pv",)),
+    "pv_forecast": (
+        "PV forecast tomorrow",
+        "pv_tomorrow",
+        ("pv", "yesterday_starts", "yesterday_pv"),
+    ),
 }
 EXTRA_ATTRIBUTES = {
     "load_forecast": (
@@ -23,12 +27,16 @@ EXTRA_ATTRIBUTES = {
         "base_tomorrow",
         "planned_tomorrow",
         "planned_events",
+        "yesterday_load_kwh",
+        "yesterday_load_actual_kwh",
     ),
     "pv_forecast": (
         "pv_today_remaining",
         "pv_tomorrow_uncalibrated",
         "pv_calibration",
         "pv_source",
+        "yesterday_pv_kwh",
+        "yesterday_pv_actual_kwh",
     ),
 }
 
@@ -51,7 +59,17 @@ class EnergyPlannerForecastSensor(SensorEntity):
     _attr_should_poll = False
     # The per-quarter lists are large and change hourly, keep them out of the database
     _unrecorded_attributes = frozenset(
-        {"starts", "load", "planned", "reserve", "pv", "planned_events"}
+        {
+            "starts",
+            "load",
+            "planned",
+            "reserve",
+            "pv",
+            "planned_events",
+            "yesterday_starts",
+            "yesterday_load",
+            "yesterday_pv",
+        }
     )
 
     def __init__(self, hass, key):

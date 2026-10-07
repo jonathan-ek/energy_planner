@@ -45,8 +45,10 @@ def statistics():
     means[LOAD][session] = 8.0
     means[EV][session] = 7.0
     for hour in hours(14):
-        if 6 <= hour.astimezone(TZ).hour < 18:
-            means[PV][hour] = 3.0
+        daylight = 6 <= hour.astimezone(TZ).hour < 18
+        # Like the real statistics, PV has values at night too (zero)
+        means[PV][hour] = 3.0 if daylight else 0.0
+        if daylight:
             means[FORECAST_NOW][hour] = 2.0
     means[PV][hour] = 900.0  # Modbus glitch, ignored
     return means
@@ -178,10 +180,9 @@ def open_meteo_forecast():
         (tomorrow + dt.timedelta(hours=h)).astimezone(dt.UTC): kw
         for h, kw in zip(range(10, 14), [0, 4, 4, 0], strict=True)
     }
-    previous = {}
-    for hour in hours(14):
-        if 6 <= hour.astimezone(TZ).hour < 18:
-            previous[hour] = 2.0
+    previous = {
+        hour: 2.0 if 6 <= hour.astimezone(TZ).hour < 18 else 0.0 for hour in hours(15)
+    }
     return latest, previous
 
 
@@ -206,6 +207,38 @@ async def test_pv_from_open_meteo(mock_hass):
     assert result["pv_calibration"] == pytest.approx(1.5)
     assert result["pv_tomorrow_uncalibrated"] == pytest.approx(8.0)
     assert result["pv_tomorrow"] == pytest.approx(12.0)
+    # Yesterday: 12 h at 2 kW day-before forecast, calibrated by 3/2; actual 12 h at 3
+    assert len(result["yesterday_starts"]) == 96
+    assert result["yesterday_pv_kwh"] == pytest.approx(36.0)
+    assert result["yesterday_pv_actual_kwh"] == pytest.approx(36.0)
+    # Flat 1 kWh per hour; the EV session yesterday is left out of the actual too
+    assert result["yesterday_load_kwh"] == pytest.approx(24.0)
+    assert result["yesterday_load_actual_kwh"] == pytest.approx(24.0)
+
+
+async def test_yesterday_includes_planned_loads(mock_hass):
+    """Test that yesterday's expected load includes yesterday's calendar events."""
+    yesterday = NOW.date() - dt.timedelta(days=1)
+    sauna = (
+        dt.datetime.combine(yesterday, dt.time(19), TZ),
+        dt.datetime.combine(yesterday, dt.time(21), TZ),
+        "Bastu",
+        "",
+    )
+    with (
+        patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
+        patch.object(dynamic_planner, "_forecast_solar_sources", return_value=[]),
+        patch.object(dynamic_planner, "_hourly_means", return_value=statistics()),
+        patch.object(dynamic_planner, "_calendar_events", return_value=[sauna]),
+        patch.object(dynamic_planner, "_solar_planes", return_value=(None, [])),
+    ):
+        await dynamic_planner.async_update_forecast(mock_hass)
+    result = mock_hass.data[DOMAIN]["forecast"]
+    assert result["yesterday_load_kwh"] == pytest.approx(29.0)
+    assert result["yesterday_pv"] is None
+    # Past events are not listed as upcoming planned loads
+    assert result["planned_events"] == []
+    assert result["planned_tomorrow"] == 0
 
 
 async def test_pv_falls_back_to_forecast_solar(mock_hass):
@@ -277,7 +310,7 @@ async def test_fetch_open_meteo_request():
     assert params["tilt"] == 27
     assert params["models"] == "metno_seamless,ecmwf_ifs025,icon_seamless"
     assert "global_tilted_irradiance_previous_day1" in params["hourly"]
-    assert params["past_days"] == dynamic_planner.CALIBRATION_DAYS
+    assert params["past_days"] == dynamic_planner.CALIBRATION_DAYS + 1
 
 
 async def test_calendar_events_parsing(mock_hass):
