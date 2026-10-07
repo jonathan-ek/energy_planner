@@ -5,6 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfElectricCurrent,
     UnitOfEnergy,
+    UnitOfPower,
     PERCENTAGE,
     UnitOfTime,
 )
@@ -264,6 +265,67 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 "unit_of_measurement": "öre/kwh",
                 "device_class": SensorDeviceClass.MONETARY,
                 "state_class": SensorStateClass.TOTAL,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                # Battery wear per kWh taken out, so the plan only cycles the
+                # battery when the price difference pays for it
+                "id": "battery_wear_cost",
+                "name": "Battery wear cost",
+                "default": 20,
+                "min_val": 0,
+                "max_val": 200,
+                "step": 1,
+                "unit_of_measurement": "öre/kwh",
+                "device_class": SensorDeviceClass.MONETARY,
+                "state_class": SensorStateClass.TOTAL,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                # Highest hourly mean grid import the planner may cause, 0 = no limit
+                "id": "grid_import_limit",
+                "name": "Grid import limit",
+                "default": 0,
+                "min_val": 0,
+                "max_val": 50,
+                "step": 0.1,
+                "unit_of_measurement": UnitOfPower.KILO_WATT,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                "id": "grid_import_limit_start",
+                "name": "Grid import limit from",
+                "default": 6,
+                "min_val": 0,
+                "max_val": 23,
+                "step": 1,
+                "unit_of_measurement": UnitOfTime.HOURS,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                "id": "grid_import_limit_end",
+                "name": "Grid import limit until",
+                "default": 23,
+                "min_val": 0,
+                "max_val": 24,
+                "step": 1,
+                "unit_of_measurement": UnitOfTime.HOURS,
                 "enabled": True,
                 "data_store": "config",
             },

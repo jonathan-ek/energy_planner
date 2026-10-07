@@ -50,3 +50,7 @@ clear_manual_slots:
 update_forecast:
   name: Update forecast
   description: Recalculate the load and PV forecast per quarter for today and tomorrow
+
+update_battery_plan:
+  name: Update battery plan
+  description: Recalculate the battery plan from the current forecast, prices and battery state

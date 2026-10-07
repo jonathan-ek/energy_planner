@@ -4,7 +4,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
 
-from .const import DOMAIN, FORECAST_SENSORS
+from .const import DOMAIN, FORECAST_SENSORS, PLAN_SENSORS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +46,9 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     _LOGGER.info("Setting up sensor platform")
     sensors = [EnergyPlannerForecastSensor(hass, key) for key in SENSORS]
     hass.data[DOMAIN][FORECAST_SENSORS] = sensors
-    async_add_devices(sensors)
+    plan_sensors = [EnergyPlannerPlanSensor(hass)]
+    hass.data[DOMAIN][PLAN_SENSORS] = plan_sensors
+    async_add_devices([*sensors, *plan_sensors])
     return True
 
 
@@ -99,3 +101,33 @@ class EnergyPlannerForecastSensor(SensorEntity):
         for key in (*self._series, *EXTRA_ATTRIBUTES[self._key]):
             attributes[key] = forecast.get(key)
         return attributes
+
+
+class EnergyPlannerPlanSensor(SensorEntity):
+    """The battery plan (dry run): the mode now, the plan per quarter in attributes."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_name = "Battery plan"
+    _unrecorded_attributes = frozenset(
+        {"starts", "modes", "soc", "grid_import", "grid_export", "targets"}
+    )
+
+    def __init__(self, hass):
+        """Initialize the plan sensor."""
+        self._hass = hass
+        self.entity_id = f"sensor.{DOMAIN}_battery_plan"
+        self._attr_unique_id = f"{DOMAIN}_battery_plan"
+
+    @property
+    def native_value(self):
+        """Return the planned mode for the current quarter."""
+        return self._hass.data[DOMAIN].get("plan", {}).get("mode")
+
+    @property
+    def extra_state_attributes(self):
+        """Return the plan."""
+        plan = self._hass.data[DOMAIN].get("plan")
+        if not plan:
+            return None
+        return {key: value for key, value in plan.items() if key != "mode"}

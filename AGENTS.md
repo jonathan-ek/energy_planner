@@ -11,10 +11,11 @@ outside the integration by scripts/automations (see `examples/`).
 | --- | --- |
 | `custom_components/energy_planner/__init__.py` | Setup, `hass.data` structure, services (`async_setup`), timers (`async_setup_entry`), planner dispatch (`run_planner`) |
 | `custom_components/energy_planner/planner/` | All planning logic (see below) |
+| `custom_components/energy_planner/button.py` | `button.energy_planner_update_battery_plan`, recalculates the battery plan |
 | `custom_components/energy_planner/{datetime,number,select,switch,time}.py` | Entity platforms; each holds its entity definitions as dicts plus one generic entity class |
-| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`); they only read `hass.data[DOMAIN]["forecast"]` |
+| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`) and `sensor.energy_planner_battery_plan`; they only read `hass.data[DOMAIN]["forecast"]` / `["plan"]` |
 | `custom_components/energy_planner/store.py` | Thin wrapper around HA `Store` (`.storage/energy_planner.<key>`) |
-| `custom_components/energy_planner/config_flow.py` | Single step: asks for `nordpool_entity_id` |
+| `custom_components/energy_planner/config_flow.py` | Setup asks for `nordpool_entity_id`; the options flow chooses the grid tariff (flat, a preset or custom YAML) |
 | `custom_components/energy_planner/services.yaml`, `translations/en.json` | Service descriptions |
 | `tests/planner/` | Tests for the basic planner, the price peak planner, the forecast functions and the forecast glue. The `.md`/`.txt`/`ARCHITECTURE.py` files in `tests/` are documentation |
 | `examples/` | Lovelace cards, `python_script`s and automations that consume the schedule |
@@ -30,6 +31,9 @@ outside the integration by scripts/automations (see `examples/`).
 | `cheapest_hours_planner.py` | N cheapest quarters per calendar day → charge; everything else discharge |
 | `price_peak_planner.py` | `find_charge_periods` / `find_discharge_periods` pick the cheapest / most expensive windows (best first), `remove_overlaps` drops conflicts, `match_charge_discharge_periods` pairs them where `is_profitable` says the spread pays off, `build_schedule` turns pairs into slots. All pure and tested; `plan_day` is the HA glue |
 | `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` only updates the forecast, it writes no schedule yet |
+| `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
+| `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores `hass.data[DOMAIN]["plan"]` (dry run, writes no schedule) |
+| `tariff.py` | Pure grid tariff model: `Tariff` with `buy_fee` / `sell_fee` (öre/kWh) and `power_cost` (kr), parsed from a dict by `tariff_from_dict`, presets in `TARIFF_PRESETS`, the household's `import_limit`. Format in the module docstring |
 | `forecast.py` | Pure forecast functions, no HA imports: quarter list (DST safe), load forecast per hour, PV integration of the `watts` forecast, PV calibration, weekend reserve |
 | `manual_slots.py` | `add_manual_slots` overlays user-added slots on the generated schedule, shifting slots forward/back |
 | `nordpool_utils.py` | `fetch_nordpool_data` (via the `nordpool.hourly` service, cached per date) and the area → timezone map `tzs` |
@@ -46,6 +50,9 @@ Everything lives in `hass.data["energy_planner"]`:
 - `number_entities`, `select_entities`, … — lists of entity objects per platform
   (keys in `const.py`), used by `update_entities`.
 - `save` — coroutine that persists the three stores.
+- `options` — a copy of the config entry options (`tariff_preset`, `tariff`), kept
+  current by an update listener. Read the tariff with `get_tariff(hass)` (`utils.py`),
+  which falls back to a flat tariff from `network_cost` / `network_compensation`.
 - `tmp` — scratch space during a planner run.
 
 ### Slots
@@ -81,10 +88,14 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   bought energy: transfer fee + energy tax, ~63 here), `network_compensation` (öre/kWh
   received when selling, ~5 here),
   `forecast_weekend_reserve` (kWh, default 4), `forecast_reserve_start` /
-  `forecast_reserve_end` (h, default 18 / 22)
+  `forecast_reserve_end` (h, default 18 / 22), `grid_import_limit` (kW hourly mean the
+  planner may import, 0 = off), `grid_import_limit_start` / `grid_import_limit_end`
+  (h, default 6 / 23), `battery_wear_cost` (öre per kWh taken out of the battery,
+  default 20)
 - Forecast inputs (config store only, defaults in `const.py`): `forecast_load_sensor`,
   `forecast_pv_sensor`, `forecast_ev_sensor`, `forecast_calendar`
-  (`calendar.energiplan`)
+  (`calendar.energiplan`); battery plan inputs `battery_soc_sensor`,
+  `battery_voltage_sensor`, `grid_import_sensor`
 
 ## Control flow
 
@@ -97,10 +108,12 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   for price peak) → `add_manual_slots` → `restore_disable_state` → `update_entities`
   → `save`.
 - **Services:** `add_slot` (appends to `manual_slots` and re-applies them),
-  `run_planner`, `clear_manual_slots`, `update_forecast`.
+  `run_planner`, `clear_manual_slots`, `update_forecast`, `update_battery_plan`
+  (also the button `button.energy_planner_update_battery_plan`).
 - **Forecast:** recalculated at :05 every hour (after the recorder compiles hourly
   statistics), once after HA has started, by the `update_forecast` service and by
   the dynamic planner. Errors are logged and do not stop the timers.
+- **Battery plan:** recalculated right after each timed forecast update.
 - **Entities** are passive views: `update()` reads from `hass.data`, setters write
   back and call `save`.
 
@@ -154,6 +167,46 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   the totals `yesterday_{load,pv}_kwh` / `yesterday_{load,pv}_actual_kwh` (actual load
   without EV). The totals are recorded, so forecast accuracy builds up in history.
 
+## Battery plan
+
+`battery_optimizer.optimize` (dry run so far: published as
+`sensor.energy_planner_battery_plan`, nothing is written to the slots):
+
+- Horizon: the current quarter until the last quarter with both a price and a load
+  forecast. Load = forecast profile + planned + reserve; PV = forecast.
+- Modes per quarter, matching what the inverter scripts can do: `self_use` (battery
+  covers the load, stores PV surplus), `hold` (keeps the energy but shaves import
+  above the quarter's target, like the "Peak +/-" automations), `sell_excess` (PV
+  surplus goes to the grid instead of the battery, slot state `sell-excess`: worth it
+  while prices fall during the day and the battery will fill later anyway; a full
+  battery exports in `self_use`, which wins ties), `charge` (from PV and grid up to
+  the import target), `sell` (full discharge to the grid).
+  Slot states for later: `self_use` → `discharge`, `hold` → `pause`, `sell_excess` →
+  `sell-excess`, `charge` → `charge`, `sell` → `sell`.
+- Costs: import at `spot * 1.25 + tariff.buy_fee`, export at `spot +
+  tariff.sell_fee`, import above `grid_import_limit` at `LIMIT_PENALTY` (20 SEK/kWh, so
+  only when unavoidable), battery wear `battery_wear_cost` per kWh taken out of the
+  battery, energy left at the end valued at the cheapest buy price in the horizon's
+  last 24 h (times the discharge efficiency) minus the wear: it can be refilled then,
+  so a higher value (the median price was tried) makes the plan hoard energy and
+  charge at the end. Wear only changes decisions that add a cycle (sell and refill), since energy
+  kept is also taken out later; it stops trades that gain only a few öre.
+- Power charges: each charge and month gets an import target (kW), starting at the
+  peak already reached this month (from the hourly changes of `grid_import_sensor`,
+  default the HAN meter `sensor.matarstallning_aktiv_energi_uttag`): import up to it is
+  free. A coordinate search raises the targets in 0.5 kW steps while the cost drops.
+  `max_charge_current` is only the hardware limit; the target sets the charging speed.
+  Raising a peak is charged at the share of the month's remaining hours the plan
+  covers, because the peak is then free for the rest of the month (`_month_share`): a
+  higher peak is accepted early in the month, hardly at the end.
+- Battery: capacity, shutdown/max SOC, charge/discharge current × the live voltage
+  (`battery_voltage_sensor`), SOC (`battery_soc_sensor`), round-trip efficiency
+  `price_peak_efficiency_factor`. About 1 s per day of quarters, run in the executor.
+- Not done yet: writing the plan to the slots, and making the inverter follow the
+  import target while charging (candidates: Solis peak shaving
+  `number.solis_s6_eh1p_peak_max_usable_grid_power` with force charge allowed under
+  peak shaving, or adjusting the charge current like the "Peak +/-" automations).
+
 ## Household and tariff
 
 Background for the planner (from the owner, Oct 2026):
@@ -187,6 +240,23 @@ Background for the planner (from the owner, Oct 2026):
 - Large loads: electric sauna ~7 kW, ~4.6 kWh per session, mostly Sunday 19–21 on
   about a quarter of Sundays. EV charger (Easee) 7–9 kW, rarely used.
 
+
+## Grid tariffs
+
+Users have different grid operators, so fees and power charges come from the tariff
+(`planner/tariff.py`), chosen in the integration options. Owner: preset
+`tekniska_verken_alternativ`, `grid_import_limit` 1 kW 06–23. The limit is meant to
+keep daytime import at the house's base load: with a 45 kr/kW winter day power charge,
+charging the battery from the grid in the day costs far more than at night. Later, the
+planner should also be able to shift controllable loads (e.g. the heat pump) to stay
+under it.
+
+The owner's brother uses E.ON Energidistribution (Virserum), preset `eon_20a` from his
+price list: 32.30 öre/kWh transfer fee (+ 45 öre energy tax, assumed), 835 kr/month,
+no power charge, selling spot + 10 öre. He has separate meters on the spa and the
+ground-source heat pump, which could later feed load patterns. The model covers the common Swedish variants: mean of the N highest hourly means per
+month, optionally at most one per day, limited by months, weekdays and hours.
+Holidays are not detected.
 
 ## Domain facts worth knowing
 
@@ -239,7 +309,8 @@ make format         # ruff format
 - pytest uses `asyncio_mode = auto` and `pytest-homeassistant-custom-component`.
   Tests mock `hass` with `MagicMock`, patch `fetch_nordpool_data`, and freeze
   `dt_utils.now` at 2026-03-12 00:00 Stockholm time (autouse `fixed_now` fixture).
-- The basic and price peak planners and the forecast have tests. The cheapest hours
+- The basic and price peak planners, the forecast, the tariff and the options flow
+  have tests. The cheapest hours
   planner, manual slots and `clear_passed_slots` are untested.
 - CI: `.github/workflows/validate.yml` (ruff, hassfest, HACS) and `tests.yml`
   (pytest on 3.14 + ruff).

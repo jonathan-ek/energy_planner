@@ -13,9 +13,33 @@ from ..const import (
     SWITCH_ENTITIES,
     NUMBER_ENTITIES,
     SLOT_COUNT,
+    TARIFF_CUSTOM,
 )
+from .tariff import TARIFF_PRESETS, Tariff, flat_tariff, tariff_from_dict
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def get_tariff(hass: HomeAssistant) -> Tariff:
+    """Return the grid tariff chosen in the integration options.
+
+    Falls back to the flat `network_cost` / `network_compensation` settings when no
+    preset is chosen or the stored custom tariff is invalid.
+    """
+    options = hass.data[DOMAIN].get("options", {})
+    preset = options.get("tariff_preset")
+    try:
+        if preset == TARIFF_CUSTOM:
+            return tariff_from_dict(options.get("tariff") or {})
+        if preset in TARIFF_PRESETS:
+            return tariff_from_dict(TARIFF_PRESETS[preset])
+    except ValueError:
+        _LOGGER.exception("Invalid tariff, using the flat network settings")
+    config = hass.data[DOMAIN]["config"]
+    return flat_tariff(
+        float(config.get("network_cost") or 0.0),
+        float(config.get("network_compensation") or 0.0),
+    )
 
 
 async def store_disable_state(hass: HomeAssistant):

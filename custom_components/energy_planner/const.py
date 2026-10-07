@@ -12,9 +12,22 @@ VERSION_STORAGE = "1"
 # Number of slots in the schedule, numbered 1..SLOT_COUNT
 SLOT_COUNT = 49
 
+# Tariff options besides the presets in planner/tariff.py: the flat network_cost /
+# network_compensation settings, or a custom tariff entered as YAML
+TARIFF_FLAT = "flat"
+TARIFF_CUSTOM = "custom"
+
 # Statistics used by the forecast, can be overridden in the config store
 DEFAULT_FORECAST_LOAD_SENSOR = "sensor.solis_s6_solis_household_load_power"
 DEFAULT_FORECAST_PV_SENSOR = "sensor.solis_s6_solis_total_pv_power"
 DEFAULT_FORECAST_EV_SENSOR = "sensor.ehwuhqtp_effekt"
 # Local calendar with planned loads (sauna, laundry, EV charging, ...)
 DEFAULT_FORECAST_CALENDAR = "calendar.energiplan"
+
+# Inputs of the battery plan, can be overridden in the config store
+DEFAULT_BATTERY_SOC_SENSOR = "sensor.solis_s6_solis_battery_soc"
+DEFAULT_BATTERY_VOLTAGE_SENSOR = "sensor.solis_s6_solis_battery_voltage"
+# Energy counter of the grid import (here the electricity meter's HAN port); its
+# hourly changes this month give the power peaks already paid for
+DEFAULT_GRID_IMPORT_SENSOR = "sensor.matarstallning_aktiv_energi_uttag"
+PLAN_SENSORS = "plan_sensors"

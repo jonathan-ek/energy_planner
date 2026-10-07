@@ -31,6 +31,7 @@ from .const import (
 )
 from .planner import (
     async_update_forecast,
+    async_update_plan,
     basic_planner,
     dynamic_planner,
     cheapest_hours_planner,
@@ -43,6 +44,7 @@ from .store import async_save_to_store, async_load_from_store
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [
+    Platform.BUTTON,
     Platform.DATETIME,
     Platform.NUMBER,
     Platform.SELECT,
@@ -182,9 +184,16 @@ async def async_setup(hass: HomeAssistant, config):
         """Service to recalculate the forecast."""
         await async_update_forecast(hass)
 
+    async def update_battery_plan_service(call: ServiceCall) -> None:
+        """Service to recalculate the battery plan."""
+        await async_update_plan(hass)
+
     # Register our service with Home Assistant.
     hass.services.async_register(DOMAIN, "add_slot", add_slot_service)
     hass.services.async_register(DOMAIN, "update_forecast", update_forecast_service)
+    hass.services.async_register(
+        DOMAIN, "update_battery_plan", update_battery_plan_service
+    )
     hass.services.async_register(DOMAIN, "run_planner", run_planner_service)
     hass.services.async_register(
         DOMAIN, "clear_manual_slots", clear_manual_slots_service
@@ -206,6 +215,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         await async_setup_data_structure(hass)
     hass.data[DOMAIN]["config"]["entry_id"] = entry.entry_id
     hass.data[DOMAIN]["config"]["nordpool_entity_id"] = entry.data["nordpool_entity_id"]
+    hass.data[DOMAIN]["options"] = dict(entry.options)
+
+    async def options_updated(hass: HomeAssistant, entry: ConfigEntry):
+        # Read by get_tariff, no reload needed
+        hass.data[DOMAIN]["options"] = dict(entry.options)
+
+    entry.async_on_unload(entry.add_update_listener(options_updated))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     async def update_schedule(now: dt.datetime):
@@ -226,11 +242,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
 
     async def update_forecast(*_):
-        # A failing forecast must not stop the timers
+        # A failing forecast or plan must not stop the timers
         try:
             await async_update_forecast(hass)
         except Exception:
             _LOGGER.exception("Failed to update the forecast")
+            return
+        try:
+            await async_update_plan(hass)
+        except Exception:
+            _LOGGER.exception("Failed to update the battery plan")
 
     # Every hour, after the recorder has compiled the hourly statistics, and once
     # Home Assistant has started so Forecast.Solar is loaded

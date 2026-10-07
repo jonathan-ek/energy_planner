@@ -47,6 +47,41 @@
     "update_forecast": {
       "name": "Update forecast",
       "description": "Recalculate the load and PV forecast per quarter for today and tomorrow"
+    },
+    "update_battery_plan": {
+      "name": "Update battery plan",
+      "description": "Recalculate the battery plan from the current forecast, prices and battery state"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Grid tariff",
+        "description": "Network fees, sell compensation and power charges used by the planner.",
+        "data": {
+          "tariff_preset": "Tariff"
+        }
+      },
+      "custom": {
+        "title": "Custom grid tariff",
+        "description": "YAML with energy_fees and sell_compensation (öre/kWh incl. VAT, matching rules add up) and power_charges (kr/kW per month, peaks = mean of the N highest hourly means, one_per_day). Every rule may limit months (1-12), weekdays (1-7, Monday = 1) and hours ([start, end), may wrap midnight).",
+        "data": {
+          "tariff": "Tariff"
+        }
+      }
+    },
+    "error": {
+      "invalid_tariff": "The tariff is invalid: check the keys and values against the description"
+    }
+  },
+  "selector": {
+    "tariff_preset": {
+      "options": {
+        "flat": "Flat: the network cost and compensation settings",
+        "tekniska_verken_alternativ": "Tekniska verken, Prislista alternativ (2026)",
+        "eon_20a": "E.ON Energidistribution 20 A, Virserum (2026)",
+        "custom": "Custom (YAML)"
+      }
     }
   }
 }
