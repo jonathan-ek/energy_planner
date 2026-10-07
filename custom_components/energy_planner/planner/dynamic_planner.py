@@ -71,7 +71,9 @@ def _forecast_solar_sources(hass: HomeAssistant):
     return sources
 
 
-def _solar_planes(hass: HomeAssistant):
+def _solar_planes(
+    hass: HomeAssistant,
+) -> tuple[tuple[float, float] | None, list[tuple[float, float, float]]]:
     """Return the location and the planes (tilt, compass azimuth, kWp).
 
     Taken from the Forecast.Solar configuration, so the planes are only set up once.
@@ -125,12 +127,17 @@ async def _fetch_open_meteo(session, latitude, longitude, tilt, azimuth):
     return data["hourly"]
 
 
-async def _open_meteo_pv(hass: HomeAssistant, location, planes):
+async def _open_meteo_pv(
+    hass: HomeAssistant,
+    location: tuple[float, float],
+    planes: list[tuple[float, float, float]],
+):
     """Return (latest, day-before) PV power forecast in kW per UTC hour, all planes."""
     session = async_get_clientsession(hass)
+    latitude, longitude = location
     latest, previous = {}, {}
     for tilt, azimuth, kwp in planes:
-        hourly = await _fetch_open_meteo(session, *location, tilt, azimuth)
+        hourly = await _fetch_open_meteo(session, latitude, longitude, tilt, azimuth)
         plane_latest, plane_previous = forecast.open_meteo_plane_power(hourly, kwp)
         for total, plane in ((latest, plane_latest), (previous, plane_previous)):
             for hour, kw in plane.items():
@@ -149,17 +156,29 @@ async def _calendar_events(hass: HomeAssistant, entity_id, start, end):
         blocking=True,
         return_response=True,
     )
+    calendar = (response or {}).get(entity_id)
+    raw_events = calendar.get("events") if isinstance(calendar, dict) else None
     events = []
-    for event in response.get(entity_id, {}).get("events", []):
-        # All-day events only have a date and say nothing about when the load runs
-        if len(event["start"]) <= 10 or len(event["end"]) <= 10:
+    for event in raw_events if isinstance(raw_events, list) else []:
+        if not isinstance(event, dict):
             continue
+        event_start, event_end = event.get("start"), event.get("end")
+        # All-day events only have a date and say nothing about when the load runs
+        if not isinstance(event_start, str) or not isinstance(event_end, str):
+            continue
+        if len(event_start) <= 10 or len(event_end) <= 10:
+            continue
+        start_time = dt_utils.parse_datetime(event_start)
+        end_time = dt_utils.parse_datetime(event_end)
+        if start_time is None or end_time is None:
+            continue
+        summary, description = event.get("summary"), event.get("description")
         events.append(
             (
-                dt_utils.as_local(dt_utils.parse_datetime(event["start"])),
-                dt_utils.as_local(dt_utils.parse_datetime(event["end"])),
-                event.get("summary", ""),
-                event.get("description", ""),
+                dt_utils.as_local(start_time),
+                dt_utils.as_local(end_time),
+                summary if isinstance(summary, str) else "",
+                description if isinstance(description, str) else "",
             )
         )
     return events
@@ -275,7 +294,7 @@ async def async_update_forecast(hass: HomeAssistant):
             plane = forecast.pv_quarters(watts, quarters)
             raw = [a + b for a, b in zip(raw, plane, strict=True)]
         pv_source = "forecast.solar"
-    if raw is not None:
+    if raw is not None and calibration is not None:
         raw_totals = _daily_totals(quarters, raw, current)
         pv = [value * calibration for value in raw]
 

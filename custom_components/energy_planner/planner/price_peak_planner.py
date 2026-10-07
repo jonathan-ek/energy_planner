@@ -135,16 +135,19 @@ def match_charge_discharge_periods(
             charge_periods[r - 1] = []
     charge_periods = [x for x in charge_periods if x]
     discharge_periods = [x for x in discharge_periods if x]
-    slots = [0] * len(prices)
-    for j, c in enumerate(charge_periods):
-        slots[min(c)] = (sum(prices[i] for i in c) / len(c), "c", j)
-    for j, d in enumerate(discharge_periods):
-        slots[min(d)] = (sum(prices[i] for i in d) / len(d), "d", j)
-    slots = [x for x in slots if x != 0]
+    # (first quarter, average price, kind, rank) in time order
+    periods = [
+        (min(c), sum(prices[i] for i in c) / len(c), "c", j)
+        for j, c in enumerate(charge_periods)
+    ] + [
+        (min(d), sum(prices[i] for i in d) / len(d), "d", j)
+        for j, d in enumerate(discharge_periods)
+    ]
+    periods.sort()
     prev_price = None
     prev_index = None
     to_remove = []
-    for p, t, i in slots:
+    for _, p, t, i in periods:
         if t == "c":
             prev_price = p
             prev_index = i
@@ -366,7 +369,7 @@ def build_schedule(nordpool_values, matched, states, max_soc, min_soc):
     return schedule
 
 
-async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
+async def plan_day(hass: HomeAssistant, nordpool_values: list[dict], config: dict):
     """Plan a day based on nordpool values."""
     _LOGGER.info("plan_day: %s", nordpool_values)
     settings = hass.data[DOMAIN]["config"]
@@ -431,7 +434,7 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
 
     tomorrow_valid = attributes.get("tomorrow_valid")
     yesterday, today, tomorrow = await fetch_nordpool_data(
-        hass, nordpool_currency, nordpool_area, tomorrow_valid
+        hass, nordpool_currency, nordpool_area, bool(tomorrow_valid)
     )
     if yesterday is None or today is None:
         raise ValueError("Nordpool data not found")

@@ -2,6 +2,7 @@
 
 import logging
 import datetime as dt
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
@@ -20,6 +21,7 @@ def mock_hass():
     """Create mock Home Assistant instance."""
     hass = MagicMock(spec=HomeAssistant)
     hass.states = MagicMock()
+    values: dict[str, Any] = {}
     hass.data = {
         DOMAIN: {
             "config": {
@@ -31,16 +33,16 @@ def mock_hass():
                 "basic_nr_of_charge_hours": 4,
                 "basic_nr_of_discharge_hours": 3,
             },
-            "values": {},
+            "values": values,
             "save": AsyncMock(),
         }
     }
     # Initialize slots as after a reset
     for i in range(1, SLOT_COUNT + 1):
-        hass.data[DOMAIN]["values"][f"slot_{i}_date_time_start"] = None
-        hass.data[DOMAIN]["values"][f"slot_{i}_state"] = "off"
-        hass.data[DOMAIN]["values"][f"slot_{i}_soc"] = 50
-        hass.data[DOMAIN]["values"][f"slot_{i}_active"] = False
+        values[f"slot_{i}_date_time_start"] = None
+        values[f"slot_{i}_state"] = "off"
+        values[f"slot_{i}_soc"] = 50
+        values[f"slot_{i}_active"] = False
     return hass
 
 

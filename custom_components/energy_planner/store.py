@@ -15,8 +15,15 @@ def get_store_key(key):
 
 def _get_store_for_key(hass, key, encoder):
     """Create a Store object for the key."""
+    # Existing stores were written with the version as the string "1". Store compares
+    # the stored version with this one, so changing it to the int 1 would make loading
+    # fail; keep the string
     return Store(
-        hass, VERSION_STORAGE, get_store_key(key), encoder=encoder, atomic_writes=True
+        hass,
+        VERSION_STORAGE,  # ty: ignore[invalid-argument-type]
+        get_store_key(key),
+        encoder=encoder,
+        atomic_writes=True,
     )
 
 

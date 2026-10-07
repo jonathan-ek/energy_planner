@@ -20,7 +20,7 @@ from homeassistant.util import dt as dt_utils
 _LOGGER = logging.getLogger(__name__)
 
 
-async def plan_day(hass: HomeAssistant, nordpool_values: [dict], config: dict):
+async def plan_day(hass: HomeAssistant, nordpool_values: list[dict], config: dict):
     """Plan day."""
     _LOGGER.info("plan_day: %s", nordpool_values)
 
@@ -93,7 +93,7 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
 
     tomorrow_valid = attributes.get("tomorrow_valid")
     yesterday, today, tomorrow = await fetch_nordpool_data(
-        hass, nordpool_currency, nordpool_area, tomorrow_valid
+        hass, nordpool_currency, nordpool_area, bool(tomorrow_valid)
     )
     if yesterday is None or today is None:
         raise ValueError("Nordpool data not found")

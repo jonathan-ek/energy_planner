@@ -17,6 +17,7 @@ by a reserve.
 
 import datetime as dt
 import re
+from collections.abc import Mapping
 from itertools import pairwise
 from statistics import mean, median
 
@@ -158,7 +159,7 @@ def _power_at(points: list[tuple[float, float]], ts: float) -> float:
 
 
 def pv_quarters(
-    watts: dict[dt.datetime, float], quarters: list[dt.datetime]
+    watts: Mapping[dt.datetime, float], quarters: list[dt.datetime]
 ) -> list[float]:
     """Integrate a power forecast (W at timestamps) to kWh per quarter (Simpson)."""
     points = sorted((t.timestamp(), float(w)) for t, w in watts.items())
@@ -304,7 +305,7 @@ def open_meteo_plane_power(
     return latest, previous
 
 
-def hourly_power_to_watts(hourly_kw: dict[dt.datetime, float]) -> dict:
+def hourly_power_to_watts(hourly_kw: Mapping[dt.datetime, float]) -> dict:
     """Place hourly mean power (kW) mid-hour, in W, as input for pv_quarters."""
     half = dt.timedelta(minutes=30)
     return {hour + half: kw * 1000 for hour, kw in hourly_kw.items()}

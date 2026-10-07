@@ -278,3 +278,47 @@ async def test_fetch_open_meteo_request():
     assert params["models"] == "metno_seamless,ecmwf_ifs025,icon_seamless"
     assert "global_tilted_irradiance_previous_day1" in params["hourly"]
     assert params["past_days"] == dynamic_planner.CALIBRATION_DAYS
+
+
+async def test_calendar_events_parsing(mock_hass):
+    """Test that only well-formed timed events are returned, in local time."""
+    mock_hass.states.get.return_value = MagicMock()
+    mock_hass.services.async_call = AsyncMock(
+        return_value={
+            "calendar.energiplan": {
+                "events": [
+                    {
+                        "start": "2026-10-11T19:00:00+02:00",
+                        "end": "2026-10-11T21:00:00+02:00",
+                        "summary": "Bastu",
+                        "description": None,
+                    },
+                    {
+                        "start": "2026-10-11",
+                        "end": "2026-10-12",
+                        "summary": "Hela dagen",
+                    },
+                    {"start": "not a date", "end": "also not", "summary": "Trasig"},
+                    "not an event",
+                ]
+            }
+        }
+    )
+    events = await dynamic_planner._calendar_events(
+        mock_hass, "calendar.energiplan", NOW, NOW + dt.timedelta(days=2)
+    )
+    assert events == [
+        (
+            dt.datetime(2026, 10, 11, 19, tzinfo=TZ),
+            dt.datetime(2026, 10, 11, 21, tzinfo=TZ),
+            "Bastu",
+            "",
+        )
+    ]
+    mock_hass.services.async_call = AsyncMock(return_value=None)
+    assert (
+        await dynamic_planner._calendar_events(
+            mock_hass, "calendar.energiplan", NOW, NOW
+        )
+        == []
+    )

@@ -133,10 +133,10 @@ async def async_setup(hass: HomeAssistant, config):
         """Service to add a slot."""
         try:
             start_datetime = dt_utils.as_local(
-                dt.datetime.fromisoformat(call.data.get("start"))
+                dt.datetime.fromisoformat(call.data["start"])
             )
             end_datetime = dt_utils.as_local(
-                dt.datetime.fromisoformat(call.data.get("end"))
+                dt.datetime.fromisoformat(call.data["end"])
             )
             state = call.data.get("state")
             soc = call.data.get("soc")
