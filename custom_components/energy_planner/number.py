@@ -184,6 +184,23 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
+                # The battery plan does not discharge below it; the inverter may,
+                # down to the shutdown SOC, to shave peaks from unexpected load.
+                # At or below the shutdown SOC: off
+                "id": "battery_reserve_soc",
+                "name": "Battery reserve SOC",
+                "default": 20,
+                "min_val": 0,
+                "max_val": 100,
+                "step": 1,
+                "unit_of_measurement": PERCENTAGE,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
                 # Extra energy to keep for unplanned weekend load, Sat/Sun 16-20
                 "id": "forecast_weekend_reserve",
                 "name": "Weekend reserve",

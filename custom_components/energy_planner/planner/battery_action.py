@@ -11,6 +11,11 @@ Pure functions, no Home Assistant imports. `resolve` combines the current slot (
   self-use: source `fallback`.
 - Otherwise (no slot, `off`, disabled) self-use: source `none`.
 
+The plan keeps the battery above the reserve SOC. When the battery is at or below it
+anyway (more load than forecast), the plan's `self_use`, `sell_excess` and `hold` turn
+into `hold` with the power charge level as import target: the battery then only
+shaves peaks that would raise the power charge, down to the shutdown SOC.
+
 The state is always a slot state the inverter scripts know (`charge`, `discharge`,
 `sell`, `sell-excess`, `pause`, `discard-excess`).
 """
@@ -64,6 +69,7 @@ class BatteryState:
     max_soc: float  # %
     max_charge_a: float
     max_discharge_a: float
+    reserve_soc: float = 0.0  # %, the plan keeps it, peak shaving may use it
 
 
 def _action(state: str, source: str, **extra: Any) -> dict[str, Any]:
@@ -112,6 +118,18 @@ def plan_action(
     target_soc = plan["soc"][last]
     capacity = battery.capacity_kwh / 100  # kWh per %
     extra: dict[str, Any] = {"soc": None, "current_a": 0}
+    target_kw = plan["targets"][index]
+    reserve = max(battery.min_soc, battery.reserve_soc)
+    if (
+        mode in ("self_use", "sell_excess", "hold")
+        and battery.reserve_soc > battery.min_soc
+        and battery.soc <= reserve
+    ):
+        # Keep the reserve for peaks; no power charge: just keep it
+        mode = "hold"
+        target_soc = reserve
+        target_kw = plan.get("peak_levels", plan["targets"])[index]
+        extra["reserve"] = True
     if mode == "charge":
         extra["soc"] = round(target_soc)
         extra["current_a"] = _current(
@@ -131,7 +149,7 @@ def plan_action(
             battery.max_discharge_a,
         )
     elif mode == "sell_excess":
-        extra["soc"] = round(battery.min_soc)
+        extra["soc"] = round(reserve)
     elif mode == "hold":
         # What the plan expects to keep (less if it shaves peaks)
         extra["soc"] = round(target_soc)
@@ -139,7 +157,7 @@ def plan_action(
         SLOT_STATES[mode],
         "plan",
         mode=mode,
-        import_target_kw=plan["targets"][index],
+        import_target_kw=target_kw,
         until=until.isoformat(),
         plan_updated=plan["updated"],
         **extra,

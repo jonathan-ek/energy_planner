@@ -206,6 +206,7 @@ def _battery(hass: HomeAssistant) -> Battery | None:
         max_power_kw=float(config.get("max_discharge_current", 0)) * voltage / 1000,
         efficiency=float(config.get("price_peak_efficiency_factor", 90)) / 100,
         wear_cost=float(config.get("battery_wear_cost", 0)) / 100,
+        reserve_kwh=capacity * float(config.get("battery_reserve_soc", 0)) / 100,
     )
 
 
@@ -279,6 +280,7 @@ def current_action(hass: HomeAssistant) -> dict:
         max_soc=float(config.get("battery_max_soc", 90)),
         max_charge_a=float(config.get("max_charge_current", 0)),
         max_discharge_a=float(config.get("max_discharge_current", 0)),
+        reserve_soc=float(config.get("battery_reserve_soc", 0)),
     )
     return resolve(slot, hass.data[DOMAIN].get("plan"), dt_utils.now(), battery)
 
@@ -417,6 +419,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         "grid_import": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_import],
         "grid_export": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_export],
         "targets": [None if t is None else round(t, 2) for t in plan.targets],
+        # Power charge level (kW): the import target below the reserve SOC
+        "peak_levels": [None if t is None else round(t, 2) for t in plan.peak_levels],
         # Spot price incl. VAT (öre/kWh), and whether it is an estimate
         "prices": [round(p * 1.25 / 10, 2) for p in price_list],
         "estimated": is_estimate,

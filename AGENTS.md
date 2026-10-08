@@ -88,7 +88,8 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   `cheapest_hours_nr_of_charge_hours`, `price_peak_nr_of_charge_hours`,
   `price_peak_nr_of_discharge_hours`, `price_peak_efficiency_factor` (%),
   `max_charge_current`, `max_discharge_current`, `battery_capacity` (Wh),
-  `battery_shutdown_soc`, `battery_max_soc`, `network_cost` (öre/kWh incl. VAT paid on
+  `battery_shutdown_soc`, `battery_reserve_soc` (%, default 20: the plan does not
+  discharge below it, see "Battery plan"), `battery_max_soc`, `network_cost` (öre/kWh incl. VAT paid on
   bought energy: transfer fee + energy tax, ~63 here), `network_compensation` (öre/kWh
   received when selling, ~5 here),
   `forecast_weekend_reserve` (kWh, default 4), `forecast_reserve_start` /
@@ -255,6 +256,16 @@ planners the plan is a preview and ignores them.
   Raising a peak is charged at the share of the month's remaining hours the plan
   covers, because the peak is then free for the rest of the month (`_month_share`): a
   higher peak is accepted early in the month, hardly at the end.
+- Reserve: the plan keeps `battery_reserve_soc` (a soft minimum above the shutdown
+  SOC) for load the forecast misses, e.g. a washing machine. `Battery.reserve_kwh`:
+  no mode discharges below it, a SOC below it (after a peak) is allowed, and the
+  energy missing at the end is valued at the end price, so the plan refills it. The
+  plan publishes `peak_levels` (the quarter's power charge level, kW, without the
+  household import limit). When the live SOC is at or below the reserve, the action
+  turns the plan's `self_use`, `sell_excess` and `hold` into `hold` with that level as
+  import target (`reserve: true`): the inverter's peak shaving only uses the reserve,
+  down to the shutdown SOC, for import that would raise the power charge; without a
+  power charge the battery is just kept.
 - Battery: capacity, shutdown/max SOC, charge/discharge current × the live voltage
   (`battery_voltage_sensor`), SOC (`battery_soc_sensor`), round-trip efficiency
   `price_peak_efficiency_factor`. About 1 s per day of quarters, run in the executor.

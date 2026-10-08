@@ -26,6 +26,11 @@ target, starting at the peak already reached this month (import up to it is free
 and raised in steps while the total cost, power charges included, goes down. Raising
 it lets the battery charge faster in the cheapest hours, at the price of a higher peak.
 
+The plan does not discharge below `Battery.reserve_kwh` (a soft minimum above the
+shutdown SOC `min_kwh`): the inverter may use that energy to shave unexpected
+peaks. Below the reserve the SOC can be (after such a peak), and the energy missing
+at the end is charged at the end price, so the plan refills it.
+
 Battery wear (`Battery.wear_cost`, SEK per kWh taken out of the battery) is added to
 every discharge, so the battery is only cycled when the price difference pays for it.
 
@@ -76,6 +81,12 @@ class Battery:
     max_power_kw: float
     efficiency: float = 0.9
     wear_cost: float = 0.0  # SEK per kWh taken out of the battery
+    reserve_kwh: float = 0.0  # the plan keeps this, the inverter may shave peaks
+
+    @property
+    def floor_kwh(self) -> float:
+        """The lowest SOC the plan discharges to: the reserve or the shutdown SOC."""
+        return max(self.min_kwh, self.reserve_kwh)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,6 +108,9 @@ class Plan:
     grid_import: list[float]
     grid_export: list[float]
     targets: list[float | None]
+    # The quarter's lowest power charge level (kW, None: no power charge), the import
+    # to shave down to with the reserve
+    peak_levels: list[float | None]
     energy_cost: float  # SEK for bought minus sold energy
     wear_cost: float  # SEK of battery wear
     power_cost: float  # SEK the power charges increase this month
@@ -134,7 +148,7 @@ def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh, extra=0.0):
     eta = math.sqrt(battery.efficiency)
     net = inputs.net[index] + extra
     power = battery.max_power_kw * QUARTER_HOURS
-    available = np.maximum(soc - battery.min_kwh, 0.0) * eta  # deliverable kWh
+    available = np.maximum(soc - battery.floor_kwh, 0.0) * eta  # deliverable kWh
     room = np.maximum(battery.max_kwh - soc, 0.0) / eta  # kWh it can take in
     surplus = max(-net, 0.0)
     demand = max(net, 0.0)
@@ -204,7 +218,7 @@ def _optimize(inputs: _Inputs, targets: list[float], caps: list[list[tuple]]):
     for mode in range(len(MODES)):
         switch[mode, mode] = 0.0
     switch[-1, :] = 0.0
-    value = np.tile(-(grid - battery.min_kwh) * inputs.end_price, (rows, 1))
+    value = np.tile(-(grid - battery.floor_kwh) * inputs.end_price, (rows, 1))
     values = [value]
     for index in range(count - 1, -1, -1):
         totals = np.full((len(MODES), SOC_STEPS), np.inf)
@@ -390,8 +404,9 @@ def optimize(
         quarter_keys.append(keys)
 
     def run(levels: dict[str, float]) -> Plan:
-        targets, caps = [], []
+        targets, caps, peak_levels = [], [], []
         for index, keys in enumerate(quarter_keys):
+            peak_levels.append(min((levels[k] for k in keys), default=None))
             target = min(
                 [levels[k] * QUARTER_HOURS for k in keys]
                 + [
@@ -430,7 +445,7 @@ def optimize(
             power += charge.kr_per_kw * (after - before)
             amortized += charge.kr_per_kw * (after - before) * shares[key]
         excess = float(np.sum(np.maximum(np.array(imports) - limit_kwh, 0.0)))
-        end_value = (socs[-1] - battery.min_kwh) * end_price if socs else 0.0
+        end_value = (socs[-1] - battery.floor_kwh) * end_price if socs else 0.0
         return Plan(
             list(starts),
             modes,
@@ -438,6 +453,7 @@ def optimize(
             imports,
             exports,
             [None if math.isinf(t) else t / QUARTER_HOURS for t in targets],
+            peak_levels,
             energy,
             wear,
             power,

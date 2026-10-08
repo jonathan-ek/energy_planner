@@ -385,3 +385,42 @@ def test_exempt_load_ignores_the_import_limit():
     )
     assert capped.limit_excess_kwh == pytest.approx(0.075 * 96)
     assert exempt.limit_excess_kwh == 0.0
+
+
+def test_reserve_is_kept():
+    """Test that the plan does not discharge below the reserve."""
+    kept = dataclasses.replace(battery(soc_kwh=10.0), reserve_kwh=4.0)
+    plan = opt.optimize(
+        STARTS, prices_by_hour(2000, 2000, 2000), LOAD, NO_PV, kept, NO_FEES
+    )
+    assert min(plan.soc) == pytest.approx(4.0)
+    assert plan.end_value == pytest.approx(0.0)
+
+
+def test_reserve_is_refilled():
+    """Test that a battery below the reserve is charged back at the cheapest price."""
+    low = dataclasses.replace(battery(soc_kwh=2.0), reserve_kwh=4.0)
+    plan = opt.optimize(
+        STARTS, prices_by_hour(100, 2000, 2000), LOAD, NO_PV, low, NO_FEES
+    )
+    assert hours(plan, 0, 6) & {"charge"}
+    assert plan.soc[-1] >= 4.0 - 1e-6
+
+
+def test_peak_levels_ignore_the_import_limit():
+    """Test that the power charge level is published apart from the import limit."""
+    plan = opt.optimize(
+        STARTS,
+        prices_by_hour(100, 2000, 2000),
+        LOAD,
+        NO_PV,
+        battery(),
+        TEKNISKA_VERKEN,
+        limit=opt.Limit(0.5),
+        history={DAY.replace(day=5, hour=12): 3.0, DAY.replace(day=5, hour=2): 2.0},
+    )
+    noon = STARTS.index(DAY.replace(hour=12))
+    level = plan.peak_levels[noon]
+    assert level is not None
+    assert level >= 3.0
+    assert plan.targets[noon] == pytest.approx(0.5)

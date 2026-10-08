@@ -1,5 +1,6 @@
 """Tests for the battery action: the current slot or the battery plan."""
 
+import dataclasses
 import datetime as dt
 import importlib
 from zoneinfo import ZoneInfo
@@ -80,6 +81,36 @@ def test_other_modes(mode, state, soc):
     """Test the slot state and SOC of the modes without a current."""
     result = action.resolve(auto(), plan([mode], [50.0]), NOW, BATTERY)
     assert (result["state"], result["soc"], result["current_a"]) == (state, soc, 0)
+
+
+RESERVE = dataclasses.replace(BATTERY, soc=20.0, reserve_soc=20.0)
+
+
+@pytest.mark.parametrize("mode", ["self_use", "sell_excess", "hold"])
+def test_reserve_only_shaves_peaks(mode):
+    """Test that at the reserve the battery holds and shaves to the power charge."""
+    planned = {**plan([mode], [20.0], [1.0]), "peak_levels": [3.5]}
+    result = action.resolve(auto(), planned, NOW, RESERVE)
+    assert (result["state"], result["mode"], result["soc"]) == ("pause", "hold", 20)
+    assert result["import_target_kw"] == 3.5
+    assert result["reserve"]
+
+
+def test_reserve_without_power_charge_keeps_the_battery():
+    """Test that without a power charge the reserve is just kept."""
+    planned = {**plan(["self_use"], [20.0]), "peak_levels": [None]}
+    result = action.resolve(auto(), planned, NOW, RESERVE)
+    assert (result["state"], result["import_target_kw"]) == ("pause", None)
+
+
+def test_above_the_reserve_the_plan_is_followed():
+    """Test that self-use runs while the battery is above the reserve."""
+    above = dataclasses.replace(RESERVE, soc=21.0)
+    planned = {**plan(["self_use"], [20.0]), "peak_levels": [3.5]}
+    result = action.resolve(auto(), planned, NOW, above)
+    assert result["state"] == "discharge"
+    sell_excess = action.resolve(auto(), plan(["sell_excess"], [50.0]), NOW, above)
+    assert sell_excess["soc"] == 20
 
 
 def test_old_plan_falls_back_to_self_use():

@@ -52,6 +52,7 @@ _LOGGER = logging.getLogger(__name__)
 PLAN_SETTINGS = (
     "battery_capacity",
     "battery_shutdown_soc",
+    "battery_reserve_soc",
     "battery_max_soc",
     "battery_wear_cost",
     "max_charge_current",

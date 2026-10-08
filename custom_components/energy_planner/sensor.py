@@ -149,6 +149,7 @@ class EnergyPlannerPlanSensor(SensorEntity):
             "grid_import",
             "grid_export",
             "targets",
+            "peak_levels",
             "heat_pump",
             "marginal",
             "temperature",
