@@ -143,6 +143,8 @@ class EnergyPlannerPlanSensor(SensorEntity):
         {
             "starts",
             "modes",
+            "prices",
+            "estimated",
             "soc",
             "grid_import",
             "grid_export",

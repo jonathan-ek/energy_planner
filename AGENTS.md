@@ -36,6 +36,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `battery_action.py` | Pure: `resolve` turns slot 1 and the plan into the action now (slot state, source, SOC, current, import target, until), mode ↔ slot state maps |
 | `heat_pump.py` | Pure heat pump economy: COP curve per outdoor temperature (`COP_CURVES`), district heating price per month (`DISTRICT_HEATING_PRESETS`), `evaluate` compares a kWh of heat from both. See "Heat pump" |
 | `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price now (`hass.data[DOMAIN]["prices"]`, stored by the battery plan), the tariff and the plan's export now |
+| `price_estimate.py` | Pure: tomorrow's prices before they are published (same-type days + a learned correction per hour, Swedish holidays). See "Battery plan" |
 | `tariff.py` | Pure grid tariff model: `Tariff` with `buy_fee` / `sell_fee` (öre/kWh) and `power_cost` (kr), parsed from a dict by `tariff_from_dict`, presets in `TARIFF_PRESETS`, the household's `import_limit`. Format in the module docstring |
 | `forecast.py` | Pure forecast functions, no HA imports: quarter list (DST safe), load forecast per hour, PV integration of the `watts` forecast, PV calibration, weekend reserve |
 | `manual_slots.py` | `add_manual_slots` overlays user-added slots on the generated schedule, shifting slots forward/back |
@@ -200,6 +201,26 @@ planners the plan is a preview and ignores them.
 
 - Horizon: the current quarter until the last quarter with both a price and a load
   forecast. Load = forecast profile + planned + reserve; PV = forecast.
+- Until tomorrow's prices are published (about 13:00) tomorrow uses an estimate
+  (`price_estimate.estimate`, `_estimated_prices`), so the plan does not end at
+  midnight and value the energy left at today's cheapest price. Per hour: the mean of
+  today's price and the last 7 days of tomorrow's type (workday, or weekend and
+  Swedish holiday incl. Midsummer, Christmas and New Year's Eve, within 21 days), plus
+  the median error of that estimate for the same hour and type change in the history,
+  shrunk by n / (n + 20). History: the Nord Pool sensor's hourly statistics (its last
+  state per hour) for 400 days, scaled to SEK/MWh excl. VAT by the known prices of
+  yesterday and today; calculated once per day (`price_estimate` in `hass.data`). The
+  plan publishes `prices` (spot incl. VAT, öre/kWh) and `estimated` per quarter; the
+  real prices replace the estimate when `tomorrow_valid` triggers a new plan.
+  Backtest (SE3, 778 mornings May 2025 - Oct 2026, the plan made at 07:00 followed until
+  13:00, real load and PV): a plan ending at midnight cost 0.31 kr/day more than knowing
+  tomorrow's prices, the simple mean of today and the last 7 days 0.15, this 0.10 (no
+  losses in winter, where the simple mean lost on Sunday -> Monday). Hourly error 23
+  öre/kWh (simple mean 25). A weather model (day-ahead wind, temperature and sun for
+  11 sites in the Nordics and Germany, gradient boosting) predicted prices better (21)
+  but planned no better (0.18); adjusting for tomorrow's sun alone changed nothing.
+  Most of the gain is in March and Sep-Oct, when solar excess meets prices the plan
+  cannot see yet.
 - Modes per quarter, matching what the inverter scripts can do: `self_use` (battery
   covers the load, stores PV surplus), `hold` (keeps the energy but shaves import
   above the quarter's target, like the "Peak +/-" automations), `sell_excess` (PV

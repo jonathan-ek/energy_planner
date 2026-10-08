@@ -75,6 +75,7 @@ async def run(hass, history=None):
     with (
         patch.object(battery_plan.dt_utils, "now", return_value=NOW),
         patch.object(battery_plan, "_prices", AsyncMock(return_value=prices())),
+        patch.object(battery_plan, "_price_history", AsyncMock(return_value={})),
         patch.object(
             battery_plan, "_hourly_import", AsyncMock(return_value=history or {})
         ),
@@ -204,3 +205,50 @@ async def test_heat_pump_is_planned(mock_hass, temperature, heats):
     assert plan["marginal"][plan["starts"].index(night)] >= 79.0
     # Its load is exempt from the 1 kW day limit
     assert plan["limit_excess_kwh"] == 0.0
+
+
+async def test_tomorrow_is_estimated(mock_hass):
+    """Test that without tomorrow's prices the plan continues on an estimate."""
+    mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = "sensor.nordpool_kwh_se3"
+    today = {s: p for s, p in prices().items() if s.date() == NOW.date()}
+    # The sensor's history in öre/kWh incl. VAT: the same daily profile
+    sensor = {
+        (START - dt.timedelta(days=i)).date(): {
+            hour: (200.0 if hour < 6 else 1500.0 if hour >= 17 else 800.0) * 0.125
+            for hour in range(24)
+        }
+        for i in range(30)
+    }
+    with (
+        patch.object(battery_plan.dt_utils, "now", return_value=NOW),
+        patch.object(battery_plan, "_prices", AsyncMock(return_value=today)),
+        patch.object(battery_plan, "_price_history", AsyncMock(return_value=sensor)),
+        patch.object(battery_plan, "_hourly_import", AsyncMock(return_value={})),
+    ):
+        await battery_plan.async_update_plan(mock_hass)
+    plan = mock_hass.data[DOMAIN]["plan"]
+    starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
+    assert starts[-1] == STARTS[-1]
+    tomorrow = [s.date() > NOW.date() for s in starts]
+    assert plan["estimated"] == tomorrow
+    # Scaled back to the spot price: 200 SEK/MWh at night is 25 öre incl. VAT
+    night = plan["prices"][tomorrow.index(True)]
+    assert night == pytest.approx(25.0)
+    estimate = mock_hass.data[DOMAIN]["price_estimate"]
+    assert estimate["day"] == NOW.date() + dt.timedelta(days=1)
+
+
+async def test_no_estimate_without_history(mock_hass):
+    """Test that without the sensor's history the plan ends with today's prices."""
+    mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = "sensor.nordpool_kwh_se3"
+    today = {s: p for s, p in prices().items() if s.date() == NOW.date()}
+    with (
+        patch.object(battery_plan.dt_utils, "now", return_value=NOW),
+        patch.object(battery_plan, "_prices", AsyncMock(return_value=today)),
+        patch.object(battery_plan, "_price_history", AsyncMock(return_value={})),
+        patch.object(battery_plan, "_hourly_import", AsyncMock(return_value={})),
+    ):
+        await battery_plan.async_update_plan(mock_hass)
+    plan = mock_hass.data[DOMAIN]["plan"]
+    assert not any(plan["estimated"])
+    assert plan["starts"][-1] == STARTS[95].isoformat()

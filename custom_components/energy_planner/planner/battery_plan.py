@@ -10,6 +10,7 @@ import asyncio
 import datetime as dt
 import functools
 import logging
+from statistics import mean, median
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
@@ -25,12 +26,18 @@ from ..const import (
 )
 from .battery_action import QUARTER, SLOT_MODES, BatteryState, Slot, resolve
 from .battery_optimizer import QUARTER_HOURS, Battery, Limit, optimize
+from .forecast import quarter_starts
 from .heat_pump import schedule
 from .heating import plan_inputs
 from .nordpool_utils import fetch_nordpool_data
+from .price_estimate import estimate
 from .utils import get_tariff
 
 _LOGGER = logging.getLogger(__name__)
+
+# Price history for the estimate of tomorrow's prices
+PRICE_HISTORY_DAYS = 400
+MIN_SCALE_HOURS = 4
 
 
 def _state_float(hass: HomeAssistant, entity_id: str) -> float | None:
@@ -65,7 +72,7 @@ async def _hourly_import(hass: HomeAssistant, statistic_id: str, start, end):
 
 
 async def _prices(hass: HomeAssistant) -> dict[dt.datetime, float]:
-    """Spot prices (SEK/MWh excl. VAT) per quarter start for today and tomorrow."""
+    """Spot prices (SEK/MWh excl. VAT) per quarter start, yesterday to tomorrow."""
     entity_id = hass.data[DOMAIN]["config"].get("nordpool_entity_id")
     state = hass.states.get(entity_id) if entity_id else None
     if entity_id is None or state is None:
@@ -73,16 +80,110 @@ async def _prices(hass: HomeAssistant) -> dict[dt.datetime, float]:
     currency = entity_id.split("_")[3].upper()
     area = entity_id.split("_")[2].upper()
     tomorrow_valid = state.attributes.get("tomorrow_valid")
-    _, today, tomorrow = await fetch_nordpool_data(
+    yesterday, today, tomorrow = await fetch_nordpool_data(
         hass, currency, area, bool(tomorrow_valid)
     )
     prices = {}
-    for value in [*(today or []), *(tomorrow or [])]:
+    for value in [*(yesterday or []), *(today or []), *(tomorrow or [])]:
         start = value["start"]
         if isinstance(start, str):
             start = dt.datetime.fromisoformat(start)
         prices[dt_utils.as_local(start)] = float(value["value"])
     return prices
+
+
+async def _price_history(
+    hass: HomeAssistant, statistic_id: str, start: dt.datetime, end: dt.datetime
+) -> dict[dt.date, dict[int, float]]:
+    """Return the Nord Pool sensor's price per local date and hour, in its unit.
+
+    The recorder keeps the sensor's last state in each hour (the hour's last quarter
+    since quarter prices), which is what the estimate was backtested on.
+    """
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass,
+        start,
+        end,
+        {statistic_id},
+        "hour",
+        None,
+        {"state"},
+    )
+    result: dict[dt.date, dict[int, float]] = {}
+    for row in stats.get(statistic_id, []):
+        state = row.get("state")
+        if state is not None:
+            local = dt_utils.as_local(dt.datetime.fromtimestamp(row["start"], dt.UTC))
+            result.setdefault(local.date(), {})[local.hour] = state
+    return result
+
+
+def _hourly(prices: dict[dt.datetime, float]) -> dict[dt.date, dict[int, float]]:
+    """Return the mean price per local date and hour."""
+    values: dict[dt.date, dict[int, list[float]]] = {}
+    for start, price in prices.items():
+        values.setdefault(start.date(), {}).setdefault(start.hour, []).append(price)
+    return {
+        day: {hour: mean(v) for hour, v in hours.items()}
+        for day, hours in values.items()
+    }
+
+
+async def _estimated_prices(
+    hass: HomeAssistant, prices: dict[dt.datetime, float], now: dt.datetime
+) -> dict[dt.datetime, float]:
+    """Return estimated spot prices per quarter of tomorrow while it is unpublished.
+
+    From the Nord Pool sensor's history (price_estimate.py), scaled to SEK/MWh excl.
+    VAT by the known prices of the last two days. Calculated once per day.
+    """
+    tomorrow = now.date() + dt.timedelta(days=1)
+    if any(start.date() == tomorrow for start in prices):
+        return {}
+    cached = hass.data[DOMAIN].get("price_estimate")
+    if cached and cached["day"] == tomorrow:
+        return cached["prices"]
+    entity_id = hass.data[DOMAIN]["config"].get("nordpool_entity_id")
+    if entity_id is None:
+        return {}
+    history = await _price_history(
+        hass,
+        entity_id,
+        dt_utils.start_of_local_day() - dt.timedelta(days=PRICE_HISTORY_DAYS),
+        now,
+    )
+    known = _hourly(prices)
+    # The sensor's unit, VAT and rounding differ from the spot prices
+    ratios = [
+        price / history[day][hour]
+        for day, hours in known.items()
+        for hour, price in hours.items()
+        if history.get(day, {}).get(hour)
+    ]
+    if len(ratios) < MIN_SCALE_HOURS:
+        return {}
+    scale = median(ratios)
+    hourly = estimate(
+        {
+            **{
+                day: {hour: price * scale for hour, price in hours.items()}
+                for day, hours in history.items()
+            },
+            **known,
+        },
+        tomorrow,
+    )
+    if hourly is None:
+        return {}
+    fallback = mean(hourly.values())
+    start = dt_utils.start_of_local_day(tomorrow)
+    estimated = {
+        quarter: hourly.get(quarter.hour, fallback)
+        for quarter in quarter_starts(start, start + dt.timedelta(days=1))
+    }
+    hass.data[DOMAIN]["price_estimate"] = {"day": tomorrow, "prices": estimated}
+    return estimated
 
 
 def _battery(hass: HomeAssistant) -> Battery | None:
@@ -230,17 +331,23 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         return
     now = dt_utils.now()
     current = now.replace(minute=now.minute - now.minute % 15, second=0, microsecond=0)
+    # Until tomorrow's prices are published the plan uses an estimate, so it can see
+    # whether energy is worth keeping past midnight
+    estimated = await _estimated_prices(hass, prices, now)
 
     starts, price_list, load, pv, temperatures = [], [], [], [], []
+    is_estimate = []
     for index, start_text in enumerate(forecast["starts"]):
         start = dt_utils.as_local(dt.datetime.fromisoformat(start_text))
         if start < current:
             continue
         base = forecast["load"][index]
-        if start not in prices or base is None:
+        price = prices.get(start, estimated.get(start))
+        if price is None or base is None:
             break
         starts.append(start)
-        price_list.append(prices[start])
+        price_list.append(price)
+        is_estimate.append(start not in prices)
         load.append(base + forecast["planned"][index] + forecast["reserve"][index])
         pv.append(forecast["pv"][index] if forecast["pv"] else 0.0)
         temperatures.append(
@@ -310,6 +417,9 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         "grid_import": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_import],
         "grid_export": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_export],
         "targets": [None if t is None else round(t, 2) for t in plan.targets],
+        # Spot price incl. VAT (öre/kWh), and whether it is an estimate
+        "prices": [round(p * 1.25 / 10, 2) for p in price_list],
+        "estimated": is_estimate,
         # Heat pump: on per quarter, what more load costs (öre/kWh), its COP and draw
         # (kW while heating)
         "heat_pump": heat_pump,
@@ -335,7 +445,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     }
     _LOGGER.info(
         "Battery plan until %s: %s now, energy %.2f SEK, wear %.2f SEK, "
-        "power charge +%.2f SEK, heat pump on %d of %d quarters",
+        "power charge +%.2f SEK, heat pump on %d of %d quarters, %d estimated prices",
         starts[-1].isoformat(),
         plan.modes[0],
         plan.energy_cost,
@@ -343,5 +453,6 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         plan.power_cost,
         sum(heat_pump),
         len(heat_pump),
+        sum(is_estimate),
     )
     write_plan_sensors(hass)
