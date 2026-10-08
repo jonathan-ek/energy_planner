@@ -26,6 +26,7 @@ from ..const import (
     DEFAULT_FORECAST_EV_SENSOR,
     DEFAULT_FORECAST_LOAD_SENSOR,
     DEFAULT_FORECAST_PV_SENSOR,
+    DEFAULT_HEAT_PUMP_ENERGY_SENSOR,
     FORECAST_SENSORS,
 )
 
@@ -59,6 +60,25 @@ async def _hourly_means(hass: HomeAssistant, statistic_ids, start, end):
             if row.get("mean") is not None
         }
         for statistic_id, rows in stats.items()
+    }
+
+
+async def _hourly_changes(hass: HomeAssistant, statistic_id, start, end):
+    """Hourly change of an energy counter in kWh (= kW mean), keyed by UTC hour."""
+    stats = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass,
+        start,
+        end,
+        {statistic_id},
+        "hour",
+        {"energy": "kWh"},
+        {"change"},
+    )
+    return {
+        dt.datetime.fromtimestamp(row["start"], dt.UTC): row["change"]
+        for row in stats.get(statistic_id, [])
+        if row.get("change") is not None
     }
 
 
@@ -144,17 +164,21 @@ async def _open_meteo_pv(
     location: tuple[float, float],
     planes: list[tuple[float, float, float]],
 ):
-    """Return (latest, day-before) PV power forecast in kW per UTC hour, all planes."""
+    """Return (latest, day-before) PV power forecast in kW per UTC hour, all planes.
+
+    Also the latest forecast's air temperature per UTC timestamp (first plane).
+    """
     session = async_get_clientsession(hass)
     latitude, longitude = location
-    latest, previous = {}, {}
+    latest, previous, temperatures = {}, {}, {}
     for tilt, azimuth, kwp in planes:
         hourly = await _fetch_open_meteo(session, latitude, longitude, tilt, azimuth)
         plane_latest, plane_previous = forecast.open_meteo_plane_power(hourly, kwp)
         for total, plane in ((latest, plane_latest), (previous, plane_previous)):
             for hour, kw in plane.items():
                 total[hour] = total.get(hour, 0.0) + kw
-    return latest, previous
+        temperatures = temperatures or forecast.open_meteo_temperature(hourly)
+    return latest, previous, temperatures
 
 
 async def _calendar_events(hass: HomeAssistant, entity_id, start, end):
@@ -254,6 +278,9 @@ async def async_update_forecast(hass: HomeAssistant):
     load_id = config.get("forecast_load_sensor", DEFAULT_FORECAST_LOAD_SENSOR)
     pv_id = config.get("forecast_pv_sensor", DEFAULT_FORECAST_PV_SENSOR)
     ev_id = config.get("forecast_ev_sensor", DEFAULT_FORECAST_EV_SENSOR)
+    heat_pump_id = config.get(
+        "heat_pump_energy_sensor", DEFAULT_HEAT_PUMP_ENERGY_SENSOR
+    )
     calendar_id = config.get("forecast_calendar", DEFAULT_FORECAST_CALENDAR)
 
     now = dt_utils.now()
@@ -276,10 +303,18 @@ async def async_update_forecast(hass: HomeAssistant):
         now,
     )
 
-    # House load without EV charging, which is planned separately
+    heat_pump = await _hourly_changes(
+        hass,
+        heat_pump_id,
+        dt_utils.start_of_local_day() - dt.timedelta(days=HISTORY_DAYS),
+        now,
+    )
+    # House load without EV charging and the heat pump, which are planned separately
     ev = means.get(ev_id, {})
     house = {
-        hour: max(kw - max(ev.get(hour, 0.0), 0.0), 0.0)
+        hour: max(
+            kw - max(ev.get(hour, 0.0), 0.0) - max(heat_pump.get(hour, 0.0), 0.0), 0.0
+        )
         for hour, kw in means.get(load_id, {}).items()
     }
     history = {}
@@ -318,10 +353,13 @@ async def async_update_forecast(hass: HomeAssistant):
     raw = None
     raw_totals = {}
     pv_source = None
+    temperature = None
     location, planes = _solar_planes(hass)
     if location and planes:
         try:
-            latest, previous = await _open_meteo_pv(hass, location, planes)
+            latest, previous, temperatures = await _open_meteo_pv(
+                hass, location, planes
+            )
         except (aiohttp.ClientError, TimeoutError, KeyError, ValueError) as err:
             _LOGGER.warning("Open-Meteo failed, using Forecast.Solar: %s", err)
         else:
@@ -330,6 +368,7 @@ async def async_update_forecast(hass: HomeAssistant):
             )
             raw = forecast.pv_quarters(forecast.hourly_power_to_watts(latest), quarters)
             pv_source = "open-meteo"
+            temperature = forecast.temperature_quarters(temperatures, quarters)
             # Yesterday: the day-before forecast, calibrated on the 14 days before it
             window = (
                 yesterday_start - dt.timedelta(days=CALIBRATION_DAYS),
@@ -379,6 +418,8 @@ async def async_update_forecast(hass: HomeAssistant):
         "planned": [round(v, 3) for v in planned],
         "reserve": [round(v, 3) for v in reserve],
         "pv": None if pv is None else [round(v, 3) for v in pv],
+        # Outdoor air temperature (°C) mid-quarter, None without Open-Meteo
+        "temperature": _rounded(temperature),
         "planned_events": [
             {
                 "summary": summary,

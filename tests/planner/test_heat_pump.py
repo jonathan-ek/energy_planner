@@ -119,3 +119,92 @@ def test_glue_missing_inputs():
     with patch.object(heating.dt_utils, "now", return_value=NOW):
         result = heating.heat_pump_economy(hass)
     assert result == {"district_heating_price": 76.7, "outdoor_temperature": None}
+
+
+def test_schedule_runs_where_heat_is_cheaper():
+    """Test the rule: district heating minus electricity / COP at least the margin."""
+    # COP 3, district heating 76.7: pays up to 215 öre/kWh electricity with margin 5
+    marginal = [100.0, 214.0, 216.0, 300.0, 300.0, 100.0, 100.0, 100.0]
+    on = heat_pump.schedule(marginal, [3.0] * 8, [76.7] * 8, [True] * 8, 5.0)
+    # 216 is just too much, but the one-quarter gap between runs is filled
+    assert on == [True, True, False, False, False, True, True, True]
+
+
+def test_schedule_needs_heating_and_a_cop():
+    """Test that it does not run without a heat need or below the operating range."""
+    heating = [True, True, False, False, True, True]
+    cops = [3.0, 3.0, 3.0, 3.0, None, None]
+    on = heat_pump.schedule([0.0] * 6, cops, [76.7] * 6, heating, 5.0)
+    assert on == [True, True, False, False, False, False]
+
+
+def test_schedule_removes_short_gaps_and_runs():
+    """Test that a single-quarter gap is filled and a single-quarter run dropped."""
+    cheap, dear = 0.0, 1000.0
+    marginal = [cheap, cheap, dear, cheap, cheap, dear, dear, cheap, dear, dear, cheap]
+    on = heat_pump.schedule(marginal, [3.0] * 11, [76.7] * 11, [True] * 11, 5.0)
+    # Gap at 2 filled, run at 7 dropped, the run at the end is kept
+    assert on == [True] * 5 + [False] * 5 + [True]
+
+
+def plan_hass(states, plan):
+    """Return a mock hass with heat pump settings, prices and a plan."""
+    hass = mock_hass(states, plan)
+    hass.data[DOMAIN]["config"] = {
+        "heat_pump_power": 300,
+        "heat_pump_margin": 5,
+        "heat_pump_heating_limit": 15,
+    }
+    return hass
+
+
+def test_plan_inputs():
+    """Test COP, price and heat need per quarter, the live temperature as fallback."""
+    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "20"}, {})
+    starts = [QUARTER, QUARTER + dt.timedelta(minutes=15)]
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        inputs = heating.plan_inputs(hass, starts, [0.0, None])
+    assert inputs.probe_kwh == pytest.approx(0.075)
+    assert inputs.temperatures == [0.0, 20.0]
+    assert inputs.cops[0] == pytest.approx(3.0)
+    assert inputs.district == [76.7, 76.7]
+    assert inputs.heating == [True, False]
+
+
+def test_action_follows_the_plan():
+    """Test the plan's flag now and when the run ends."""
+    starts = [QUARTER + dt.timedelta(minutes=15 * i) for i in range(4)]
+    plan = {
+        "updated": QUARTER.isoformat(),
+        "starts": [s.isoformat() for s in starts],
+        "heat_pump": [True, True, False, False],
+        "marginal": [100.0] * 4,
+        "heat_pump_cop": [3.0] * 4,
+    }
+    hass = plan_hass({}, plan)
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        action = heating.heat_pump_action(hass)
+    assert action["state"] == "on"
+    assert action["source"] == "plan"
+    assert action["until"] == starts[2].isoformat()
+
+
+def test_action_falls_back_to_the_economy_now():
+    """Test that without a plan the saving now and the heating limit decide."""
+    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, {})
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        action = heating.heat_pump_action(hass)
+    assert (action["state"], action["source"]) == ("on", "fallback")
+    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "16"}, {})
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        action = heating.heat_pump_action(hass)
+    assert action["state"] == "off"
+
+
+def test_action_without_inputs_decides_nothing():
+    """Test that missing prices give no decision, so the heat pump is left alone."""
+    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, {})
+    hass.data[DOMAIN]["prices"] = {}
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        action = heating.heat_pump_action(hass)
+    assert (action["state"], action["source"]) == (None, "none")

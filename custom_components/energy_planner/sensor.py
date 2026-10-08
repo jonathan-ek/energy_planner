@@ -10,7 +10,7 @@ from homeassistant.const import UnitOfEnergy
 
 from .const import DOMAIN, FORECAST_SENSORS, PLAN_SENSORS
 from .planner.battery_plan import current_action
-from .planner.heating import heat_pump_economy
+from .planner.heating import heat_pump_action, heat_pump_economy
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,6 +73,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerPlanSensor(hass),
         EnergyPlannerActionSensor(hass),
         *(EnergyPlannerHeatPumpSensor(hass, key) for key in HEAT_PUMP_SENSORS),
+        EnergyPlannerHeatPumpActionSensor(hass),
     ]
     hass.data[DOMAIN][PLAN_SENSORS] = plan_sensors
     async_add_devices([*sensors, *plan_sensors])
@@ -137,7 +138,18 @@ class EnergyPlannerPlanSensor(SensorEntity):
     _attr_should_poll = False
     _attr_name = "Battery plan"
     _unrecorded_attributes = frozenset(
-        {"starts", "modes", "soc", "grid_import", "grid_export", "targets"}
+        {
+            "starts",
+            "modes",
+            "soc",
+            "grid_import",
+            "grid_export",
+            "targets",
+            "heat_pump",
+            "marginal",
+            "temperature",
+            "heat_pump_cop",
+        }
     )
 
     def __init__(self, hass):
@@ -243,3 +255,41 @@ class EnergyPlannerHeatPumpSensor(SensorEntity):
         if self._key == "heat_pump_cop":
             return {"outdoor_temperature": self._economy.get("outdoor_temperature")}
         return None
+
+
+class EnergyPlannerHeatPumpActionSensor(SensorEntity):
+    """Whether the heat pump should heat now (`on`/`off`).
+
+    From the battery plan, or from the saving now when the plan is old (`source`).
+    See planner/heating.py.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_name = "Heat pump action"
+    _attr_icon = "mdi:heat-pump"
+
+    def __init__(self, hass):
+        """Initialize the heat pump action sensor."""
+        self._hass = hass
+        self.entity_id = f"sensor.{DOMAIN}_heat_pump_action"
+        self._attr_unique_id = f"{DOMAIN}_heat_pump_action"
+        self._action: dict = {}
+
+    def resolve(self) -> None:
+        """Resolve the action now; write_plan_sensors calls it before each write."""
+        self._action = heat_pump_action(self._hass)
+
+    async def async_added_to_hass(self) -> None:
+        """Resolve the action when the sensor is added."""
+        self.resolve()
+
+    @property
+    def native_value(self):
+        """Return on or off."""
+        return self._action.get("state")
+
+    @property
+    def extra_state_attributes(self):
+        """Return where it comes from, until when, the electricity cost and COP."""
+        return {key: value for key, value in self._action.items() if key != "state"}

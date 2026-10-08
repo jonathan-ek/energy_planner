@@ -54,6 +54,13 @@ def statistics():
     return means
 
 
+@pytest.fixture(autouse=True)
+def no_heat_pump():
+    """Return no heat pump energy history unless a test patches it."""
+    with patch.object(dynamic_planner, "_hourly_changes", AsyncMock(return_value={})):
+        yield
+
+
 @pytest.fixture
 def mock_hass():
     """Create a mock hass with the domain data and Stockholm as time zone."""
@@ -183,7 +190,12 @@ def open_meteo_forecast():
     previous = {
         hour: 2.0 if 6 <= hour.astimezone(TZ).hour < 18 else 0.0 for hour in hours(15)
     }
-    return latest, previous
+    # Air temperature at the timestamps: 0 °C at midnight, +1 °C per hour tomorrow
+    temperatures = {
+        (tomorrow + dt.timedelta(hours=h)).astimezone(dt.UTC): float(h)
+        for h in range(24)
+    }
+    return latest, previous, temperatures
 
 
 async def test_pv_from_open_meteo(mock_hass):
@@ -214,6 +226,29 @@ async def test_pv_from_open_meteo(mock_hass):
     # Flat 1 kWh per hour; the EV session yesterday is left out of the actual too
     assert result["yesterday_load_kwh"] == pytest.approx(24.0)
     assert result["yesterday_load_actual_kwh"] == pytest.approx(24.0)
+    # Mid-quarter temperature tomorrow, None where Open-Meteo has none
+    temperature = result["temperature"]
+    assert temperature[95] is None
+    assert temperature[96 + 4 * 10] == pytest.approx(10.125)
+
+
+async def test_heat_pump_is_removed_from_the_load(mock_hass):
+    """Test that the heat pump's energy is taken out of the load history."""
+    heat_pump = dict.fromkeys(hours(35), 0.25)
+    with (
+        patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
+        patch.object(dynamic_planner, "_forecast_solar_sources", return_value=[]),
+        patch.object(dynamic_planner, "_hourly_means", return_value=statistics()),
+        patch.object(
+            dynamic_planner, "_hourly_changes", AsyncMock(return_value=heat_pump)
+        ),
+        patch.object(dynamic_planner, "_calendar_events", return_value=[]),
+        patch.object(dynamic_planner, "_solar_planes", return_value=(None, [])),
+    ):
+        await dynamic_planner.async_update_forecast(mock_hass)
+    result = mock_hass.data[DOMAIN]["forecast"]
+    assert result["load_tomorrow"] == pytest.approx(18.0)
+    assert result["temperature"] is None
 
 
 async def test_yesterday_includes_planned_loads(mock_hass):

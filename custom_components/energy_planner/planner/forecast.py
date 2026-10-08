@@ -305,6 +305,43 @@ def open_meteo_plane_power(
     return latest, previous
 
 
+def open_meteo_temperature(
+    hourly: dict, models: tuple[str, ...] = OPEN_METEO_MODELS
+) -> dict[dt.datetime, float]:
+    """Return the latest forecast's air temperature (°C) per UTC timestamp.
+
+    temperature_2m is the value at the timestamp (not a mean), averaged over the
+    models, skipping missing values.
+    """
+    temperatures = {}
+    for i, time in enumerate(hourly["time"]):
+        values = [
+            series[i]
+            for model in models
+            if (series := hourly.get(f"temperature_2m_{model}")) is not None
+            and series[i] is not None
+        ]
+        if values:
+            moment = dt.datetime.fromisoformat(time).replace(tzinfo=dt.UTC)
+            temperatures[moment] = mean(values)
+    return temperatures
+
+
+def temperature_quarters(
+    temperatures: Mapping[dt.datetime, float], quarters: list[dt.datetime]
+) -> list[float | None]:
+    """Interpolate point temperatures to the middle of each quarter (None outside)."""
+    points = sorted((m.timestamp(), value) for m, value in temperatures.items())
+    result = []
+    for start in quarters:
+        middle = (start + QUARTER / 2).timestamp()
+        if not points or not points[0][0] <= middle <= points[-1][0]:
+            result.append(None)
+            continue
+        result.append(_power_at(points, middle))
+    return result
+
+
 def hourly_power_to_watts(hourly_kw: Mapping[dt.datetime, float]) -> dict:
     """Place hourly mean power (kW) mid-hour, in W, as input for pv_quarters."""
     half = dt.timedelta(minutes=30)

@@ -342,3 +342,46 @@ def test_month_share():
     assert opt._month_share(STARTS, STARTS[0]) == pytest.approx(24 / (19 * 24))
     last = [s.replace(day=31) for s in STARTS]
     assert opt._month_share(last, last[0]) == pytest.approx(1.0)
+
+
+def test_marginal_is_the_price_of_more_load():
+    """Test what more load costs: the buy price, the lost export, or battery energy."""
+    probe = 0.075
+    # Empty battery and no PV: every extra kWh is bought
+    plan = opt.optimize(
+        STARTS, [1000.0] * 96, LOAD, NO_PV, battery(), NO_FEES, probe_kwh=probe
+    )
+    assert plan.marginal == pytest.approx([1.25] * 96)
+    # Full battery that cannot take the PV: the extra kWh is not exported
+    stuck = opt.Battery(2.0, 20.0, 20.0, 0.0, 0.0, 0.81)
+    plan = opt.optimize(
+        STARTS, [1000.0] * 96, [0.0] * 96, PV_MIDDAY, stuck, NO_FEES, probe_kwh=probe
+    )
+    assert plan.marginal[11 * 4] == pytest.approx(1.0)
+    # Without a probe there is no marginal
+    assert (
+        opt.optimize(STARTS, [1000.0] * 96, LOAD, NO_PV, battery(), NO_FEES).marginal
+        == []
+    )
+
+
+def test_exempt_load_ignores_the_import_limit():
+    """Test that exempt load (the heat pump) is not held back by the import limit."""
+    limit = opt.Limit(1.0, 0, 24)
+    heat_pump = [0.075] * 96
+    load = [0.25 + 0.075] * 96  # 1 kW house + 0.3 kW heat pump
+    capped = opt.optimize(
+        STARTS, [1000.0] * 96, load, NO_PV, battery(), NO_FEES, limit=limit
+    )
+    exempt = opt.optimize(
+        STARTS,
+        [1000.0] * 96,
+        load,
+        NO_PV,
+        battery(),
+        NO_FEES,
+        limit=limit,
+        exempt=heat_pump,
+    )
+    assert capped.limit_excess_kwh == pytest.approx(0.075 * 96)
+    assert exempt.limit_excess_kwh == 0.0

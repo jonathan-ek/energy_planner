@@ -25,6 +25,8 @@ from ..const import (
 )
 from .battery_action import QUARTER, SLOT_MODES, BatteryState, Slot, resolve
 from .battery_optimizer import QUARTER_HOURS, Battery, Limit, optimize
+from .heat_pump import schedule
+from .heating import plan_inputs
 from .nordpool_utils import fetch_nordpool_data
 from .utils import get_tariff
 
@@ -229,7 +231,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     now = dt_utils.now()
     current = now.replace(minute=now.minute - now.minute % 15, second=0, microsecond=0)
 
-    starts, price_list, load, pv = [], [], [], []
+    starts, price_list, load, pv, temperatures = [], [], [], [], []
     for index, start_text in enumerate(forecast["starts"]):
         start = dt_utils.as_local(dt.datetime.fromisoformat(start_text))
         if start < current:
@@ -241,6 +243,9 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         price_list.append(prices[start])
         load.append(base + forecast["planned"][index] + forecast["reserve"][index])
         pv.append(forecast["pv"][index] if forecast["pv"] else 0.0)
+        temperatures.append(
+            forecast["temperature"][index] if forecast.get("temperature") else None
+        )
     if not starts:
         _LOGGER.info("No prices for the forecast, skipping the battery plan")
         return
@@ -259,21 +264,40 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         month_start,
         now,
     )
-    plan = await hass.async_add_executor_job(
-        functools.partial(
-            optimize,
-            starts,
-            price_list,
-            load,
-            pv,
-            battery,
-            tariff,
-            limit,
-            history,
-            forced=_forced(hass, starts),
-            current_mode=_planned_mode(hass, now),
-        )
+    run = functools.partial(
+        optimize,
+        starts,
+        price_list,
+        battery=battery,
+        tariff=tariff,
+        limit=limit,
+        history=history,
+        forced=_forced(hass, starts),
+        current_mode=_planned_mode(hass, now),
     )
+    # The heat pump runs where its heat is cheaper than district heating at what more
+    # load costs in this plan (Plan.marginal); then the battery is planned with it.
+    # Its load is exempt from the import limit, only the power charges count
+    heat = plan_inputs(hass, starts, temperatures)
+    plan = await hass.async_add_executor_job(
+        functools.partial(run, load=load, pv=pv, probe_kwh=heat.probe_kwh)
+    )
+    marginal = [round(m * 100, 1) for m in plan.marginal]
+    heat_pump = (
+        schedule(marginal, heat.cops, heat.district, heat.heating, heat.margin)
+        if heat.probe_kwh > 0
+        else [False] * len(starts)
+    )
+    if any(heat_pump):
+        extra = [heat.probe_kwh if on else 0.0 for on in heat_pump]
+        plan = await hass.async_add_executor_job(
+            functools.partial(
+                run,
+                load=[a + b for a, b in zip(load, extra, strict=True)],
+                pv=pv,
+                exempt=extra,
+            )
+        )
 
     capacity = float(config.get("battery_capacity", 0)) / 1000
     hass.data[DOMAIN]["plan"] = {
@@ -284,6 +308,11 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         "grid_import": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_import],
         "grid_export": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_export],
         "targets": [None if t is None else round(t, 2) for t in plan.targets],
+        # Heat pump: on per quarter, what more load costs (öre/kWh) and its COP
+        "heat_pump": heat_pump,
+        "marginal": marginal,
+        "temperature": [None if t is None else round(t, 1) for t in heat.temperatures],
+        "heat_pump_cop": [None if c is None else round(c, 2) for c in heat.cops],
         "mode": plan.modes[0],
         "target_kw": None if plan.targets[0] is None else round(plan.targets[0], 2),
         "energy_cost": round(plan.energy_cost, 2),
@@ -302,11 +331,13 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     }
     _LOGGER.info(
         "Battery plan until %s: %s now, energy %.2f SEK, wear %.2f SEK, "
-        "power charge +%.2f SEK",
+        "power charge +%.2f SEK, heat pump on %d of %d quarters",
         starts[-1].isoformat(),
         plan.modes[0],
         plan.energy_cost,
         plan.wear_cost,
         plan.power_cost,
+        sum(heat_pump),
+        len(heat_pump),
     )
     write_plan_sensors(hass)

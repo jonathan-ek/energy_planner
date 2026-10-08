@@ -185,3 +185,22 @@ async def test_current_action_follows_an_auto_slot(mock_hass):
         result = battery_plan.current_action(mock_hass)
     assert result["source"] == "plan"
     assert result["mode"] == mock_hass.data[DOMAIN]["plan"]["modes"][0]
+
+
+@pytest.mark.parametrize(("temperature", "heats"), [(0.0, True), (20.0, False)])
+async def test_heat_pump_is_planned(mock_hass, temperature, heats):
+    """Test that the heat pump runs on cheap night electricity when heat is needed."""
+    mock_hass.data[DOMAIN]["config"].update(
+        {"heat_pump_power": 300, "heat_pump_margin": 5, "heat_pump_heating_limit": 15}
+    )
+    mock_hass.data[DOMAIN]["forecast"]["temperature"] = [temperature] * 192
+    plan = await run(mock_hass)
+    on = dict(zip(plan["starts"], plan["heat_pump"], strict=True))
+    night = dt.datetime(2026, 1, 14, 3, tzinfo=TZ).isoformat()
+    assert on[night] is heats
+    assert len(plan["marginal"]) == len(plan["starts"])
+    # At least 0.79 kr/kWh at night (200 SEK/MWh * 1.25 + 54 öre night fees); more,
+    # because the battery charges at the night import target and the load raises it
+    assert plan["marginal"][plan["starts"].index(night)] >= 79.0
+    # Its load is exempt from the 1 kW day limit
+    assert plan["limit_excess_kwh"] == 0.0

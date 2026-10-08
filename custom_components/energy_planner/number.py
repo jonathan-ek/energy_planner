@@ -6,6 +6,7 @@ from homeassistant.const import (
     UnitOfElectricCurrent,
     UnitOfEnergy,
     UnitOfPower,
+    UnitOfTemperature,
     PERCENTAGE,
     UnitOfTime,
 )
@@ -326,6 +327,56 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 "max_val": 24,
                 "step": 1,
                 "unit_of_measurement": UnitOfTime.HOURS,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                # What the heat pump draws while it heats; the battery plan adds it to
+                # the load when it runs. 0 = do not plan the heat pump
+                "id": "heat_pump_power",
+                "name": "Heat pump power",
+                "default": 300,
+                "min_val": 0,
+                "max_val": 3000,
+                "step": 50,
+                "unit_of_measurement": UnitOfPower.WATT,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                # The heat pump only runs when its heat is at least this much cheaper
+                # than district heating (öre per kWh of heat)
+                "id": "heat_pump_margin",
+                "name": "Heat pump margin",
+                "default": 5,
+                "min_val": 0,
+                "max_val": 100,
+                "step": 1,
+                "unit_of_measurement": "öre/kwh",
+                "device_class": SensorDeviceClass.MONETARY,
+                "state_class": SensorStateClass.TOTAL,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                # Heat is only needed (and saves district heating) below this outdoor
+                # temperature
+                "id": "heat_pump_heating_limit",
+                "name": "Heat pump heating limit",
+                "default": 15,
+                "min_val": -10,
+                "max_val": 25,
+                "step": 0.5,
+                "unit_of_measurement": UnitOfTemperature.CELSIUS,
                 "enabled": True,
                 "data_store": "config",
             },

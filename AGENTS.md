@@ -13,12 +13,12 @@ outside the integration by scripts/automations (see `examples/`).
 | `custom_components/energy_planner/planner/` | All planning logic (see below) |
 | `custom_components/energy_planner/button.py` | `button.energy_planner_update_battery_plan`, recalculates the battery plan |
 | `custom_components/energy_planner/{datetime,number,select,switch,time}.py` | Entity platforms; each holds its entity definitions as dicts plus one generic entity class |
-| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`) `sensor.energy_planner_battery_plan`, `sensor.energy_planner_battery_action` (what the inverter should do now, `battery_plan.current_action`) and the heat pump sensors `heat_pump_cop`, `district_heating_price`, `heat_pump_saving` (`heating.heat_pump_economy`); they only read `hass.data` |
+| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`) `sensor.energy_planner_battery_plan`, `sensor.energy_planner_battery_action` (what the inverter should do now, `battery_plan.current_action`) the heat pump sensors `heat_pump_cop`, `district_heating_price`, `heat_pump_saving` (`heating.heat_pump_economy`) and `heat_pump_action` (`heating.heat_pump_action`); they only read `hass.data` |
 | `custom_components/energy_planner/store.py` | Thin wrapper around HA `Store` (`.storage/energy_planner.<key>`) |
 | `custom_components/energy_planner/config_flow.py` | Setup asks for `nordpool_entity_id`; the options flow chooses the grid tariff (flat, a preset or custom YAML) |
 | `custom_components/energy_planner/services.yaml`, `translations/en.json` | Service descriptions |
 | `tests/planner/` | Tests for the basic planner, the price peak planner, the forecast functions and the forecast glue. The `.md`/`.txt`/`ARCHITECTURE.py` files in `tests/` are documentation |
-| `examples/` | Lovelace cards, `python_script`s and automations that consume the schedule; `follow_battery_action.py` + `_automation.yml` follow the action sensor and only write changed settings |
+| `examples/` | Lovelace cards, `python_script`s and automations that consume the schedule; `follow_battery_action.py` + `_automation.yml` follow the action sensor and only write changed settings; `follow_heat_pump_action_automation.yml` switches `climate.hallen` |
 | `energy_planner_extras.yaml`, `add_slot_form.yml`, `Basic_config_card.yml` | HA package + cards for the manual "add slot" form |
 | `local_deploy.sh` | Copies the component into `~/projects/ha_demo/config` and restarts its docker compose |
 
@@ -94,13 +94,16 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   `forecast_reserve_end` (h, default 18 / 22), `grid_import_limit` (kW hourly mean the
   planner may import, 0 = off), `grid_import_limit_start` / `grid_import_limit_end`
   (h, default 6 / 23), `battery_wear_cost` (öre per kWh taken out of the battery,
-  default 20)
+  default 20), `heat_pump_power` (W while heating, default 300, 0 = not planned),
+  `heat_pump_margin` (öre per kWh of heat, default 5), `heat_pump_heating_limit`
+  (°C outdoor, default 15)
 - Forecast inputs (config store only, defaults in `const.py`): `forecast_load_sensor`,
   `forecast_pv_sensor`, `forecast_ev_sensor`, `forecast_calendar`
   (`calendar.energiplan`); battery plan inputs `battery_soc_sensor`,
   `battery_voltage_sensor`, `grid_import_sensor`; heat pump inputs
   `outdoor_temperature_sensor` (`sensor.gw1100a_outdoor_temperature`),
-  `heat_pump_model` (`msz_ap42`), `district_heating` (`tekniska_verken_2026`)
+  `heat_pump_model` (`msz_ap42`), `district_heating` (`tekniska_verken_2026`),
+  `heat_pump_energy_sensor` (`sensor.hallen_energy`)
 
 ## Control flow
 
@@ -132,7 +135,8 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 Method and numbers come from a backtest on the real HA data (Oct 2026):
 
 - **Load** = `sensor.solis_s6_solis_household_load_power` hourly mean minus EV
-  charging (`sensor.ehwuhqtp_effekt`, planned separately). Forecast per local hour =
+  charging (`sensor.ehwuhqtp_effekt`) and the heat pump (`sensor.hallen_energy` hourly
+  change), which are planned separately. Forecast per local hour =
   mean of (last 7 days' profile, last 4 same-type days' profile; same type =
   workday/weekend), using only days before today, then split evenly into quarters.
   About 24% hourly and 14% daily error. Quarter profiles, temperature and gradient
@@ -164,6 +168,7 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   usually runs), for unplanned weekend load. Holidays are not detected.
 - Output: `hass.data[DOMAIN]["forecast"]` with parallel lists `starts`, `load`
   (profile), `planned`, `reserve`, `pv` (kWh per quarter, all of today and tomorrow),
+  `temperature` (Open-Meteo air temperature mid-quarter, None without Open-Meteo),
   `planned_events`, and totals. `load_tomorrow` / `load_today_remaining` = profile +
   planned (today counted from the current quarter); `base_tomorrow` and
   `planned_tomorrow` split it. The sensors expose the lists as attributes, which are
@@ -254,26 +259,41 @@ heat: district heating at the season's energy price against electricity / COP.
   in Dec–Feb (2026: Jan 2.53, Feb 2.42 MWh, from the bills). These sensors
   replace the MQTT feed (`sensor.fjarrvarme`, stuck since 2025) and the old heat pump
   automations, removed in Oct 2026.
-- Electricity: spot × 1.25 + `tariff.buy_fee`, or, for the part the battery plan
-  exports this quarter (`HEAT_PUMP_INPUT_KW` 1 kW), spot + `tariff.sell_fee`. Power
-  charges are not included.
+- Electricity (saving sensor): spot × 1.25 + `tariff.buy_fee`, or, for the part of
+  `heat_pump_power` the battery plan exports this quarter, spot + `tariff.sell_fee`.
+  Power charges are not included.
 - Break-even with COP 3: spot about 134 öre/kWh in Oct–Nov and Mar–Apr, 189 in
   Dec–Feb; in summer only exported solar pays.
-- Next: an example automation that switches `climate.hallen` on the saving with a
-  margin and a minimum run time, then the heat pump as a flexible load in the battery
-  plan (cheap hours, solar surplus, power peaks and the import limit).
+- Draw: MELCloud history (`sensor.hallen_energy`, 0.1 kWh steps) shows 0.1–0.2 kW on
+  average while running, hall target 24 °C; the owner plans with 300 W
+  (`heat_pump_power`) to be conservative. So its power peak costs little (0.3 kW ×
+  45 kr/kW in winter days) and it nearly always pays for it.
+- In the battery plan (`async_update_plan`): a first run prices `heat_pump_power` more
+  load per quarter (`Plan.marginal`, öre/kWh: buy price, lost export, or the battery
+  energy it uses, plus power charges). `heat_pump.schedule` turns it on where the
+  outdoor temperature (forecast, else live) is below `heat_pump_heating_limit` and
+  `district − marginal / COP ≥ heat_pump_margin`, without runs or gaps under 30 min.
+  A second run plans the battery with that load added and `exempt` from the import
+  limit (only power charges limit it). The plan publishes `heat_pump`, `marginal`,
+  `temperature` and `heat_pump_cop` per quarter.
+- `sensor.energy_planner_heat_pump_action` (`on`/`off`): the plan now (source `plan`,
+  `until` the end of the run); if the plan is older than 30 min, the saving sensor
+  against the margin and the heating limit (source `fallback`); without prices or
+  an outdoor temperature (just after a restart) no state (source `none`), so the
+  automation leaves the heat pump alone.
+  `examples/follow_heat_pump_action_automation.yml` sets `climate.hallen` to `heat` or
+  `off` (only from `off` / `heat`, so cooling is left alone); the target stays at
+  24 °C for now, to see how much it changes the use.
 
 ## Household and tariff
 
 Background for the planner (from the owner, Oct 2026):
 
 - Location Linköping (58.38 N, 15.66 E), price area SE3, grid operator Tekniska verken.
-- Main heating is district heating (fjärrvärme, price in `sensor.fjarrvarme`,
-  öre/kWh). An air-to-air heat pump ("Hallen", MELCloud `climate.hallen`, energy
-  `sensor.hallen_energy`) can heat or cool part of the house when that is cheaper than
-  district heating; existing HA automations already compare spot price and the
-  estimated COP (`sensor.estimerad_verkningsgrad_luft_luft_varmepump`) with the
-  district heating price.
+- Main heating is district heating (fjärrvärme). An air-to-air heat pump ("Hallen",
+  MELCloud `climate.hallen`, energy `sensor.hallen_energy`) can heat or cool part of
+  the house; it should heat when that is cheaper than district heating (see "Heat
+  pump").
 - Electricity is bought at the quarter-hour spot price plus network fees.
 - Network tariff: Konsumtionsabonnemang, "Prislista alternativ" (time-differentiated),
   prices from 2026-01-01 incl. VAT
@@ -303,7 +323,8 @@ Users have different grid operators, so fees and power charges come from the tar
 (`planner/tariff.py`), chosen in the integration options. Owner: preset
 `tekniska_verken_alternativ`, `grid_import_limit` 1 kW 06–23. The limit is meant to
 keep daytime import at the house's base load: with a 45 kr/kW winter day power charge,
-charging the battery from the grid in the day costs far more than at night. Later, the
+charging the battery from the grid in the day costs far more than at night. The heat
+pump's load is exempt from it (Oct 2026): its saving pays for the higher peak. Later, the
 planner should also be able to shift controllable loads (e.g. the heat pump) to stay
 under it.
 

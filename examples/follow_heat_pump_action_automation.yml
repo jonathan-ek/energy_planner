@@ -1,0 +1,45 @@
+# Turns the heat pump (climate.hallen) on and off from
+# sensor.energy_planner_heat_pump_action: on while its heat is cheaper than district
+# heating, given the battery plan (see AGENTS.md, "Heat pump").
+#
+# Only switches between heat and off, so cooling or another mode set by hand is left
+# alone, and only writes when the mode differs. The plan has no runs or gaps shorter
+# than 30 minutes. The target temperature is not changed.
+alias: Follow heat pump action
+description: ""
+triggers:
+  - trigger: state
+    entity_id:
+      - sensor.energy_planner_heat_pump_action
+  - trigger: time_pattern
+    minutes: /5
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: sensor.energy_planner_heat_pump_action
+            state: "on"
+          - condition: state
+            entity_id: climate.hallen
+            state: "off"
+        sequence:
+          - action: climate.set_hvac_mode
+            target:
+              entity_id: climate.hallen
+            data:
+              hvac_mode: heat
+      - conditions:
+          - condition: state
+            entity_id: sensor.energy_planner_heat_pump_action
+            state: "off"
+          - condition: state
+            entity_id: climate.hallen
+            state: heat
+        sequence:
+          - action: climate.set_hvac_mode
+            target:
+              entity_id: climate.hallen
+            data:
+              hvac_mode: "off"
+mode: single

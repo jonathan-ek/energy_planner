@@ -36,3 +36,6 @@ PLAN_SENSORS = "plan_sensors"
 DEFAULT_OUTDOOR_TEMPERATURE_SENSOR = "sensor.gw1100a_outdoor_temperature"
 DEFAULT_HEAT_PUMP_MODEL = "msz_ap42"
 DEFAULT_DISTRICT_HEATING = "tekniska_verken_2026"
+# Energy counter of the heat pump: removed from the load history, the battery plan adds
+# the heat pump where it plans it
+DEFAULT_HEAT_PUMP_ENERGY_SENSOR = "sensor.hallen_energy"

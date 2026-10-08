@@ -29,6 +29,12 @@ it lets the battery charge faster in the cheapest hours, at the price of a highe
 Battery wear (`Battery.wear_cost`, SEK per kWh taken out of the battery) is added to
 every discharge, so the battery is only cycled when the price difference pays for it.
 
+`Plan.marginal` is what `probe_kwh` more load costs per kWh in each quarter, given
+the plan: the buy price when importing, the export price lost when exporting, or the
+value of the battery energy it uses (from the dynamic program), plus power charges.
+The heat pump is planned on it (heat_pump.py); its load can be `exempt` from the
+household's import limit, so only the power charges limit it.
+
 A peak is paid once per month but then usable for the rest of it, while the plan only
 covers a day or two. So when comparing targets, raising a peak costs the share of the
 monthly charge that the plan covers of the month's remaining hours (assuming the
@@ -100,6 +106,7 @@ class Plan:
     # "<index in tariff.power_charges>:<YYYY-MM>"
     peaks: dict[str, tuple[float, float]]
     objective: float  # what the search minimizes, see the module docstring
+    marginal: list[float]  # SEK per kWh of `probe_kwh` more load in each quarter
 
 
 @dataclasses.dataclass(frozen=True)
@@ -115,13 +122,17 @@ class _Inputs:
     end_price: float  # SEK per kWh left in the battery at the end, wear deducted
     forced: Sequence[str | None]  # a mode the quarter must use, e.g. a manual slot
     current_mode: str | None  # the mode running now, changing it costs SWITCH_COST
+    probe_kwh: float  # extra load per quarter that Plan.marginal prices, 0: none
 
 
-def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh):
-    """Return (next soc, grid import, grid export) for a mode, vectorized over soc."""
+def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh, extra=0.0):
+    """Return (next soc, grid import, grid export) for a mode, vectorized over soc.
+
+    `extra` is load added to the quarter's (for Plan.marginal).
+    """
     battery = inputs.battery
     eta = math.sqrt(battery.efficiency)
-    net = inputs.net[index]
+    net = inputs.net[index] + extra
     power = battery.max_power_kw * QUARTER_HOURS
     available = np.maximum(soc - battery.min_kwh, 0.0) * eta  # deliverable kWh
     room = np.maximum(battery.max_kwh - soc, 0.0) / eta  # kWh it can take in
@@ -151,10 +162,17 @@ def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh):
     return next_soc, np.maximum(grid, 0.0), exported
 
 
-def _quarter_cost(inputs: _Inputs, index: int, grid_import, grid_export, caps):
-    """Energy cost plus penalties for import above the limit and the targets."""
+def _quarter_cost(
+    inputs: _Inputs, index: int, grid_import, grid_export, caps, exempt=0.0
+):
+    """Energy cost plus penalties for import above the limit and the targets.
+
+    `exempt` is extra load that the limit does not apply to (for Plan.marginal).
+    """
     cost = grid_import * inputs.buy[index] - grid_export * inputs.sell[index]
-    cost = cost + np.maximum(grid_import - inputs.limit[index], 0.0) * LIMIT_PENALTY
+    cost = cost + (
+        np.maximum(grid_import - inputs.limit[index] - exempt, 0.0) * LIMIT_PENALTY
+    )
     # A kWh above a target in one quarter raises that hour's mean by 1 kW
     for cap_kwh, kr_per_kw in caps:
         cost = cost + np.maximum(grid_import - cap_kwh, 0.0) * kr_per_kw
@@ -204,19 +222,33 @@ def _optimize(inputs: _Inputs, targets: list[float], caps: list[list[tuple]]):
     # Forward pass from the actual state of charge and the mode running now
     soc = np.array([min(max(battery.soc_kwh, battery.min_kwh), battery.max_kwh)])
     previous = MODES.index(inputs.current_mode) if inputs.current_mode else rows - 1
-    modes, socs, imports, exports = [], [], [], []
+    modes, socs, imports, exports, marginal = [], [], [], [], []
     switches = 0
+
+    def total(index, mode, soc, extra=0.0):
+        next_soc, imp, exp = _step(
+            inputs, index, MODES[mode], soc, targets[index], extra
+        )
+        cost = float(
+            _quarter_cost(inputs, index, imp, exp, caps[index], extra)[0]
+            + _wear(battery, soc, next_soc)[0]
+            + np.interp(next_soc, grid, values[index + 1][mode])[0]
+            + switch[previous, mode]
+        )
+        return cost, next_soc, imp, exp
+
     for index in range(count):
         candidates = []
         for mode in _allowed(inputs, index):
-            next_soc, imp, exp = _step(inputs, index, MODES[mode], soc, targets[index])
-            total = float(
-                _quarter_cost(inputs, index, imp, exp, caps[index])[0]
-                + _wear(battery, soc, next_soc)[0]
-                + np.interp(next_soc, grid, values[index + 1][mode])[0]
-                + switch[previous, mode]
+            cost, next_soc, imp, exp = total(index, mode, soc)
+            candidates.append((cost, mode, next_soc, imp, exp))
+        if inputs.probe_kwh > 0:
+            probed = min(
+                total(index, mode, soc, inputs.probe_kwh)[0]
+                for mode in _allowed(inputs, index)
             )
-            candidates.append((total, mode, next_soc, imp, exp))
+            lowest = min(c[0] for c in candidates)
+            marginal.append((probed - lowest) / inputs.probe_kwh)
         # Small tie margin: the first (simplest) mode wins when costs are equal
         lowest = min(c[0] for c in candidates)
         _, mode, soc, imp, exp = next(c for c in candidates if c[0] <= lowest + 1e-9)
@@ -237,7 +269,7 @@ def _optimize(inputs: _Inputs, targets: list[float], caps: list[list[tuple]]):
         socs.append(float(soc[0]))
         imports.append(float(imp[0]))
         exports.append(float(exp[0]))
-    return modes, socs, imports, exports, switches
+    return modes, socs, imports, exports, switches, marginal
 
 
 def _hourly(starts: Sequence[dt.datetime], kwh: Sequence[float]):
@@ -277,6 +309,8 @@ def optimize(
     history: Mapping[dt.datetime, float] | None = None,
     forced: Sequence[str | None] | None = None,
     current_mode: str | None = None,
+    exempt: Sequence[float] | None = None,
+    probe_kwh: float = 0.0,
 ) -> Plan:
     """Return the cheapest plan.
 
@@ -284,7 +318,9 @@ def optimize(
     `pv` kWh per quarter; `history` the hourly mean grid import (kW, keyed by local
     hour start) so far this month, which sets the peaks already paid for; `forced`
     a mode per quarter that must be used (None: free); `current_mode` the mode the
-    battery runs now, so a recalculated plan only changes it when it pays.
+    battery runs now, so a recalculated plan only changes it when it pays; `exempt`
+    kWh per quarter of the load that the import limit does not apply to (the heat
+    pump); `probe_kwh` the extra load per quarter that `Plan.marginal` prices.
     """
     history = dict(history or {})
     limit = limit or Limit()
@@ -306,7 +342,7 @@ def optimize(
     ]
     limit_kwh = np.array(
         [math.inf if kw is None else kw * QUARTER_HOURS for kw in limits]
-    )
+    ) + np.array(exempt if exempt is not None else [0.0] * len(starts), dtype=float)
     # Energy left at the end is worth no more than a purchase at the cheapest price
     # of the horizon's last day (minus the wear of taking it out): the battery can be
     # refilled then. A typical price instead makes the plan hoard energy it could
@@ -330,6 +366,7 @@ def optimize(
         end_price,
         tuple(forced) if forced else (None,) * len(starts),
         current_mode,
+        0.0,
     )
 
     # The power charges in the horizon, per month, and the peak already reached
@@ -372,7 +409,9 @@ def optimize(
                     for k in keys
                 ]
             )
-        modes, socs, imports, exports, switches = _optimize(inputs, targets, caps)
+        modes, socs, imports, exports, switches, marginal = _optimize(
+            inputs, targets, caps
+        )
         energy = float(np.dot(imports, buy) - np.dot(exports, sell))
         first = min(max(battery.soc_kwh, battery.min_kwh), battery.max_kwh)
         wear = sum(
@@ -411,6 +450,7 @@ def optimize(
             - end_value
             + excess * LIMIT_PENALTY
             + switches * SWITCH_COST,
+            marginal,
         )
 
     # Coordinate search over the import targets, starting at the peaks already paid
@@ -430,4 +470,8 @@ def optimize(
                     best, levels, improved = plan, {**levels, key: float(level)}, True
         if not improved:
             break
+    if probe_kwh > 0:
+        # Only for the chosen targets: the probe slows each run down
+        inputs = dataclasses.replace(inputs, probe_kwh=probe_kwh)
+        best = run(levels)
     return best

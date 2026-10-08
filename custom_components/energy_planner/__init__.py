@@ -62,6 +62,9 @@ PLAN_SETTINGS = (
     "grid_import_limit",
     "grid_import_limit_start",
     "grid_import_limit_end",
+    "heat_pump_power",
+    "heat_pump_margin",
+    "heat_pump_heating_limit",
 )
 # Recalculate the plan when the actual SOC is this many % from the plan
 SOC_DRIFT = 5.0

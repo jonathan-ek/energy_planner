@@ -1,5 +1,11 @@
-"""HA glue for the heat pump economy (heat_pump.py), shown by the heat pump sensors."""
+"""HA glue for the heat pump (heat_pump.py).
 
+Its economy now, the inputs for the battery plan, and what it should do now
+(`sensor.energy_planner_heat_pump_action`).
+"""
+
+from collections.abc import Sequence
+import dataclasses
 import datetime as dt
 
 from homeassistant.core import HomeAssistant
@@ -11,23 +17,54 @@ from ..const import (
     DEFAULT_OUTDOOR_TEMPERATURE_SENSOR,
     DOMAIN,
 )
-from .battery_action import QUARTER
+from .battery_action import QUARTER, STALE_AFTER
 from .heat_pump import (
     COP_CURVES,
     DISTRICT_HEATING_PRESETS,
+    cop,
     district_heating_price,
     evaluate,
 )
 from .utils import get_tariff
-
-# kW the heat pump typically draws: the planned export covers this much of it
-HEAT_PUMP_INPUT_KW = 1.0
 
 
 def _quarter(moment: dt.datetime) -> dt.datetime:
     return moment.replace(
         minute=moment.minute - moment.minute % 15, second=0, microsecond=0
     )
+
+
+def _setting(hass: HomeAssistant, key: str, default: float) -> float:
+    return float(hass.data[DOMAIN]["config"].get(key, default))
+
+
+def _power_kw(hass: HomeAssistant) -> float:
+    """Return what the heat pump draws while it heats in kW (heat_pump_power)."""
+    return _setting(hass, "heat_pump_power", 300) / 1000
+
+
+def _curve(hass: HomeAssistant):
+    config = hass.data[DOMAIN]["config"]
+    return COP_CURVES.get(config.get("heat_pump_model", DEFAULT_HEAT_PUMP_MODEL), ())
+
+
+def _seasons(hass: HomeAssistant):
+    config = hass.data[DOMAIN]["config"]
+    return DISTRICT_HEATING_PRESETS.get(
+        config.get("district_heating", DEFAULT_DISTRICT_HEATING), ()
+    )
+
+
+def outdoor_temperature(hass: HomeAssistant) -> float | None:
+    """Return the live outdoor temperature (°C)."""
+    config = hass.data[DOMAIN]["config"]
+    state = hass.states.get(
+        config.get("outdoor_temperature_sensor", DEFAULT_OUTDOOR_TEMPERATURE_SENSOR)
+    )
+    try:
+        return float(state.state) if state is not None else None
+    except ValueError:
+        return None
 
 
 def _planned_export(hass: HomeAssistant, moment: dt.datetime) -> float:
@@ -43,26 +80,20 @@ def _planned_export(hass: HomeAssistant, moment: dt.datetime) -> float:
 
 
 def heat_pump_economy(hass: HomeAssistant) -> dict:
-    """Return the heat pump economy now (see heat_pump.evaluate), or {}."""
+    """Return the heat pump economy now (see heat_pump.evaluate).
+
+    Without the inputs only the district heating price and temperature are given.
+    """
     data = hass.data[DOMAIN]
-    config = data["config"]
     now = dt_utils.now()
-    seasons = DISTRICT_HEATING_PRESETS.get(
-        config.get("district_heating", DEFAULT_DISTRICT_HEATING), ()
-    )
-    district = district_heating_price(seasons, now)
-    curve = COP_CURVES.get(config.get("heat_pump_model", DEFAULT_HEAT_PUMP_MODEL), ())
-    state = hass.states.get(
-        config.get("outdoor_temperature_sensor", DEFAULT_OUTDOOR_TEMPERATURE_SENSOR)
-    )
+    district = district_heating_price(_seasons(hass), now)
+    curve = _curve(hass)
     spot = (data.get("prices") or {}).get(_quarter(now))
-    try:
-        outdoor = float(state.state) if state is not None else None
-    except ValueError:
-        outdoor = None
+    outdoor = outdoor_temperature(hass)
     if district is None or outdoor is None or spot is None or not curve:
         return {"district_heating_price": district, "outdoor_temperature": outdoor}
     tariff = get_tariff(hass)
+    power = _power_kw(hass)
     result = evaluate(
         spot,
         tariff.buy_fee(now),
@@ -70,7 +101,95 @@ def heat_pump_economy(hass: HomeAssistant) -> dict:
         outdoor,
         curve,
         district,
-        _planned_export(hass, now) / HEAT_PUMP_INPUT_KW,
+        _planned_export(hass, now) / power if power > 0 else 0.0,
     )
     result["spot"] = round(spot / 10, 1)
     return result
+
+
+@dataclasses.dataclass(frozen=True)
+class PlanInputs:
+    """What the battery plan needs to plan the heat pump, per quarter."""
+
+    probe_kwh: float  # what the heat pump uses in a quarter, 0: not planned
+    margin: float  # öre per kWh of heat
+    temperatures: list[float | None]
+    cops: list[float | None]
+    district: list[float | None]
+    heating: list[bool]
+
+
+def plan_inputs(
+    hass: HomeAssistant,
+    starts: Sequence[dt.datetime],
+    temperatures: Sequence[float | None],
+) -> PlanInputs:
+    """Return the heat pump inputs for the battery plan's quarters.
+
+    `temperatures` is the forecast per quarter; missing ones use the live outdoor
+    temperature.
+    """
+    live = outdoor_temperature(hass)
+    temps = [live if t is None else t for t in temperatures]
+    curve = _curve(hass)
+    seasons = _seasons(hass)
+    limit = _setting(hass, "heat_pump_heating_limit", 15)
+    return PlanInputs(
+        probe_kwh=_power_kw(hass) * QUARTER.total_seconds() / 3600 if curve else 0.0,
+        margin=_setting(hass, "heat_pump_margin", 5),
+        temperatures=temps,
+        cops=[None if t is None else cop(curve, t) for t in temps],
+        district=[district_heating_price(seasons, s) for s in starts],
+        heating=[t is not None and t < limit for t in temps],
+    )
+
+
+def heat_pump_action(hass: HomeAssistant) -> dict:
+    """Return whether the heat pump should heat now.
+
+    From the battery plan (source `plan`) while it is fresh and covers now, otherwise
+    from the economy now and the heating limit (source `fallback`); without prices or
+    an outdoor temperature no decision (state None, source `none`).
+    """
+    now = dt_utils.now()
+    plan = hass.data[DOMAIN].get("plan") or {}
+    flags = plan.get("heat_pump")
+    if flags and now - dt.datetime.fromisoformat(plan["updated"]) <= STALE_AFTER:
+        starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
+        index = next((i for i, s in enumerate(starts) if s <= now < s + QUARTER), None)
+        if index is not None:
+            last = index
+            while last + 1 < len(flags) and flags[last + 1] == flags[index]:
+                last += 1
+            return {
+                "state": "on" if flags[index] else "off",
+                "source": "plan",
+                "until": (starts[last] + QUARTER).isoformat(),
+                "marginal": plan["marginal"][index],
+                "cop": plan["heat_pump_cop"][index],
+            }
+    economy = heat_pump_economy(hass)
+    outdoor = economy.get("outdoor_temperature")
+    saving = economy.get("saving")
+    if "cop" not in economy or outdoor is None:
+        # No prices or temperature yet (e.g. just after a restart): no decision, so
+        # the automation leaves the heat pump as it is
+        return {
+            "state": None,
+            "source": "none",
+            "until": None,
+            "marginal": None,
+            "cop": None,
+        }
+    heat = (
+        saving is not None
+        and saving >= _setting(hass, "heat_pump_margin", 5)
+        and outdoor < _setting(hass, "heat_pump_heating_limit", 15)
+    )
+    return {
+        "state": "on" if heat else "off",
+        "source": "fallback",
+        "until": None,
+        "marginal": economy.get("electricity_price"),
+        "cop": economy.get("cop"),
+    }

@@ -120,3 +120,46 @@ def evaluate(
     result["saving"] = round(district_price - heat, 1)
     result["break_even_spot"] = round((district_price * pump_cop - buy_fee) / 1.25, 1)
     return result
+
+
+def schedule(
+    marginal: Sequence[float],
+    cops: Sequence[float | None],
+    district: Sequence[float | None],
+    heating: Sequence[bool],
+    margin: float,
+    min_quarters: int = 2,
+) -> list[bool]:
+    """Return per quarter whether the heat pump should heat.
+
+    `marginal` is what the heat pump's electricity costs in each quarter (öre/kWh, the
+    battery plan's Plan.marginal), `district` the district heating price (öre/kWh),
+    `heating` whether heat is needed. It runs where its heat is at least `margin`
+    öre/kWh cheaper. Gaps and runs shorter than `min_quarters` are removed (gaps
+    first), so the compressor does not start and stop every quarter; a run at the
+    start or end of the horizon may continue outside it and is kept.
+    """
+    on = [
+        need
+        and pump_cop is not None
+        and price is not None
+        and price - cost / pump_cop >= margin
+        for cost, pump_cop, price, need in zip(
+            marginal, cops, district, heating, strict=True
+        )
+    ]
+
+    def runs(value):
+        start = None
+        for index, state in enumerate([*on, not value]):
+            if state == value and start is None:
+                start = index
+            elif state != value and start is not None:
+                yield start, index
+                start = None
+
+    for value in (False, True):
+        for start, end in list(runs(value)):
+            if end - start < min_quarters and start > 0 and end < len(on):
+                on[start:end] = [not value] * (end - start)
+    return on
