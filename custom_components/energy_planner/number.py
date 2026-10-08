@@ -334,8 +334,9 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
-                # What the heat pump draws while it heats; the battery plan adds it to
-                # the load when it runs. 0 = do not plan the heat pump
+                # What the heat pump draws while it heats, until the forecast has
+                # measured it from the house load; the battery plan adds it to the load
+                # when it runs. 0 = do not plan the heat pump
                 "id": "heat_pump_power",
                 "name": "Heat pump power",
                 "default": 300,

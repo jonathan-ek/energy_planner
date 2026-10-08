@@ -17,7 +17,7 @@ by a reserve.
 
 import datetime as dt
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from statistics import mean, median
 
@@ -57,6 +57,14 @@ PLANNED_LOAD_DEFAULTS = (
     (("elbil", "laddning", "ladda", "ev", "charge"), 20.0),
 )
 ENERGY_PATTERN = re.compile(r"(\d+(?:[.,]\d+)?)\s*kwh", re.IGNORECASE)
+
+# Heat pump draw, measured from the house load (its own energy counter, MELCloud,
+# showed a fifth of it): hours it heated at least this share, against the median of
+# the same hour on days it did not heat
+HEAT_PUMP_MIN_SHARE = 0.75
+HEAT_PUMP_MIN_REFERENCES = 3
+# Per hour; more is another load (the MSZ-AP42 draws at most about 1.9 kW)
+HEAT_PUMP_MAX_KW = 2.5
 
 
 def is_offday(day: dt.date) -> bool:
@@ -129,6 +137,57 @@ def cap_large_loads(
             kwh = min(kwh, median(references) + LARGE_LOAD_MARGIN_KWH)
         capped[(day, hour)] = kwh
     return capped
+
+
+def heating_shares(
+    changes: Sequence[tuple[dt.datetime, bool]], end: dt.datetime
+) -> dict[dt.datetime, float]:
+    """Return the share of each hour the heat pump heated, keyed by UTC hour start.
+
+    `changes` are (time, heating) state changes in time order, `end` closes the last.
+    Hours it did not heat are left out.
+    """
+    shares: dict[dt.datetime, float] = {}
+    bounds = [*changes, (end, False)]
+    for (start, heating), (stop, _) in pairwise(bounds):
+        if not heating:
+            continue
+        moment = start.astimezone(dt.UTC)
+        stop = stop.astimezone(dt.UTC)
+        while moment < stop:
+            hour = moment.replace(minute=0, second=0, microsecond=0)
+            until = min(hour + dt.timedelta(hours=1), stop)
+            shares[hour] = shares.get(hour, 0.0) + (until - moment) / dt.timedelta(
+                hours=1
+            )
+            moment = until
+    return shares
+
+
+def heat_pump_excess(
+    history: Mapping[tuple[dt.date, int], float],
+    shares: Mapping[tuple[dt.date, int], float],
+) -> dict[tuple[dt.date, int], float]:
+    """Measure what the heat pump drew (kW) in the hours it heated, from the load.
+
+    `history` is the load per (local date, hour) without the heat pump taken out,
+    `shares` the share of each hour it heated. Each hour it heated most of is compared
+    with the median of the same hour on days it did not heat at all, scaled to a whole
+    hour of heating and capped at HEAT_PUMP_MAX_KW.
+    """
+    references: dict[int, list[float]] = {}
+    for (day, hour), kw in history.items():
+        if not shares.get((day, hour)):
+            references.setdefault(hour, []).append(kw)
+    excess = {}
+    for key, share in shares.items():
+        if share < HEAT_PUMP_MIN_SHARE or key not in history:
+            continue
+        if len(references.get(key[1], [])) < HEAT_PUMP_MIN_REFERENCES:
+            continue
+        kw = (history[key] - median(references[key[1]])) / share
+        excess[key] = min(kw, HEAT_PUMP_MAX_KW)
+    return excess
 
 
 def load_quarters(

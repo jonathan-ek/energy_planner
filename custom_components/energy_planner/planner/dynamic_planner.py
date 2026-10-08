@@ -1,8 +1,10 @@
 import datetime as dt
+import functools
 import logging
 
 import aiohttp
 from homeassistant.components.recorder import get_instance
+from homeassistant.components.recorder.history import state_changes_during_period
 from homeassistant.components.recorder.statistics import statistics_during_period
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -10,7 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_utils
 
-from . import forecast
+from . import forecast, heat_pump, heating
 from .battery_plan import async_request_plan
 from .manual_slots import add_manual_slots
 from .utils import (
@@ -26,7 +28,9 @@ from ..const import (
     DEFAULT_FORECAST_EV_SENSOR,
     DEFAULT_FORECAST_LOAD_SENSOR,
     DEFAULT_FORECAST_PV_SENSOR,
-    DEFAULT_HEAT_PUMP_ENERGY_SENSOR,
+    DEFAULT_HEAT_PUMP_CLIMATE,
+    DEFAULT_INDOOR_TEMPERATURE_SENSOR,
+    DEFAULT_OUTDOOR_TEMPERATURE_SENSOR,
     FORECAST_SENSORS,
 )
 
@@ -63,23 +67,33 @@ async def _hourly_means(hass: HomeAssistant, statistic_ids, start, end):
     }
 
 
-async def _hourly_changes(hass: HomeAssistant, statistic_id, start, end):
-    """Hourly change of an energy counter in kWh (= kW mean), keyed by UTC hour."""
-    stats = await get_instance(hass).async_add_executor_job(
-        statistics_during_period,
-        hass,
-        start,
-        end,
-        {statistic_id},
-        "hour",
-        {"energy": "kWh"},
-        {"change"},
+async def _heating_shares(hass: HomeAssistant, entity_id, start, end):
+    """Share of each UTC hour the climate entity was in `heat` mode."""
+    states = await get_instance(hass).async_add_executor_job(
+        functools.partial(
+            state_changes_during_period,
+            hass,
+            start,
+            end,
+            entity_id,
+            no_attributes=True,
+            include_start_time_state=True,
+        )
     )
-    return {
-        dt.datetime.fromtimestamp(row["start"], dt.UTC): row["change"]
-        for row in stats.get(statistic_id, [])
-        if row.get("change") is not None
-    }
+    changes = [
+        (max(state.last_changed, start), state.state == "heat")
+        for state in states.get(entity_id, [])
+    ]
+    return forecast.heating_shares(changes, end)
+
+
+def _local_hours(hourly: dict[dt.datetime, float]) -> dict[tuple[dt.date, int], float]:
+    """Key hourly values by (local date, hour) instead of the UTC hour start."""
+    result = {}
+    for hour, value in hourly.items():
+        local = dt_utils.as_local(hour)
+        result[(local.date(), local.hour)] = value
+    return result
 
 
 def _forecast_solar_sources(hass: HomeAssistant):
@@ -278,8 +292,12 @@ async def async_update_forecast(hass: HomeAssistant):
     load_id = config.get("forecast_load_sensor", DEFAULT_FORECAST_LOAD_SENSOR)
     pv_id = config.get("forecast_pv_sensor", DEFAULT_FORECAST_PV_SENSOR)
     ev_id = config.get("forecast_ev_sensor", DEFAULT_FORECAST_EV_SENSOR)
-    heat_pump_id = config.get(
-        "heat_pump_energy_sensor", DEFAULT_HEAT_PUMP_ENERGY_SENSOR
+    heat_pump_id = config.get("heat_pump_climate", DEFAULT_HEAT_PUMP_CLIMATE)
+    indoor_id = config.get(
+        "indoor_temperature_sensor", DEFAULT_INDOOR_TEMPERATURE_SENSOR
+    )
+    outdoor_id = config.get(
+        "outdoor_temperature_sensor", DEFAULT_OUTDOOR_TEMPERATURE_SENSOR
     )
     calendar_id = config.get("forecast_calendar", DEFAULT_FORECAST_CALENDAR)
 
@@ -298,29 +316,47 @@ async def async_update_forecast(hass: HomeAssistant):
     forecast_ids = [entity for _, entity in sources if entity]
     means = await _hourly_means(
         hass,
-        {load_id, pv_id, ev_id, *forecast_ids},
+        {load_id, pv_id, ev_id, indoor_id, outdoor_id, *forecast_ids},
         dt_utils.start_of_local_day() - dt.timedelta(days=HISTORY_DAYS),
         now,
     )
 
-    heat_pump = await _hourly_changes(
+    shares = await _heating_shares(
         hass,
         heat_pump_id,
         dt_utils.start_of_local_day() - dt.timedelta(days=HISTORY_DAYS),
         now,
     )
-    # House load without EV charging and the heat pump, which are planned separately
+    # House load without EV charging and the heat pump, which are planned separately.
+    # The heat pump has no reliable meter, so its draw is measured from the load
     ev = means.get(ev_id, {})
-    house = {
-        hour: max(
-            kw - max(ev.get(hour, 0.0), 0.0) - max(heat_pump.get(hour, 0.0), 0.0), 0.0
-        )
+    without_ev = {
+        hour: max(kw - max(ev.get(hour, 0.0), 0.0), 0.0)
         for hour, kw in means.get(load_id, {}).items()
     }
-    history = {}
-    for hour, kw in house.items():
-        local = dt_utils.as_local(hour)
-        history[(local.date(), local.hour)] = kw
+    # and its heat loss (kW of heat per °C indoor-outdoor) from that
+    indoor = means.get(indoor_id, {})
+    outdoor = means.get(outdoor_id, {})
+    curve = heating.curve(hass)
+    loss, loss_hours = heat_pump.heat_loss(
+        forecast.heat_pump_excess(_local_hours(without_ev), _local_hours(shares)),
+        _local_hours(indoor),
+        _local_hours(outdoor),
+        curve,
+    )
+    setting = float(config.get("heat_pump_power", 300)) / 1000
+
+    def heat_pump_kw(hour):
+        """Return what the heat pump drew while heating in an hour (kW)."""
+        if loss is None or indoor.get(hour) is None or outdoor.get(hour) is None:
+            return setting
+        return heat_pump.draw(loss, indoor[hour], outdoor[hour], curve)
+
+    house = {
+        hour: max(kw - shares.get(hour, 0.0) * heat_pump_kw(hour), 0.0)
+        for hour, kw in without_ev.items()
+    }
+    history = _local_hours(house)
     # One-off large loads are added back from the calendar or covered by the reserve
     history = forecast.cap_large_loads(history)
     load = forecast.load_quarters(history, quarters, today)
@@ -420,6 +456,9 @@ async def async_update_forecast(hass: HomeAssistant):
         "pv": None if pv is None else [round(v, 3) for v in pv],
         # Outdoor air temperature (°C) mid-quarter, None without Open-Meteo
         "temperature": _rounded(temperature),
+        # Measured heat pump heat loss (kW per °C), None until enough hours exist
+        "heat_pump_loss": None if loss is None else round(loss, 3),
+        "heat_pump_loss_hours": loss_hours,
         "planned_events": [
             {
                 "summary": summary,

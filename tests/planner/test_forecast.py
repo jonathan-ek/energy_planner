@@ -242,3 +242,46 @@ def test_hourly_power_to_watts_keeps_energy():
     assert watts[ten + dt.timedelta(minutes=90)] == 4000
     quarters = forecast.quarter_starts(ten, ten + dt.timedelta(hours=4))
     assert sum(forecast.pv_quarters(watts, quarters)) == pytest.approx(8.0)
+
+
+def test_heating_shares():
+    """Test the share of each UTC hour in heat mode, across hour boundaries."""
+    utc = dt.UTC
+    changes = [
+        (dt.datetime(2026, 10, 7, 22, 30, tzinfo=utc), True),
+        (dt.datetime(2026, 10, 8, 0, 15, tzinfo=utc), False),
+        (dt.datetime(2026, 10, 8, 1, 45, tzinfo=utc), True),
+    ]
+    shares = forecast.heating_shares(changes, dt.datetime(2026, 10, 8, 2, tzinfo=utc))
+    assert shares == {
+        dt.datetime(2026, 10, 7, 22, tzinfo=utc): 0.5,
+        dt.datetime(2026, 10, 7, 23, tzinfo=utc): 1.0,
+        dt.datetime(2026, 10, 8, 0, tzinfo=utc): 0.25,
+        dt.datetime(2026, 10, 8, 1, tzinfo=utc): 0.25,
+    }
+
+
+def test_heat_pump_excess():
+    """Test the load above the same hour on days without heating."""
+    days = [dt.date(2026, 10, 1) + dt.timedelta(days=i) for i in range(10)]
+    history = {(day, hour): 0.8 for day in days for hour in range(24)}
+    shares = {}
+    for hour in range(3):
+        shares[(days[-1], hour)] = 1.0
+        history[(days[-1], hour)] = 0.8 + (0.6 if hour else 7.0)  # a sauna hour
+    # A quarter of an hour at 0.15 kW more scales to 0.6 kW
+    shares[(days[-1], 4)] = 0.75
+    history[(days[-1], 4)] = 0.8 + 0.45
+    # Half an hour of heating does not measure
+    shares[(days[-1], 5)] = 0.5
+    excess = forecast.heat_pump_excess(history, shares)
+    assert excess == pytest.approx(
+        {(days[-1], 0): 2.5, (days[-1], 1): 0.6, (days[-1], 2): 0.6, (days[-1], 4): 0.6}
+    )
+
+
+def test_heat_pump_excess_needs_references():
+    """Test that an hour without enough days without heating is not measured."""
+    days = [dt.date(2026, 10, 1) + dt.timedelta(days=i) for i in range(3)]
+    history = {(day, 0): 0.8 for day in days}
+    assert forecast.heat_pump_excess(history, {(days[-1], 0): 1.0}) == {}

@@ -171,6 +171,53 @@ def test_plan_inputs():
     assert inputs.heating == [True, False]
 
 
+def test_heat_loss():
+    """Test heat per °C indoor-outdoor: draw * COP / difference."""
+    excess = dict.fromkeys(range(6), 0.5)
+    indoor = dict.fromkeys(range(6), 21.0)
+    # COP 3 at 0 °C: 1.5 kW heat for 21 °C
+    outdoor = dict.fromkeys(range(6), 0.0)
+    loss, hours = heat_pump.heat_loss(excess, indoor, outdoor, CURVE)
+    assert (loss, hours) == (pytest.approx(1.5 / 21), 6)
+    # Hours without temperatures or with a small difference do not count
+    outdoor[0] = 19.0
+    del indoor[1]
+    assert heat_pump.heat_loss(excess, indoor, outdoor, CURVE) == (None, 4)
+
+
+def test_draw():
+    """Test the draw from the heat loss, zero above indoor and below the curve."""
+    loss = 1.5 / 21
+    assert heat_pump.draw(loss, 21.0, 0.0, CURVE) == pytest.approx(0.5)
+    # Colder: more heat at a lower COP
+    assert heat_pump.draw(loss, 21.0, -10.0, CURVE) > 0.7
+    assert heat_pump.draw(loss, 21.0, 22.0, CURVE) == 0.0
+    assert heat_pump.draw(loss, 21.0, -20.0, CURVE) == 0.0
+    assert heat_pump.draw(10.0, 21.0, -10.0, CURVE) == heat_pump.MAX_DRAW_KW
+
+
+def test_plan_inputs_use_the_heat_loss():
+    """Test that the measured heat loss gives the draw per quarter."""
+    hass = plan_hass({"sensor.gw1100a_indoor_temperature": "21"}, {})
+    hass.data[DOMAIN]["forecast"] = {"heat_pump_loss": 1.5 / 21}
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        inputs = heating.plan_inputs(hass, [QUARTER] * 2, [0.0, 7.0])
+    # 0.5 kW at 0 °C, 14 / 21 * 1.5 kW heat at COP 3.62 at 7 °C
+    assert inputs.draws == pytest.approx([0.125, 0.25 / 3.62])
+    assert inputs.probe_kwh == pytest.approx((0.125 + 0.25 / 3.62) / 2)
+    # Without an indoor temperature the setting is used
+    hass = plan_hass({}, {})
+    hass.data[DOMAIN]["forecast"] = {"heat_pump_loss": 1.5 / 21}
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        inputs = heating.plan_inputs(hass, [QUARTER], [0.0])
+    assert inputs.draws == pytest.approx([0.075])
+    # 0 W still turns planning off
+    hass.data[DOMAIN]["config"]["heat_pump_power"] = 0
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        inputs = heating.plan_inputs(hass, [QUARTER], [0.0])
+    assert inputs.probe_kwh == 0.0
+
+
 def test_action_follows_the_plan():
     """Test the plan's flag now and when the run ends."""
     starts = [QUARTER + dt.timedelta(minutes=15 * i) for i in range(4)]

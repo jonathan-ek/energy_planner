@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_utils
 from ..const import (
     DEFAULT_DISTRICT_HEATING,
     DEFAULT_HEAT_PUMP_MODEL,
+    DEFAULT_INDOOR_TEMPERATURE_SENSOR,
     DEFAULT_OUTDOOR_TEMPERATURE_SENSOR,
     DOMAIN,
 )
@@ -23,6 +24,7 @@ from .heat_pump import (
     DISTRICT_HEATING_PRESETS,
     cop,
     district_heating_price,
+    draw,
     evaluate,
 )
 from .utils import get_tariff
@@ -38,14 +40,26 @@ def _setting(hass: HomeAssistant, key: str, default: float) -> float:
     return float(hass.data[DOMAIN]["config"].get(key, default))
 
 
-def _power_kw(hass: HomeAssistant) -> float:
-    """Return what the heat pump draws while it heats in kW (heat_pump_power)."""
-    return _setting(hass, "heat_pump_power", 300) / 1000
-
-
-def _curve(hass: HomeAssistant):
+def curve(hass: HomeAssistant) -> tuple[tuple[float, float], ...]:
+    """Return the heat pump's COP curve (heat_pump_model)."""
     config = hass.data[DOMAIN]["config"]
     return COP_CURVES.get(config.get("heat_pump_model", DEFAULT_HEAT_PUMP_MODEL), ())
+
+
+def _power_kw(hass: HomeAssistant, outdoor: float | None) -> float:
+    """Return what the heat pump draws while it heats in kW.
+
+    From the heat loss the forecast measured, the live indoor and the outdoor
+    temperature, else the heat_pump_power setting. A setting of 0 turns planning off.
+    """
+    setting = _setting(hass, "heat_pump_power", 300) / 1000
+    loss = (hass.data[DOMAIN].get("forecast") or {}).get("heat_pump_loss")
+    indoor = _temperature(
+        hass, "indoor_temperature_sensor", DEFAULT_INDOOR_TEMPERATURE_SENSOR
+    )
+    if setting <= 0 or not loss or indoor is None or outdoor is None:
+        return setting
+    return draw(loss, indoor, outdoor, curve(hass))
 
 
 def _seasons(hass: HomeAssistant):
@@ -55,16 +69,20 @@ def _seasons(hass: HomeAssistant):
     )
 
 
-def outdoor_temperature(hass: HomeAssistant) -> float | None:
-    """Return the live outdoor temperature (°C)."""
-    config = hass.data[DOMAIN]["config"]
-    state = hass.states.get(
-        config.get("outdoor_temperature_sensor", DEFAULT_OUTDOOR_TEMPERATURE_SENSOR)
-    )
+def _temperature(hass: HomeAssistant, key: str, default: str) -> float | None:
+    """Return a live temperature (°C) from the sensor configured under `key`."""
+    state = hass.states.get(hass.data[DOMAIN]["config"].get(key, default))
     try:
         return float(state.state) if state is not None else None
     except ValueError:
         return None
+
+
+def outdoor_temperature(hass: HomeAssistant) -> float | None:
+    """Return the live outdoor temperature (°C)."""
+    return _temperature(
+        hass, "outdoor_temperature_sensor", DEFAULT_OUTDOOR_TEMPERATURE_SENSOR
+    )
 
 
 def _planned_export(hass: HomeAssistant, moment: dt.datetime) -> float:
@@ -87,23 +105,24 @@ def heat_pump_economy(hass: HomeAssistant) -> dict:
     data = hass.data[DOMAIN]
     now = dt_utils.now()
     district = district_heating_price(_seasons(hass), now)
-    curve = _curve(hass)
+    cop_curve = curve(hass)
     spot = (data.get("prices") or {}).get(_quarter(now))
     outdoor = outdoor_temperature(hass)
-    if district is None or outdoor is None or spot is None or not curve:
+    if district is None or outdoor is None or spot is None or not cop_curve:
         return {"district_heating_price": district, "outdoor_temperature": outdoor}
     tariff = get_tariff(hass)
-    power = _power_kw(hass)
+    power = _power_kw(hass, outdoor)
     result = evaluate(
         spot,
         tariff.buy_fee(now),
         tariff.sell_fee(now),
         outdoor,
-        curve,
+        cop_curve,
         district,
         _planned_export(hass, now) / power if power > 0 else 0.0,
     )
     result["spot"] = round(spot / 10, 1)
+    result["power"] = round(power, 3)
     return result
 
 
@@ -111,7 +130,8 @@ def heat_pump_economy(hass: HomeAssistant) -> dict:
 class PlanInputs:
     """What the battery plan needs to plan the heat pump, per quarter."""
 
-    probe_kwh: float  # what the heat pump uses in a quarter, 0: not planned
+    probe_kwh: float  # extra load per quarter to price, 0: not planned
+    draws: list[float]  # kWh the heat pump uses per quarter while heating
     margin: float  # öre per kWh of heat
     temperatures: list[float | None]
     cops: list[float | None]
@@ -131,16 +151,22 @@ def plan_inputs(
     """
     live = outdoor_temperature(hass)
     temps = [live if t is None else t for t in temperatures]
-    curve = _curve(hass)
+    cop_curve = curve(hass)
     seasons = _seasons(hass)
     limit = _setting(hass, "heat_pump_heating_limit", 15)
+    hours = QUARTER.total_seconds() / 3600
+    draws = [_power_kw(hass, t) * hours if cop_curve else 0.0 for t in temps]
+    heating = [t is not None and t < limit for t in temps]
+    drawing = [kwh for kwh in draws if kwh > 0]
     return PlanInputs(
-        probe_kwh=_power_kw(hass) * QUARTER.total_seconds() / 3600 if curve else 0.0,
+        # More load is priced at the mean draw
+        probe_kwh=sum(drawing) / len(drawing) if drawing else 0.0,
+        draws=draws,
         margin=_setting(hass, "heat_pump_margin", 5),
         temperatures=temps,
-        cops=[None if t is None else cop(curve, t) for t in temps],
+        cops=[None if t is None else cop(cop_curve, t) for t in temps],
         district=[district_heating_price(seasons, s) for s in starts],
-        heating=[t is not None and t < limit for t in temps],
+        heating=heating,
     )
 
 

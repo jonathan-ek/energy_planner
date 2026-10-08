@@ -289,7 +289,9 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         else [False] * len(starts)
     )
     if any(heat_pump):
-        extra = [heat.probe_kwh if on else 0.0 for on in heat_pump]
+        extra = [
+            kwh if on else 0.0 for kwh, on in zip(heat.draws, heat_pump, strict=True)
+        ]
         plan = await hass.async_add_executor_job(
             functools.partial(
                 run,
@@ -308,11 +310,13 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         "grid_import": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_import],
         "grid_export": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_export],
         "targets": [None if t is None else round(t, 2) for t in plan.targets],
-        # Heat pump: on per quarter, what more load costs (öre/kWh) and its COP
+        # Heat pump: on per quarter, what more load costs (öre/kWh), its COP and draw
+        # (kW while heating)
         "heat_pump": heat_pump,
         "marginal": marginal,
         "temperature": [None if t is None else round(t, 1) for t in heat.temperatures],
         "heat_pump_cop": [None if c is None else round(c, 2) for c in heat.cops],
+        "heat_pump_power": [round(kwh / QUARTER_HOURS, 3) for kwh in heat.draws],
         "mode": plan.modes[0],
         "target_kw": None if plan.targets[0] is None else round(plan.targets[0], 2),
         "energy_cost": round(plan.energy_cost, 2),

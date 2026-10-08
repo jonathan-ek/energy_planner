@@ -13,9 +13,12 @@ a house heated by district heating) only pays when a kWh of heat from it,
   electricity costs spot incl. VAT plus the grid fees; electricity that would
   otherwise be exported costs only what selling it would earn (`export_share`).
   Power charges are not included.
+- Draw: the heat the heat pump delivers is taken as proportional to the indoor-outdoor
+  difference (`heat_loss`, measured from the house load), so it draws
+  `loss * (indoor - outdoor) / COP` (`draw`).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import dataclasses
 import datetime as dt
 from itertools import pairwise
@@ -120,6 +123,50 @@ def evaluate(
     result["saving"] = round(district_price - heat, 1)
     result["break_even_spot"] = round((district_price * pump_cop - buy_fee) / 1.25, 1)
     return result
+
+
+# Heat loss measurement: hours with a smaller indoor-outdoor difference say little
+LOSS_MIN_DIFFERENCE = 3.0
+LOSS_MIN_HOURS = 6
+# Highest draw (kW) the model gives; the MSZ-AP42 draws at most about 1.9 kW
+MAX_DRAW_KW = 2.0
+
+
+def heat_loss[K](
+    excess: Mapping[K, float],
+    indoor: Mapping[K, float],
+    outdoor: Mapping[K, float],
+    curve: Sequence[tuple[float, float]],
+) -> tuple[float | None, int]:
+    """Measure the heat the heat pump delivers per °C indoor-outdoor (kW/K).
+
+    `excess` is its measured draw per hour (kW), `indoor` / `outdoor` the hour's mean
+    temperatures. Heat = draw * COP, so loss = draw * COP / (indoor - outdoor).
+    Returns the mean and the number of hours, None for the mean with fewer than
+    LOSS_MIN_HOURS.
+    """
+    losses = []
+    for key, kw in excess.items():
+        inside, outside = indoor.get(key), outdoor.get(key)
+        if inside is None or outside is None:
+            continue
+        pump_cop = cop(curve, outside)
+        if pump_cop is None or inside - outside < LOSS_MIN_DIFFERENCE:
+            continue
+        losses.append(kw * pump_cop / (inside - outside))
+    if len(losses) < LOSS_MIN_HOURS:
+        return None, len(losses)
+    return max(sum(losses) / len(losses), 0.0), len(losses)
+
+
+def draw(
+    loss: float, indoor: float, outdoor: float, curve: Sequence[tuple[float, float]]
+) -> float:
+    """Return what the heat pump draws (kW) to hold indoor at an outdoor temperature."""
+    pump_cop = cop(curve, outdoor)
+    if pump_cop is None:
+        return 0.0
+    return min(max(loss * (indoor - outdoor) / pump_cop, 0.0), MAX_DRAW_KW)
 
 
 def schedule(

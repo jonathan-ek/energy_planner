@@ -35,6 +35,8 @@ EXTRA_ATTRIBUTES = {
         "planned_events",
         "yesterday_load_kwh",
         "yesterday_load_actual_kwh",
+        "heat_pump_loss",
+        "heat_pump_loss_hours",
     ),
     "pv_forecast": (
         "pv_today_remaining",
@@ -149,6 +151,7 @@ class EnergyPlannerPlanSensor(SensorEntity):
             "marginal",
             "temperature",
             "heat_pump_cop",
+            "heat_pump_power",
         }
     )
 
