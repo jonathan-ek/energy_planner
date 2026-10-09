@@ -285,3 +285,25 @@ def test_heat_pump_excess_needs_references():
     days = [dt.date(2026, 10, 1) + dt.timedelta(days=i) for i in range(3)]
     history = {(day, 0): 0.8 for day in days}
     assert forecast.heat_pump_excess(history, {(days[-1], 0): 1.0}) == {}
+
+
+def test_no_reserve_while_away():
+    """Test that quarters inside an away period get no reserve."""
+    saturday = dt.datetime(2026, 10, 10, 0, 0, tzinfo=TZ)
+    quarters = forecast.quarter_starts(saturday, saturday + dt.timedelta(days=2))
+    sunday = saturday + dt.timedelta(days=1)
+    away = forecast.away_quarters([(saturday, sunday)], quarters)
+    assert sum(away) == 96
+    assert away[95] and not away[96]
+    reserve = forecast.reserve_quarters(quarters, 4.0, away=away)
+    assert sum(reserve[:96]) == 0
+    assert sum(reserve[96:]) == pytest.approx(4.0)
+
+
+@pytest.mark.parametrize(
+    ("summary", "away"),
+    [("Borta i helgen", True), ("Bortrest", True), ("Away", True), ("Bastu", False)],
+)
+def test_is_away_event(summary, away):
+    """Test the words that say nobody is home."""
+    assert forecast.is_away_event(summary) == away

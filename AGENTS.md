@@ -171,11 +171,15 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
 - **Reserve** = `forecast_weekend_reserve` spread over Sat/Sun
   `forecast_reserve_start`–`forecast_reserve_end` (default 18–22, when the sauna
   usually runs), for unplanned weekend load. Holidays are not detected.
+- **Away:** events in the same calendar whose title contains `borta`, `bortrest` or
+  `away` (`forecast.AWAY_WORDS`, all-day events too) mark the quarters they cover as
+  `away`: no weekend reserve there. The battery keeps `battery_reserve_soc`, and the
+  load profile is not lowered.
 - Output: `hass.data[DOMAIN]["forecast"]` with parallel lists `starts`, `load`
   (profile), `planned`, `reserve`, `pv` (kWh per quarter, all of today and tomorrow),
   `temperature` (Open-Meteo air temperature mid-quarter, None without Open-Meteo),
   `heat_pump_loss` / `heat_pump_loss_hours` (measured heat loss, kW/K),
-  `planned_events`, and totals. `load_tomorrow` / `load_today_remaining` = profile +
+  `planned_events`, `away` (bool per quarter), and totals. `load_tomorrow` / `load_today_remaining` = profile +
   planned (today counted from the current quarter); `base_tomorrow` and
   `planned_tomorrow` split it. The sensors expose the lists as attributes, which are
   kept out of the recorder. The Energi dashboard has a "Prognos" view

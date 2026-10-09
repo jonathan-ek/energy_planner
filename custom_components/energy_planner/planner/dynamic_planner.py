@@ -195,8 +195,13 @@ async def _open_meteo_pv(
     return latest, previous, temperatures
 
 
-async def _calendar_events(hass: HomeAssistant, entity_id, start, end):
-    """Return timed events (start, end, summary, description) from a calendar."""
+async def _calendar_events(
+    hass: HomeAssistant, entity_id, start, end, *, all_day=False
+):
+    """Return events (start, end, summary, description) from a calendar.
+
+    All-day events (from local midnight) only with `all_day`.
+    """
     if hass.states.get(entity_id) is None:
         return []
     response = await hass.services.async_call(
@@ -213,13 +218,21 @@ async def _calendar_events(hass: HomeAssistant, entity_id, start, end):
         if not isinstance(event, dict):
             continue
         event_start, event_end = event.get("start"), event.get("end")
-        # All-day events only have a date and say nothing about when the load runs
         if not isinstance(event_start, str) or not isinstance(event_end, str):
             continue
         if len(event_start) <= 10 or len(event_end) <= 10:
-            continue
-        start_time = dt_utils.parse_datetime(event_start)
-        end_time = dt_utils.parse_datetime(event_end)
+            # All-day events only have a date and say nothing about when a load runs
+            if not all_day:
+                continue
+            start_date = dt_utils.parse_date(event_start)
+            end_date = dt_utils.parse_date(event_end)
+            if start_date is None or end_date is None:
+                continue
+            start_time = dt_utils.start_of_local_day(start_date)
+            end_time = dt_utils.start_of_local_day(end_date)
+        else:
+            start_time = dt_utils.parse_datetime(event_start)
+            end_time = dt_utils.parse_datetime(event_end)
         if start_time is None or end_time is None:
             continue
         summary, description = event.get("summary"), event.get("description")
@@ -234,6 +247,20 @@ async def _calendar_events(hass: HomeAssistant, entity_id, start, end):
     return events
 
 
+async def _away_periods(hass: HomeAssistant, calendar_id, start, end):
+    """Return (start, end) of calendar events saying nobody is home, all-day too."""
+    try:
+        events = await _calendar_events(hass, calendar_id, start, end, all_day=True)
+    except Exception:
+        _LOGGER.exception("Failed to read away events from %s", calendar_id)
+        return []
+    return [
+        (event_start, event_end)
+        for event_start, event_end, summary, _ in events
+        if forecast.is_away_event(summary)
+    ]
+
+
 async def _planned_loads(hass: HomeAssistant, calendar_id, start, end):
     """Planned loads (start, end, kWh, summary) from the calendar."""
     try:
@@ -243,6 +270,8 @@ async def _planned_loads(hass: HomeAssistant, calendar_id, start, end):
         return []
     planned = []
     for event_start, event_end, summary, description in events:
+        if forecast.is_away_event(summary):
+            continue
         kwh = forecast.planned_event_energy(summary, description)
         if kwh is None:
             _LOGGER.debug("Ignoring calendar event without energy: %s", summary)
@@ -361,11 +390,16 @@ async def async_update_forecast(hass: HomeAssistant):
     history = forecast.cap_large_loads(history)
     load = forecast.load_quarters(history, quarters, today)
     yesterday_load = forecast.load_quarters(history, yesterday_quarters, yesterday)
+    # Nobody home: no reserve for unplanned load (here and the battery's reserve SOC)
+    away = forecast.away_quarters(
+        await _away_periods(hass, calendar_id, quarters[0], end), quarters
+    )
     reserve = forecast.reserve_quarters(
         quarters,
         float(config.get("forecast_weekend_reserve", 4)),
         int(config.get("forecast_reserve_start", 18)),
         int(config.get("forecast_reserve_end", 22)),
+        away,
     )
     planned_loads = await _planned_loads(hass, calendar_id, yesterday_start, end)
     planned_energy = [(start, stop, kwh) for start, stop, kwh, _ in planned_loads]
@@ -453,6 +487,7 @@ async def async_update_forecast(hass: HomeAssistant):
         "load": [None if v is None else round(v, 3) for v in load],
         "planned": [round(v, 3) for v in planned],
         "reserve": [round(v, 3) for v in reserve],
+        "away": away,
         "pv": None if pv is None else [round(v, 3) for v in pv],
         # Outdoor air temperature (°C) mid-quarter, None without Open-Meteo
         "temperature": _rounded(temperature),

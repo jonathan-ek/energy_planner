@@ -402,3 +402,49 @@ async def test_calendar_events_parsing(mock_hass):
         )
         == []
     )
+
+
+async def test_away_removes_the_weekend_reserve(mock_hass):
+    """Test that an all-day away event drops the reserve and marks the quarters."""
+    friday = dt.datetime(2026, 10, 9, 14, 10, tzinfo=TZ)
+    saturday = dt.datetime(2026, 10, 10, tzinfo=TZ)
+    away = (saturday, saturday + dt.timedelta(days=1), "Borta", "")
+    with (
+        patch.object(dynamic_planner.dt_utils, "now", return_value=friday),
+        patch.object(dynamic_planner, "_forecast_solar_sources", return_value=[]),
+        patch.object(dynamic_planner, "_hourly_means", return_value=statistics()),
+        patch.object(dynamic_planner, "_solar_planes", return_value=(None, [])),
+        patch.object(dynamic_planner, "_calendar_events", return_value=[away]),
+    ):
+        await dynamic_planner.async_update_forecast(mock_hass)
+    result = mock_hass.data[DOMAIN]["forecast"]
+    assert sum(result["reserve"]) == 0
+    assert result["planned_events"] == []
+    marked = dict(zip(result["starts"], result["away"], strict=True))
+    assert marked[saturday.isoformat()]
+    assert not marked[(saturday - dt.timedelta(minutes=15)).isoformat()]
+
+
+async def test_calendar_all_day_events(mock_hass):
+    """Test that all-day events are returned from local midnight when asked for."""
+    mock_hass.states.get.return_value = MagicMock()
+    mock_hass.services.async_call = AsyncMock(
+        return_value={
+            "calendar.energiplan": {
+                "events": [
+                    {"start": "2026-10-10", "end": "2026-10-12", "summary": "Borta"}
+                ]
+            }
+        }
+    )
+    events = await dynamic_planner._calendar_events(
+        mock_hass, "calendar.energiplan", NOW, NOW + dt.timedelta(days=5), all_day=True
+    )
+    assert events == [
+        (
+            dt.datetime(2026, 10, 10, tzinfo=TZ),
+            dt.datetime(2026, 10, 12, tzinfo=TZ),
+            "Borta",
+            "",
+        )
+    ]

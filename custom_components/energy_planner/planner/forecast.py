@@ -57,6 +57,9 @@ PLANNED_LOAD_DEFAULTS = (
     (("elbil", "laddning", "ladda", "ev", "charge"), 20.0),
 )
 ENERGY_PATTERN = re.compile(r"(\d+(?:[.,]\d+)?)\s*kwh", re.IGNORECASE)
+# Calendar events (also all-day) whose title contains one of these (lower case) mark
+# that nobody is home: no reserve for unplanned load
+AWAY_WORDS = ("borta", "bortrest", "away")
 
 # Heat pump draw, measured from the house load (its own energy counter, MELCloud,
 # showed a fifth of it): hours it heated at least this share, against the median of
@@ -259,15 +262,35 @@ def reserve_quarters(
     reserve_kwh: float,
     start_hour: int = 18,
     end_hour: int = 22,
+    away: Sequence[bool] | None = None,
 ) -> list[float]:
-    """Spread a reserve for unplanned weekend load evenly over the weekend window."""
+    """Spread a reserve for unplanned weekend load evenly over the weekend window.
+
+    Quarters marked `away` (nobody home) get none.
+    """
     if end_hour <= start_hour:
         return [0.0] * len(quarters)
+    away = away if away is not None else [False] * len(quarters)
     per_quarter = reserve_kwh / ((end_hour - start_hour) * 4)
     return [
-        per_quarter if is_offday(q.date()) and start_hour <= q.hour < end_hour else 0.0
-        for q in quarters
+        per_quarter
+        if is_offday(q.date()) and start_hour <= q.hour < end_hour and not gone
+        else 0.0
+        for q, gone in zip(quarters, away, strict=True)
     ]
+
+
+def is_away_event(summary: str) -> bool:
+    """Return whether a calendar event title says nobody is home."""
+    title = (summary or "").lower()
+    return any(word in title for word in AWAY_WORDS)
+
+
+def away_quarters(
+    periods: Sequence[tuple[dt.datetime, dt.datetime]], quarters: list[dt.datetime]
+) -> list[bool]:
+    """Return per quarter whether it starts inside one of the (start, end) periods."""
+    return [any(start <= q < end for start, end in periods) for q in quarters]
 
 
 def planned_event_energy(summary: str, description: str = "") -> float | None:
