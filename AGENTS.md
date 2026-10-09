@@ -271,6 +271,17 @@ planners the plan is a preview and ignores them.
   import target (`reserve: true`): the inverter's peak shaving only uses the reserve,
   down to the shutdown SOC, for import that would raise the power charge; without a
   power charge the battery is just kept.
+- Car (prototype, not wired into HA yet): `optimize(vehicle=Vehicle(...))` plans an
+  EV with the battery. `Vehicle`: charger powers (`charger_powers(min, max)`, 0 or one
+  of them per quarter), the energy needed at the plug, when it is plugged in and the
+  deadline (quarter index; past the horizon: the part the charger can still deliver
+  after it costs the end price). Missing energy costs `shortfall_price` (10 SEK/kWh).
+  The dynamic program's second state is the energy delivered (0.5 kWh steps); the
+  car is exempt from the household import limit but not from the power charge
+  levels. The target search uses 2 kW steps, then 0.5 kW around the best
+  (`_candidate_levels`, same results, half the time). Searching the levels with the
+  car as a fixed load was 2-3 times faster but lost up to 3 kr/day, so every search
+  run is joint. Plan fields: `ev_kwh`, `ev_missing_kwh`, `ev_missing_cost`.
 - Battery: capacity, shutdown/max SOC, charge/discharge current × the live voltage
   (`battery_voltage_sensor`), SOC (`battery_soc_sensor`), round-trip efficiency
   `price_peak_efficiency_factor`. About 1 s per day of quarters, run in the executor.

@@ -40,6 +40,17 @@ value of the battery energy it uses (from the dynamic program), plus power charg
 The heat pump is planned on it (heat_pump.py); its load can be `exempt` from the
 household's import limit, so only the power charges limit it.
 
+An electric car (`Vehicle`) can be planned together with the battery: the dynamic
+program gets a second state, the energy delivered to the car, and per quarter the
+car charges at 0 or one of the charger's powers while it is plugged in, so that its
+need is met by its deadline (see `_optimize`). Planning both at once beats charging
+the car first in its cheapest quarters and then planning the battery around it:
+they share the cheap hours, the solar surplus and the power peaks. Backtest on 24
+random days with the owner's battery and tariff (Oct 2026, synthetic prices and
+loads): 5.6 kr/day less than that sequential plan (never worse), 16.5 kr/day less
+than charging at full power on arrival. A run takes about 8 s on a desktop and
+30-100 s on the HA host, 3-4 times longer than without a car.
+
 A peak is paid once per month but then usable for the rest of it, while the plan only
 covers a day or two. So when comparing targets, raising a peak costs the share of the
 monthly charge that the plan covers of the month's remaining hours (assuming the
@@ -60,6 +71,9 @@ QUARTER_HOURS = 0.25
 MODES = ("self_use", "hold", "sell_excess", "discard_excess", "charge", "sell")
 SOC_STEPS = 101
 TARGET_STEP_KW = 0.5
+# The target search first tries levels this far apart, then TARGET_STEP_KW around
+# the best (see `_candidate_levels`)
+COARSE_STEP_KW = 2.0
 # SEK per kWh above the household's import limit: higher than any price, so it is
 # only broken when the battery cannot cover the load
 LIMIT_PENALTY = 20.0
@@ -98,6 +112,41 @@ class Limit:
     end_hour: int = 23
 
 
+@dataclasses.dataclass(frozen=True)
+class Vehicle:
+    """An electric car to charge, as the plan sees it (energies at the plug).
+
+    The car needs `need_kwh` more by the start of quarter `deadline` (an index into
+    the plan's quarters; at or past the end means after the horizon). It charges only
+    in quarters where `plugged` is true, at 0 or one of `powers_kw` (the charger's
+    lowest to highest power; below its lowest current it can not charge at all).
+
+    Energy still missing at a deadline inside the horizon costs `shortfall_price`
+    SEK/kWh: a soft constraint, so a need that can not be met still gives a plan,
+    and a high price, so it is met whenever it can be. Missing at a deadline after
+    the horizon it costs the cheapest buy price of the horizon's last day (it can
+    be charged then). Charging past the need is worth nothing; quarters after the
+    deadline do not charge (the next need is planned when it is known).
+
+    `step_kwh` is the resolution of the energy delivered so far, the dynamic
+    program's second state (see `_optimize`).
+    """
+
+    powers_kw: tuple[float, ...]
+    need_kwh: float
+    plugged: Sequence[bool]
+    deadline: int
+    shortfall_price: float = 10.0
+    step_kwh: float = 0.5
+
+
+def charger_powers(min_kw: float, max_kw: float, count: int = 3) -> tuple[float, ...]:
+    """Return `count` charging powers from the charger's lowest to its highest."""
+    if count <= 1 or max_kw <= min_kw:
+        return (max_kw,)
+    return tuple(float(kw) for kw in np.linspace(min_kw, max_kw, count))
+
+
 @dataclasses.dataclass
 class Plan:
     """The optimized schedule, one entry per quarter."""
@@ -121,6 +170,11 @@ class Plan:
     peaks: dict[str, tuple[float, float]]
     objective: float  # what the search minimizes, see the module docstring
     marginal: list[float]  # SEK per kWh of `probe_kwh` more load in each quarter
+    # The car (Vehicle): kWh charged per quarter, and what is still missing at the
+    # deadline and what that costs (the shortfall price or charging after the horizon)
+    ev_kwh: list[float] = dataclasses.field(default_factory=list)
+    ev_missing_kwh: float = 0.0
+    ev_missing_cost: float = 0.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -137,6 +191,8 @@ class _Inputs:
     forced: Sequence[str | None]  # a mode the quarter must use, e.g. a manual slot
     current_mode: str | None  # the mode running now, changing it costs SWITCH_COST
     probe_kwh: float  # extra load per quarter that Plan.marginal prices, 0: none
+    vehicle: Vehicle | None = None  # a car to charge, None: no car
+    ev_end_price: float = 0.0  # SEK per kWh the car still needs after the horizon
 
 
 def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh, extra=0.0):
@@ -204,11 +260,128 @@ def _allowed(inputs: _Inputs, index: int) -> list[int]:
     return [MODES.index(forced)] if forced else list(range(len(MODES)))
 
 
-def _optimize(inputs: _Inputs, targets: list[float], caps: list[list[tuple]]):
+def _ev_levels(inputs: _Inputs) -> np.ndarray:
+    """Return the car's state grid: energy delivered so far, 0 to the need (kWh).
+
+    Evenly spaced at about `Vehicle.step_kwh`; one level (no car state) without a
+    car or a need.
+    """
+    vehicle = inputs.vehicle
+    if vehicle is None or vehicle.need_kwh <= 0 or vehicle.deadline <= 0:
+        return np.zeros(1)
+    count = max(math.ceil(vehicle.need_kwh / vehicle.step_kwh), 1) + 1
+    return np.linspace(0.0, vehicle.need_kwh, count)
+
+
+def _ev_actions(inputs: _Inputs, index: int, levels: np.ndarray) -> list[float]:
+    """Return the kWh the car can charge in a quarter: 0, or one per charger power.
+
+    Only while it is plugged in, before its deadline, and while it has a need.
+    """
+    vehicle = inputs.vehicle
+    if (
+        vehicle is None
+        or len(levels) == 1
+        or index >= vehicle.deadline
+        or not vehicle.plugged[index]
+    ):
+        return [0.0]
+    return [0.0, *(kw * QUARTER_HOURS for kw in vehicle.powers_kw)]
+
+
+def _ev_missing(inputs: _Inputs, levels: np.ndarray, at_end: bool) -> np.ndarray:
+    """Return the cost (SEK) of what each car level still misses of the need.
+
+    At the deadline (`at_end` False) all of it costs the shortfall price. At the end
+    of the horizon (`at_end` True, the deadline is after it) the part the charger
+    can still deliver before the deadline (the quarters left times its highest
+    power, assuming it stays plugged in) costs `_Inputs.ev_end_price`, the rest the
+    shortfall price. Without that limit the plan would always leave a later need
+    to after the horizon, where the end price can not be beaten, even when there is
+    not time enough left to charge it.
+    """
+    vehicle = inputs.vehicle
+    if vehicle is None:
+        return np.zeros(len(levels))
+    missing = np.maximum(vehicle.need_kwh - levels, 0.0)
+    if not at_end:
+        return missing * vehicle.shortfall_price
+    left = (
+        max(vehicle.deadline - len(inputs.starts), 0)
+        * max(vehicle.powers_kw)
+        * QUARTER_HOURS
+    )
+    later = np.minimum(missing, left)
+    return later * inputs.ev_end_price + (missing - later) * vehicle.shortfall_price
+
+
+def _at_soc(values: np.ndarray, grid: np.ndarray, soc: np.ndarray) -> np.ndarray:
+    """Interpolate `values[soc level, car level]` at each soc, linear in soc.
+
+    `grid` is evenly spaced; a soc outside it is clamped to its ends (as np.interp).
+    Returns one row of car levels per soc.
+    """
+    position = (np.clip(soc, grid[0], grid[-1]) - grid[0]) / (grid[1] - grid[0])
+    low = np.minimum(np.floor(position).astype(int), len(grid) - 2)
+    weight = (position - low)[:, None]
+    return values[low] * (1.0 - weight) + values[low + 1] * weight
+
+
+def _shifted(values: np.ndarray, kwh: float, levels: np.ndarray) -> np.ndarray:
+    """Return `values[..., car level]` at each car level plus `kwh`, linear.
+
+    The car levels are evenly spaced, so the shift is the same fraction of a step
+    for every level. Levels past the need are capped at it: energy charged past
+    the need is worth nothing.
+    """
+    count = len(levels)
+    if count == 1 or kwh == 0:
+        return values
+    position = np.arange(count) + kwh / (levels[1] - levels[0])
+    low = np.minimum(np.floor(position).astype(int), count - 1)
+    high = np.minimum(low + 1, count - 1)
+    weight = np.where(low >= count - 1, 0.0, position - np.floor(position))
+    return values[..., low] * (1.0 - weight) + values[..., high] * weight
+
+
+def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
     """Run the dynamic program for fixed import targets; return per quarter results.
 
-    The state is the state of charge and the previous quarter's mode (the last row:
-    none), so that changing mode can cost `SWITCH_COST`.
+    `targets` is (power charge level, other limit) in kWh per quarter: the import
+    target is the lower of the two, and the car's charging is added to the other
+    limit (it is exempt from the household's import limit, like the heat pump, and
+    the charger's power comes on top of the battery's), but not to the power charge
+    level, which caps the whole import.
+
+    State, at the start of each quarter: the battery's SOC (`SOC_STEPS` levels from
+    the shutdown SOC to the max), the previous quarter's mode (changing it costs
+    `SWITCH_COST`; the last row: none, for the first quarter) and, with a car, the
+    energy delivered to it so far (`_ev_levels`, 0 to the need). Without a car the
+    car axis has one level and only "not charging", so the program is the plain
+    battery one.
+
+    Backward pass, from the end: the value (the cost from then on) at the end is
+    minus the battery energy above its floor at `end_price`, plus the car's missing
+    energy at `ev_end_price` if its deadline is after the horizon. Then for each
+    quarter, for each car action (0 or a charger power, `_ev_actions`) and each
+    allowed mode: `_step` gives the next SOC, import and export with the car's
+    energy added to the load; the quarter's cost (energy, limit penalty, power
+    charge caps, wear) plus the value at (next SOC, delivered + charged), linear
+    in both (`_at_soc`, `_shifted`). The best action per mode, then the best mode
+    per previous mode, is the quarter's value. At the start of the deadline quarter
+    the car axis begins: the value after it does not depend on the car, plus what
+    each level still misses at `shortfall_price`. Before the deadline the car axis
+    is kept even where it can not charge (not plugged in yet), so the program sees
+    the need coming.
+
+    Forward pass, from the actual SOC, the mode running now and nothing delivered:
+    each quarter takes the (mode, car action) with the lowest cost plus value of
+    the next state (ties: the simplest mode, then the lowest power), the car's
+    delivered energy is tracked exactly and capped at the need. `Plan.marginal`
+    (with `probe_kwh`) is computed here, the extra load added to the car's.
+
+    Returns (modes, socs, imports, exports, switches, marginal, ev kWh per quarter,
+    car energy missing at its deadline).
     """
     battery = inputs.battery
     grid = np.linspace(battery.min_kwh, battery.max_kwh, SOC_STEPS)
@@ -218,72 +391,116 @@ def _optimize(inputs: _Inputs, targets: list[float], caps: list[list[tuple]]):
     for mode in range(len(MODES)):
         switch[mode, mode] = 0.0
     switch[-1, :] = 0.0
-    value = np.tile(-(grid - battery.floor_kwh) * inputs.end_price, (rows, 1))
-    values = [value]
+    levels = _ev_levels(inputs)
+    vehicle = inputs.vehicle if len(levels) > 1 else None
+    deadline = vehicle.deadline if vehicle else count
+    level_caps, other_caps = targets
+
+    def target(index: int, ev_kwh: float) -> float:
+        return min(level_caps[index], other_caps[index] + ev_kwh)
+
+    # values[t][previous mode, soc level, car level]: the cost from the start of
+    # quarter t on. The car axis has one level after the deadline
+    battery_end = -(grid - battery.floor_kwh) * inputs.end_price
+    end = np.tile(battery_end[:, None], (rows, 1, 1))
+    if vehicle and deadline >= count:
+        end = end + _ev_missing(inputs, levels, at_end=True)[None, None, :]
+    values = [end]
     for index in range(count - 1, -1, -1):
-        totals = np.full((len(MODES), SOC_STEPS), np.inf)
-        for mode in _allowed(inputs, index):
-            soc, imp, exp = _step(inputs, index, MODES[mode], grid, targets[index])
-            totals[mode] = (
-                _quarter_cost(inputs, index, imp, exp, caps[index])
-                + _wear(battery, grid, soc)
-                + np.interp(soc, grid, values[-1][mode])
-            )
+        following = values[-1]
+        if vehicle and index + 1 == deadline < count:
+            # The deadline: what each car level still misses
+            following = following + _ev_missing(inputs, levels, at_end=False)
+            values[-1] = following
+        car = following.shape[2]
+        best = np.full((len(MODES), SOC_STEPS, car), np.inf)
+        for ev_kwh in _ev_actions(inputs, index, levels):
+            for mode in _allowed(inputs, index):
+                soc, imp, exp = _step(
+                    inputs, index, MODES[mode], grid, target(index, ev_kwh), ev_kwh
+                )
+                cost = _quarter_cost(
+                    inputs, index, imp, exp, caps[index], ev_kwh
+                ) + _wear(battery, grid, soc)
+                if car > 1:
+                    future = _shifted(
+                        _at_soc(following[mode], grid, soc), ev_kwh, levels
+                    )
+                else:
+                    future = np.interp(soc, grid, following[mode][:, 0])[:, None]
+                best[mode] = np.minimum(best[mode], cost[:, None] + future)
         # Best over the modes for each previous mode
-        values.append(np.min(totals[None, :, :] + switch[:, :, None], axis=1))
+        values.append(np.min(best[None] + switch[:, :, None, None], axis=1))
     values.reverse()
 
     # Forward pass from the actual state of charge and the mode running now
     soc = np.array([min(max(battery.soc_kwh, battery.min_kwh), battery.max_kwh)])
+    delivered = 0.0
     previous = MODES.index(inputs.current_mode) if inputs.current_mode else rows - 1
-    modes, socs, imports, exports, marginal = [], [], [], [], []
+    modes, socs, imports, exports, marginal, charged = [], [], [], [], [], []
     switches = 0
 
-    def total(index, mode, soc, extra=0.0):
+    def total(index, mode, ev_kwh, soc, extra=0.0):
+        load = ev_kwh + extra
         next_soc, imp, exp = _step(
-            inputs, index, MODES[mode], soc, targets[index], extra
+            inputs, index, MODES[mode], soc, target(index, ev_kwh), load
         )
+        following = values[index + 1][mode]
+        if following.shape[1] == 1:
+            future = float(np.interp(next_soc[0], grid, following[:, 0]))
+        else:
+            row = _at_soc(following, grid, next_soc)[0]
+            future = float(np.interp(min(delivered + ev_kwh, levels[-1]), levels, row))
         cost = float(
-            _quarter_cost(inputs, index, imp, exp, caps[index], extra)[0]
+            _quarter_cost(inputs, index, imp, exp, caps[index], load)[0]
             + _wear(battery, soc, next_soc)[0]
-            + np.interp(next_soc, grid, values[index + 1][mode])[0]
+            + future
             + switch[previous, mode]
         )
         return cost, next_soc, imp, exp
 
     for index in range(count):
         candidates = []
+        actions = _ev_actions(inputs, index, levels)
         for mode in _allowed(inputs, index):
-            cost, next_soc, imp, exp = total(index, mode, soc)
-            candidates.append((cost, mode, next_soc, imp, exp))
+            for ev_kwh in actions:
+                cost, next_soc, imp, exp = total(index, mode, ev_kwh, soc)
+                candidates.append((cost, mode, ev_kwh, next_soc, imp, exp))
         if inputs.probe_kwh > 0:
             probed = min(
-                total(index, mode, soc, inputs.probe_kwh)[0]
+                total(index, mode, ev_kwh, soc, inputs.probe_kwh)[0]
                 for mode in _allowed(inputs, index)
+                for ev_kwh in actions
             )
             lowest = min(c[0] for c in candidates)
             marginal.append((probed - lowest) / inputs.probe_kwh)
-        # Small tie margin: the first (simplest) mode wins when costs are equal
+        # Small tie margin: the first (simplest mode, lowest power) wins when equal
         lowest = min(c[0] for c in candidates)
-        _, mode, soc, imp, exp = next(c for c in candidates if c[0] <= lowest + 1e-9)
+        _, mode, ev_kwh, soc, imp, exp = next(
+            c for c in candidates if c[0] <= lowest + 1e-9
+        )
         # Modes that do the same this quarter (e.g. `sell` with an empty battery and
         # `sell_excess`) are named after the simplest one, so the inverter does not
         # run a mode the plan does not need
         mode = next(
             c[1]
             for c in candidates
-            if all(
+            if c[2] == ev_kwh
+            and all(
                 abs(float(x[0]) - float(y[0])) < 1e-9
-                for x, y in ((c[2], soc), (c[3], imp), (c[4], exp))
+                for x, y in ((c[3], soc), (c[4], imp), (c[5], exp))
             )
         )
         switches += switch[previous, mode] > 0
         previous = mode
+        delivered = min(delivered + ev_kwh, levels[-1]) if vehicle else 0.0
         modes.append(MODES[mode])
         socs.append(float(soc[0]))
         imports.append(float(imp[0]))
         exports.append(float(exp[0]))
-    return modes, socs, imports, exports, switches, marginal
+        charged.append(ev_kwh)
+    missing = max(vehicle.need_kwh - delivered, 0.0) if vehicle else 0.0
+    return modes, socs, imports, exports, switches, marginal, charged, missing
 
 
 def _hourly(starts: Sequence[dt.datetime], kwh: Sequence[float]):
@@ -312,6 +529,37 @@ def _charge_key(charge_index: int, moment: dt.datetime) -> str:
     return f"{charge_index}:{moment.year}-{moment.month:02d}"
 
 
+def _candidate_levels(
+    start: float, best: float, top: float, *, fine: bool
+) -> list[float]:
+    """Return the import target levels (kW) to try for one power charge.
+
+    Coarse pass (`fine` False): from `start` (the level before this search round)
+    up to `top` in `COARSE_STEP_KW` steps. Fine pass: `TARGET_STEP_KW` steps within
+    a coarse step on both sides of the best level found, above `start`, skipping
+    the levels the coarse pass tried. With the coarse step equal to the fine step
+    this is the plain scan of every level. Tried in increasing order.
+    """
+    if not fine:
+        return [
+            float(level)
+            for level in np.arange(
+                start + COARSE_STEP_KW, top + TARGET_STEP_KW, COARSE_STEP_KW
+            )
+        ]
+    if COARSE_STEP_KW <= TARGET_STEP_KW:
+        return []
+    tried = {round(start + COARSE_STEP_KW * k, 6) for k in range(1, 1000)}
+    low = max(start, best - COARSE_STEP_KW) + TARGET_STEP_KW
+    return [
+        float(level)
+        for level in np.arange(
+            low, min(best + COARSE_STEP_KW, top + TARGET_STEP_KW), TARGET_STEP_KW
+        )
+        if round(float(level), 6) not in tried and abs(level - best) > 1e-9
+    ]
+
+
 def optimize(
     starts: Sequence[dt.datetime],
     prices: Sequence[float],
@@ -325,6 +573,7 @@ def optimize(
     current_mode: str | None = None,
     exempt: Sequence[float] | None = None,
     probe_kwh: float = 0.0,
+    vehicle: Vehicle | None = None,
 ) -> Plan:
     """Return the cheapest plan.
 
@@ -334,7 +583,8 @@ def optimize(
     a mode per quarter that must be used (None: free); `current_mode` the mode the
     battery runs now, so a recalculated plan only changes it when it pays; `exempt`
     kWh per quarter of the load that the import limit does not apply to (the heat
-    pump); `probe_kwh` the extra load per quarter that `Plan.marginal` prices.
+    pump); `probe_kwh` the extra load per quarter that `Plan.marginal` prices;
+    `vehicle` a car to charge in the same plan (see `Vehicle` and `_optimize`).
     """
     history = dict(history or {})
     limit = limit or Limit()
@@ -381,6 +631,10 @@ def optimize(
         tuple(forced) if forced else (None,) * len(starts),
         current_mode,
         0.0,
+        vehicle,
+        # The car's missing energy after the horizon: bought at the cheapest price of
+        # the horizon's last day
+        float(np.min(buy[-END_WINDOW:])) if len(buy) else 0.0,
     )
 
     # The power charges in the horizon, per month, and the peak already reached
@@ -404,17 +658,22 @@ def optimize(
         quarter_keys.append(keys)
 
     def run(levels: dict[str, float]) -> Plan:
+        """Plan for fixed import target levels."""
         targets, caps, peak_levels = [], [], []
+        level_caps, other_caps = [], []
         for index, keys in enumerate(quarter_keys):
             peak_levels.append(min((levels[k] for k in keys), default=None))
-            target = min(
-                [levels[k] * QUARTER_HOURS for k in keys]
-                + [
-                    float(limit_kwh[index]),
-                    battery.max_grid_charge_kw * QUARTER_HOURS + max(net[index], 0.0),
-                ]
+            level_caps.append(
+                min((levels[k] * QUARTER_HOURS for k in keys), default=math.inf)
             )
-            targets.append(target)
+            other_caps.append(
+                min(
+                    float(inputs.limit[index]),
+                    battery.max_grid_charge_kw * QUARTER_HOURS
+                    + max(inputs.net[index], 0.0),
+                )
+            )
+            targets.append(min(level_caps[-1], other_caps[-1]))
             caps.append(
                 [
                     (
@@ -424,9 +683,19 @@ def optimize(
                     for k in keys
                 ]
             )
-        modes, socs, imports, exports, switches, marginal = _optimize(
-            inputs, targets, caps
+        modes, socs, imports, exports, switches, marginal, ev_kwh, missing = _optimize(
+            inputs, (level_caps, other_caps), caps
         )
+        ev_missing_cost = 0.0
+        car = inputs.vehicle
+        if car is not None and car.need_kwh > 0:
+            ev_missing_cost = float(
+                _ev_missing(
+                    inputs,
+                    np.array([car.need_kwh - missing]),
+                    at_end=car.deadline >= len(starts),
+                )[0]
+            )
         energy = float(np.dot(imports, buy) - np.dot(exports, sell))
         first = min(max(battery.soc_kwh, battery.min_kwh), battery.max_kwh)
         wear = sum(
@@ -444,7 +713,9 @@ def optimize(
             peaks[key] = (before, after)
             power += charge.kr_per_kw * (after - before)
             amortized += charge.kr_per_kw * (after - before) * shares[key]
-        excess = float(np.sum(np.maximum(np.array(imports) - limit_kwh, 0.0)))
+        excess = float(
+            np.sum(np.maximum(np.array(imports) - inputs.limit - np.array(ev_kwh), 0.0))
+        )
         end_value = (socs[-1] - battery.floor_kwh) * end_price if socs else 0.0
         return Plan(
             list(starts),
@@ -465,25 +736,34 @@ def optimize(
             + amortized
             - end_value
             + excess * LIMIT_PENALTY
-            + switches * SWITCH_COST,
+            + switches * SWITCH_COST
+            + ev_missing_cost,
             marginal,
+            ev_kwh,
+            missing,
+            ev_missing_cost,
         )
 
-    # Coordinate search over the import targets, starting at the peaks already paid
+    # Coordinate search over the import targets, starting at the peaks already paid.
+    # With a car every run is the joint program: searching with the car as a fixed
+    # load (in its cheapest quarters at full power) was 2-3 times faster but missed
+    # the low levels where the car charges slowly, losing up to 3 kr a day
     levels = {key: before for key, (_, _, before) in charges.items()}
     best = run(levels)
-    top = battery.max_grid_charge_kw + max(
-        float(np.max(net, initial=0.0)) / QUARTER_HOURS, 0.0
+    top = (
+        battery.max_grid_charge_kw
+        + max(float(np.max(net, initial=0.0)) / QUARTER_HOURS, 0.0)
+        + (max(vehicle.powers_kw) if vehicle else 0.0)
     )
     for _ in range(2):
         improved = False
         for key in charges:
-            for level in np.arange(
-                levels[key] + TARGET_STEP_KW, top + TARGET_STEP_KW, TARGET_STEP_KW
-            ):
-                plan = run({**levels, key: float(level)})
-                if plan.objective < best.objective - 0.01:
-                    best, levels, improved = plan, {**levels, key: float(level)}, True
+            start = levels[key]
+            for fine in (False, True):
+                for level in _candidate_levels(start, levels[key], top, fine=fine):
+                    plan = run({**levels, key: level})
+                    if plan.objective < best.objective - 0.01:
+                        best, levels, improved = plan, {**levels, key: level}, True
         if not improved:
             break
     if probe_kwh > 0:

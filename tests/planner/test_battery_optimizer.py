@@ -424,3 +424,141 @@ def test_peak_levels_ignore_the_import_limit():
     assert level is not None
     assert level >= 3.0
     assert plan.targets[noon] == pytest.approx(0.5)
+
+
+def car(need=8.0, plugged=None, deadline=28, powers=(4.0, 8.0)):
+    """Return a car needing `need` kWh by quarter `deadline` (07:00)."""
+    return opt.Vehicle(
+        powers_kw=powers,
+        need_kwh=need,
+        plugged=plugged if plugged is not None else [True] * 96,
+        deadline=deadline,
+    )
+
+
+def charged(plan, first, last):
+    """Return the car's kWh charged between two hours."""
+    return sum(plan.ev_kwh[first * 4 : last * 4])
+
+
+def test_car_charges_in_the_cheapest_quarters():
+    """Test that the car gets its need by the deadline, in the cheap night hours."""
+    prices = [100.0 if 2 <= s.hour < 4 else 1000.0 for s in STARTS]
+    plan = opt.optimize(
+        STARTS,
+        prices,
+        LOAD,
+        NO_PV,
+        battery(soc_kwh=2.0, max_kwh=2.5),
+        NO_FEES,
+        vehicle=car(),
+    )
+    assert sum(plan.ev_kwh) == pytest.approx(8.0)
+    assert charged(plan, 2, 4) == pytest.approx(8.0)
+    assert plan.ev_missing_kwh == pytest.approx(0.0)
+    # The car's energy is imported (no battery worth using)
+    assert sum(plan.grid_import) == pytest.approx(8.0 + sum(LOAD), abs=0.5)
+
+
+def test_car_only_charges_while_plugged_in():
+    """Test that a car home from 04:00 can not use the cheaper hours before."""
+    plugged = [s.hour >= 4 for s in STARTS]
+    prices = [100.0 if s.hour < 4 else 500.0 if s.hour < 6 else 1000.0 for s in STARTS]
+    plan = opt.optimize(
+        STARTS,
+        prices,
+        LOAD,
+        NO_PV,
+        battery(max_kwh=2.5),
+        NO_FEES,
+        vehicle=car(plugged=plugged),
+    )
+    assert charged(plan, 0, 4) == 0.0
+    assert charged(plan, 4, 6) == pytest.approx(8.0)
+    assert charged(plan, 7, 24) == 0.0  # nothing after the deadline
+
+
+def test_car_need_that_can_not_be_met():
+    """Test that a car plugged in too briefly charges at full power and misses."""
+    plugged = [6 * 4 <= i < 7 * 4 for i in range(96)]  # 06:00-07:00, at most 8 kWh
+    plan = opt.optimize(
+        STARTS,
+        [500.0] * 96,
+        LOAD,
+        NO_PV,
+        battery(max_kwh=2.5),
+        NO_FEES,
+        vehicle=car(need=12.0, plugged=plugged),
+    )
+    assert charged(plan, 6, 7) == pytest.approx(8.0)
+    assert plan.ev_missing_kwh == pytest.approx(4.0)
+    assert plan.ev_missing_cost == pytest.approx(40.0)
+
+
+def test_car_deadline_after_the_horizon():
+    """Test a need after the horizon: deferred if there is time, else charged now.
+
+    Two days, the last day's cheapest price (the end price) at 22-24, one cheaper
+    hour on the first night. With the deadline far after the horizon the car takes
+    the cheaper hour; with a deadline one hour after it, only 8 kWh can wait.
+    """
+    starts = [DAY + dt.timedelta(minutes=15 * i) for i in range(192)]
+    prices = [
+        50.0 if i // 4 == 3 else 200.0 if (i // 4) % 24 >= 22 else 1000.0
+        for i in range(192)
+    ]
+    load, no_pv = [0.25] * 192, [0.0] * 192
+    later = opt.optimize(
+        starts,
+        prices,
+        load,
+        no_pv,
+        battery(max_kwh=2.5),
+        NO_FEES,
+        vehicle=car(plugged=[True] * 192, deadline=400),
+    )
+    assert charged(later, 3, 4) == pytest.approx(8.0)
+    assert later.ev_missing_kwh == pytest.approx(0.0)
+    # 20 kWh by an hour after the horizon at 8 kW: at least 12 kWh now, the rest is
+    # left for the hour after it at the end price
+    soon = opt.optimize(
+        starts,
+        [500.0] * 192,
+        load,
+        no_pv,
+        battery(max_kwh=2.5),
+        NO_FEES,
+        vehicle=car(need=20.0, plugged=[True] * 192, deadline=196),
+    )
+    assert sum(soon.ev_kwh) == pytest.approx(12.0, abs=1.0)
+    assert soon.ev_missing_cost == pytest.approx(
+        soon.ev_missing_kwh * 500 * 1.25 / 1000
+    )
+
+
+def test_car_and_battery_share_the_power_charge():
+    """Test that the car and the battery spread over the night instead of a peak.
+
+    Both want the cheap 00-06 hours; with a night power charge charging the car at
+    8 kW in one hour costs more than spreading it, the battery fills around it.
+    """
+    night = tariff.Tariff(
+        power_charges=(
+            tariff.PowerCharge(
+                kr_per_kw=200.0, period=tariff.Period(start_hour=0, end_hour=6)
+            ),
+        )
+    )
+    prices = [100.0 if s.hour < 6 else 2000.0 for s in STARTS]
+    plan = opt.optimize(
+        STARTS,
+        prices,
+        LOAD,
+        NO_PV,
+        battery(soc_kwh=2.0, max_kwh=8.0),
+        night,
+        vehicle=car(need=8.0, deadline=24),
+    )
+    assert sum(plan.ev_kwh) == pytest.approx(8.0)
+    # 8 kWh car + 6 kWh battery + 6 kWh load in 6 hours: about 3.3 kW, not 8+
+    assert peak(plan.grid_import, 0, 6) < 4.5
