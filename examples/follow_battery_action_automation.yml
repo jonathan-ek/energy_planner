@@ -7,7 +7,9 @@
 # replaces them), or disable them. Turning the toggle off turns peak shaving off and
 # returns to the previous behaviour.
 #
-# The script only writes settings that changed, so it can run every minute.
+# The script only writes settings that changed, so it can run every minute. With
+# window enable switches (TIME_OF_USE, CHARGE_PERIOD, DISCHARGE_PERIOD in the
+# script, e.g. an S6-EH3P), turn those off too when stopped.
 alias: Follow battery action
 description: ""
 triggers:

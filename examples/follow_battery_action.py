@@ -44,6 +44,12 @@ FEED_IN_LIMIT = "switch.solis_s6_eh1p_grid_feed_in_power_limit_switch"
 PEAK_SHAVING = "switch.solis_s6_eh1p_peak_shaving_mode"
 PEAK_GRID_POWER = "number.solis_s6_eh1p_peak_max_usable_grid_power"  # W
 PEAK_BASELINE_SOC = "number.solis_s6_eh1p_peak_baseline_soc"  # %
+# Inverters with an enable switch for time-of-use and each window (e.g. the
+# S6-EH3P: switch.time_of_use, switch.solis_s6_solis_grid_connected_charging_period_6
+# and ..._discharging_period_6); None where the times alone set the window (EH1P)
+TIME_OF_USE = None
+CHARGE_PERIOD = None
+DISCHARGE_PERIOD = None
 
 BATTERY_SOC = "sensor.solis_s6_solis_battery_soc"
 PV_POWER = "sensor.solis_s6_solis_total_pv_power"  # W
@@ -159,24 +165,34 @@ elif state == "sell-excess" and soc is not None:
 
 # Turn off what is not used first, so two modes are never active together
 if charge is None:
+    if CHARGE_PERIOD:
+        set_switch(CHARGE_PERIOD, False)
     set_time(CHARGE_START, OFF)
     set_time(CHARGE_END, OFF)
 if discharge is None:
+    if DISCHARGE_PERIOD:
+        set_switch(DISCHARGE_PERIOD, False)
     set_time(DISCHARGE_START, OFF)
     set_time(DISCHARGE_END, OFF)
 if peak is None:
     set_switch(PEAK_SHAVING, False)
+if TIME_OF_USE:
+    set_switch(TIME_OF_USE, charge is not None or discharge is not None)
 
 if charge is not None:
     set_number(CHARGE_CURRENT, charge[0])
     set_number(CHARGE_SOC, charge[1])
     set_time(CHARGE_START, OFF)
     set_time(CHARGE_END, end)
+    if CHARGE_PERIOD:
+        set_switch(CHARGE_PERIOD, True)
 if discharge is not None:
     set_number(DISCHARGE_CURRENT, discharge[0])
     set_number(DISCHARGE_SOC, discharge[1])
     set_time(DISCHARGE_START, OFF)
     set_time(DISCHARGE_END, end)
+    if DISCHARGE_PERIOD:
+        set_switch(DISCHARGE_PERIOD, True)
 if peak is not None:
     set_number(PEAK_GRID_POWER, peak[0])
     set_number(PEAK_BASELINE_SOC, peak[1])
