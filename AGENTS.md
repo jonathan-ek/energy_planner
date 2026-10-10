@@ -83,7 +83,8 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 ### Config keys (entity ids are `<platform>.energy_planner_<key>`)
 
 - `select`: `planner_state` (`basic`, `cheapest hours`, `dynamic`, `price peak`, `off`),
-  `price_peak_planner_{cheap,expensive,inbetween}_state`
+  `price_peak_planner_{cheap,expensive,inbetween}_state`, `forecast_load_model`
+  (`profile`, default; `temperature`, see "Forecast")
 - `time`: `earliest_charge_time` (22:00), `earliest_discharge_time` (06:00)
 - `number`: `basic_nr_of_charge_hours`, `basic_nr_of_discharge_hours`,
   `cheapest_hours_nr_of_charge_hours`, `price_peak_nr_of_charge_hours`,
@@ -150,6 +151,15 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   temperature). Before profiling, hours more than 3.5 kWh above the median of the same
   hour in the previous 14 days are capped (`cap_large_loads`): one-off loads like the
   sauna come from the calendar or the reserve instead, so they are not counted twice.
+- **Load, temperature model** (`forecast_load_model` = `temperature`, for houses heated
+  with electricity; `temperature_load_quarters`): each day's profile is scaled so its
+  total changes by the heating slope × (Open-Meteo's daily mean temperature − the
+  measured mean of the days behind the profile). The slope (kWh/day per °C, at most 0,
+  published as `heating_slope`) is a least-squares fit of the 35 history days' load
+  against their mean `outdoor_temperature_sensor`. Without Open-Meteo, or with too
+  little or too even temperature history, it is the profile. Backtest on the owner's
+  parents' house (electric heating, 595 days 2025-01 - 2026-09): daily error 21% ->
+  18%, Nov-Mar 18% -> 13%, summer unchanged. The owner's house keeps `profile`.
 - **PV** = Open-Meteo `global_tilted_irradiance` per panel plane (planes, kWp and
   location read from the Forecast.Solar config, `_solar_planes`), averaged over the
   models in `OPEN_METEO_MODELS` (MET Nordic, ECMWF, ICON), derated for cell

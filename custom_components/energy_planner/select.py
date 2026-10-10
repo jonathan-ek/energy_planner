@@ -4,6 +4,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN, SLOT_COUNT, SELECT_ENTITIES
+from .planner.forecast import LOAD_MODELS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -110,6 +111,19 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 ],
                 "default": "pause",
                 "name": "Price peak planner inbetween hours state",
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerSelectEntity(
+            hass,
+            {
+                # profile: the load profile alone; temperature: corrected for the
+                # outdoor temperature, for houses heated with electricity
+                "id": "forecast_load_model",
+                "options": list(LOAD_MODELS),
+                "default": "profile",
+                "name": "Forecast load model",
                 "enabled": True,
                 "data_store": "config",
             },

@@ -405,10 +405,6 @@ async def async_update_forecast(hass: HomeAssistant):
     planned_energy = [(start, stop, kwh) for start, stop, kwh, _ in planned_loads]
     planned = forecast.planned_quarters(planned_energy, quarters)
     yesterday_planned = forecast.planned_quarters(planned_energy, yesterday_quarters)
-    yesterday_expected = [
-        None if base is None else base + extra
-        for base, extra in zip(yesterday_load, yesterday_planned, strict=True)
-    ]
 
     # PV: Open-Meteo, or Forecast.Solar if that fails. Both are scaled by the
     # actual / forecast ratio of the last two weeks
@@ -424,6 +420,7 @@ async def async_update_forecast(hass: HomeAssistant):
     raw_totals = {}
     pv_source = None
     temperature = None
+    temperatures = {}
     location, planes = _solar_planes(hass)
     if location and planes:
         try:
@@ -470,6 +467,25 @@ async def async_update_forecast(hass: HomeAssistant):
         raw_totals = _daily_totals(quarters, raw, current)
         pv = [value * calibration for value in raw]
 
+    # Houses heated with electricity: the profile corrected for the outdoor temperature,
+    # measured for the history days, Open-Meteo's for the forecast days
+    load_model = config.get("forecast_load_model", "profile")
+    slope = None
+    if load_model == "temperature" and temperatures:
+        measured = forecast.daily_means(_local_hours(outdoor))
+        expected = forecast.daily_means(_local_hours(temperatures))
+        slope = forecast.heating_slope(history, measured, today)
+        load = forecast.temperature_load_quarters(
+            history, quarters, today, measured, expected
+        )
+        yesterday_load = forecast.temperature_load_quarters(
+            history, yesterday_quarters, yesterday, measured, expected
+        )
+    yesterday_expected = [
+        None if base is None else base + extra
+        for base, extra in zip(yesterday_load, yesterday_planned, strict=True)
+    ]
+
     tomorrow = today + dt.timedelta(days=1)
     base_totals = _daily_totals(quarters, load, current)
     planned_totals = _daily_totals(quarters, planned, current)
@@ -494,6 +510,9 @@ async def async_update_forecast(hass: HomeAssistant):
         # Measured heat pump heat loss (kW per °C), None until enough hours exist
         "heat_pump_loss": None if loss is None else round(loss, 3),
         "heat_pump_loss_hours": loss_hours,
+        "load_model": load_model,
+        # Temperature model: daily load change per °C warmer (kWh/°C), 0 = none
+        "heating_slope": None if slope is None else round(slope, 2),
         "planned_events": [
             {
                 "summary": summary,

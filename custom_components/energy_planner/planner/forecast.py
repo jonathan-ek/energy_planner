@@ -3,7 +3,8 @@
 Backtested on a year of data (see AGENTS.md): blending a 7-day hourly profile with
 a profile of the last same-type days (workday / weekend) gave the best day-ahead
 consumption forecast, and splitting the hour evenly into quarters is as good as any
-quarter profile.
+quarter profile. For houses heated with electricity the profile can be corrected for
+the outdoor temperature (temperature_load_quarters).
 
 PV comes from Open-Meteo's tilted irradiance per panel plane, averaged over three
 weather models (day-ahead backtest: 11% daily error against 17% for Forecast.Solar).
@@ -34,6 +35,16 @@ SAME_TYPE_LOOKBACK_DAYS = 35
 OPEN_METEO_MODELS = ("metno_seamless", "ecmwf_ifs025", "icon_seamless")
 # Power loss per °C of cell temperature above 25 °C
 TEMPERATURE_COEFFICIENT = 0.004
+
+# Load models (setting forecast_load_model): the profile alone, or corrected for the
+# outdoor temperature (temperature_load_quarters)
+LOAD_MODELS = ("profile", "temperature")
+# Temperature model: a day with at least this many hours counts as complete
+DAY_MIN_HOURS = 20
+# ... days with a temperature needed to fit the heating slope
+TEMPERATURE_MIN_DAYS = 14
+# ... standard deviation (°C) of their temperatures needed to trust the fit
+TEMPERATURE_MIN_SPREAD = 1.0
 
 # PV calibration settings
 CALIBRATION_MIN_FORECAST_KWH = 5.0
@@ -101,18 +112,9 @@ def hourly_load_forecast(
     history maps (local date, local hour) to kWh. Only days before today are used, so
     the forecast for today and tomorrow is based on the same complete days.
     """
-    recent = [
-        history[(today - dt.timedelta(days=i), hour)]
-        for i in range(1, PROFILE_DAYS + 1)
-        if (today - dt.timedelta(days=i), hour) in history
-    ]
-    same_type = []
-    for i in range(1, SAME_TYPE_LOOKBACK_DAYS + 1):
-        candidate = today - dt.timedelta(days=i)
-        if is_offday(candidate) == is_offday(day) and (candidate, hour) in history:
-            same_type.append(history[(candidate, hour)])
-            if len(same_type) == SAME_TYPE_DAYS:
-                break
+    recent_days, same_type_days = _profile_days(history, day, hour, today)
+    recent = [history[(d, hour)] for d in recent_days]
+    same_type = [history[(d, hour)] for d in same_type_days]
     profiles = []
     if len(recent) >= PROFILE_MIN_DAYS:
         profiles.append(mean(recent))
@@ -123,6 +125,118 @@ def hourly_load_forecast(
     # Not enough history yet, use whatever exists for this hour
     fallback = [kwh for (_, h), kwh in history.items() if h == hour]
     return mean(fallback) if fallback else None
+
+
+def _profile_days(
+    history: dict[tuple[dt.date, int], float], day: dt.date, hour: int, today: dt.date
+) -> tuple[list[dt.date], list[dt.date]]:
+    """Return the days hourly_load_forecast uses for an hour: recent and same-type."""
+    recent = [
+        today - dt.timedelta(days=i)
+        for i in range(1, PROFILE_DAYS + 1)
+        if (today - dt.timedelta(days=i), hour) in history
+    ]
+    same_type = []
+    for i in range(1, SAME_TYPE_LOOKBACK_DAYS + 1):
+        candidate = today - dt.timedelta(days=i)
+        if is_offday(candidate) == is_offday(day) and (candidate, hour) in history:
+            same_type.append(candidate)
+            if len(same_type) == SAME_TYPE_DAYS:
+                break
+    return recent, same_type
+
+
+def daily_means(hourly: Mapping[tuple[dt.date, int], float]) -> dict[dt.date, float]:
+    """Return the mean per local date of hourly values, for days with most hours."""
+    days: dict[dt.date, list[float]] = {}
+    for (day, _), value in hourly.items():
+        days.setdefault(day, []).append(value)
+    return {
+        day: mean(values)
+        for day, values in days.items()
+        if len(values) >= DAY_MIN_HOURS
+    }
+
+
+def heating_slope(
+    history: dict[tuple[dt.date, int], float],
+    temperatures: Mapping[dt.date, float],
+    today: dt.date,
+) -> float:
+    """Return the daily load change per °C warmer outdoors (kWh/°C, at most 0).
+
+    A least-squares line through each complete history day before today: its load
+    against its mean outdoor temperature, over the last SAME_TYPE_LOOKBACK_DAYS days.
+    0 (no correction) with fewer than TEMPERATURE_MIN_DAYS such days, when their
+    temperatures hardly differ, or when the load rises with the temperature (cooling
+    is not modelled).
+    """
+    hours: dict[dt.date, list[float]] = {}
+    for (day, _), kwh in history.items():
+        hours.setdefault(day, []).append(kwh)
+    points = [
+        (temperatures[day], sum(values))
+        for i in range(1, SAME_TYPE_LOOKBACK_DAYS + 1)
+        if (day := today - dt.timedelta(days=i)) in temperatures
+        and len(values := hours.get(day, [])) >= DAY_MIN_HOURS
+    ]
+    if len(points) < TEMPERATURE_MIN_DAYS:
+        return 0.0
+    x_mean = mean(x for x, _ in points)
+    y_mean = mean(y for _, y in points)
+    spread = sum((x - x_mean) ** 2 for x, _ in points)
+    if spread < TEMPERATURE_MIN_SPREAD**2 * len(points):
+        return 0.0
+    slope = sum((x - x_mean) * (y - y_mean) for x, y in points) / spread
+    return min(slope, 0.0)
+
+
+def temperature_load_quarters(
+    history: dict[tuple[dt.date, int], float],
+    quarters: list[dt.datetime],
+    today: dt.date,
+    measured: Mapping[dt.date, float],
+    expected: Mapping[dt.date, float],
+) -> list[float | None]:
+    """Forecast kWh per quarter like load_quarters, corrected for the temperature.
+
+    For houses heated with electricity (backtested on such a house: daily error 21%
+    -> 18%, in Nov-Mar 18% -> 13%; a district heated house hardly changes). The
+    profile is built from earlier days, so a cold day after a mild week is
+    under-forecast. Each day's profile is scaled so its total changes by
+    heating_slope * (expected temperature - the mean temperature of the days behind
+    the profile), the recent and same-type days averaged like the profiles.
+
+    measured is the daily mean outdoor temperature of the history days, expected the
+    forecast daily mean of the forecast days. Days missing either keep the profile.
+    quarters should cover whole local days, as the correction is spread over the
+    quarters of a day in the list.
+    """
+    load = load_quarters(history, quarters, today)
+    slope = heating_slope(history, measured, today)
+    if not slope:
+        return load
+    days: dict[dt.date, list[int]] = {}
+    for i, start in enumerate(quarters):
+        days.setdefault(start.date(), []).append(i)
+    for day, indices in days.items():
+        total = sum(load[i] or 0.0 for i in indices)
+        # The noon hour stands for the day: history days are complete apart from gaps
+        groups = _profile_days(history, day, 12, today)
+        references = [
+            mean(measured[d] for d in group if d in measured)
+            for group in groups
+            if any(d in measured for d in group)
+        ]
+        if day not in expected or not references or total <= 0:
+            continue
+        change = slope * (expected[day] - mean(references))
+        factor = max(1 + change / total, 0.0)
+        for i in indices:
+            value = load[i]
+            if value is not None:
+                load[i] = value * factor
+    return load
 
 
 def cap_large_loads(

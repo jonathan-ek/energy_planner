@@ -37,6 +37,8 @@ EXTRA_ATTRIBUTES = {
         "yesterday_load_actual_kwh",
         "heat_pump_loss",
         "heat_pump_loss_hours",
+        "load_model",
+        "heating_slope",
     ),
     "pv_forecast": (
         "pv_today_remaining",

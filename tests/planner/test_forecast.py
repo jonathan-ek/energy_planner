@@ -307,3 +307,66 @@ def test_no_reserve_while_away():
 def test_is_away_event(summary, away):
     """Test the words that say nobody is home."""
     assert forecast.is_away_event(summary) == away
+
+
+class TestTemperatureLoad:
+    """Tests for the temperature corrected load forecast."""
+
+    today = dt.date(2026, 10, 7)  # Wednesday
+
+    def setup_method(self):
+        """Build 35 days on the line load = 40 - 2 x temperature (kWh/day).
+
+        The last 7 days are all 10 °C (20 kWh), so the profile is 20 kWh at 10 °C.
+        """
+        days = [self.today - dt.timedelta(days=i) for i in range(1, 36)]
+        self.measured = {
+            day: 10.0 if i < 7 else (5.0 if i % 2 else 15.0)
+            for i, day in enumerate(days)
+        }
+        self.history = history_for(days, lambda d, h: (40 - 2 * self.measured[d]) / 24)
+        self.quarters = forecast.quarter_starts(
+            dt.datetime.combine(self.today, dt.time(), TZ),
+            dt.datetime.combine(self.today + dt.timedelta(days=2), dt.time(), TZ),
+        )
+
+    def test_daily_means_need_most_hours(self):
+        """Test that a day with few hours gets no mean."""
+        hourly = {(self.today, h): float(h) for h in range(24)}
+        hourly[(self.today + dt.timedelta(days=1), 0)] = 5.0
+        assert forecast.daily_means(hourly) == {self.today: pytest.approx(11.5)}
+
+    def test_heating_slope(self):
+        """Test the fitted load change per °C."""
+        slope = forecast.heating_slope(self.history, self.measured, self.today)
+        assert slope == pytest.approx(-2.0)
+
+    def test_no_slope_without_variation_or_data(self):
+        """Test that the slope is 0 without enough days or temperature spread."""
+        flat = dict.fromkeys(self.measured, 10.0)
+        assert forecast.heating_slope(self.history, flat, self.today) == 0
+        few = dict(list(self.measured.items())[:10])
+        assert forecast.heating_slope(self.history, few, self.today) == 0
+        # More load when warmer (cooling) is not modelled
+        warm = {day: 20 - t for day, t in self.measured.items()}
+        assert forecast.heating_slope(self.history, warm, self.today) == 0
+
+    def test_colder_day_gets_more_load(self):
+        """Test that each day's total moves along the slope from the profile."""
+        tomorrow = self.today + dt.timedelta(days=1)
+        expected = {self.today: 10.0, tomorrow: 0.0}
+        load = forecast.temperature_load_quarters(
+            self.history, self.quarters, self.today, self.measured, expected
+        )
+        # Profile 20 kWh at 10 °C; tomorrow 10 °C colder: + 2 x 10 kWh
+        assert sum(v or 0.0 for v in load[:96]) == pytest.approx(20.0)
+        assert sum(v or 0.0 for v in load[96:]) == pytest.approx(40.0)
+        # Spread like the profile (flat here)
+        assert load[96:] == pytest.approx([40.0 / 96] * 96)
+
+    def test_day_without_temperature_keeps_profile(self):
+        """Test that a day without a forecast temperature is not corrected."""
+        load = forecast.temperature_load_quarters(
+            self.history, self.quarters, self.today, self.measured, {}
+        )
+        assert load == forecast.load_quarters(self.history, self.quarters, self.today)

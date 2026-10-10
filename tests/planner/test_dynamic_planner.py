@@ -234,6 +234,57 @@ async def test_pv_from_open_meteo(mock_hass):
     assert temperature[96 + 4 * 10] == pytest.approx(10.125)
 
 
+@pytest.mark.parametrize(
+    ("model", "load_tomorrow", "slope"),
+    [("profile", 24.0, None), ("temperature", 36.0, -1.0)],
+)
+async def test_temperature_load_model(mock_hass, model, load_tomorrow, slope):
+    """Test that the temperature model only changes the load when chosen."""
+    means = statistics()
+    # Measured outdoor temperature: 10 °C the last 9 days, 4 / 16 °C before, and
+    # load on the line 24 + (10 - temperature) kWh per day
+    means[OUTDOOR] = {}
+    for hour in hours(35):
+        local = hour.astimezone(TZ)
+        age = (NOW.date() - local.date()).days
+        temperature = 10.0 if age <= 9 else (4.0 if age % 2 else 16.0)
+        means[OUTDOOR][hour] = temperature
+        means[LOAD][hour] = 1.0 + (10.0 - temperature) / 24
+        means[EV][hour] = 0.0
+    latest, previous, _ = open_meteo_forecast()
+    # Open-Meteo: 10 °C until tomorrow, which is 12 °C colder
+    tomorrow = dt.datetime.combine(NOW.date() + dt.timedelta(days=1), dt.time(0), TZ)
+    temperatures = {
+        hour: -2.0 if hour >= tomorrow.astimezone(dt.UTC) else 10.0
+        for hour in (
+            (tomorrow + dt.timedelta(hours=h)).astimezone(dt.UTC)
+            for h in range(-72, 24)
+        )
+    }
+    mock_hass.data[DOMAIN]["config"]["forecast_load_model"] = model
+    with (
+        patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
+        patch.object(dynamic_planner, "_forecast_solar_sources", return_value=[]),
+        patch.object(dynamic_planner, "_hourly_means", return_value=means),
+        patch.object(dynamic_planner, "_calendar_events", return_value=[]),
+        patch.object(
+            dynamic_planner, "_solar_planes", return_value=((58.4, 15.6), [(27, 75, 6)])
+        ),
+        patch.object(
+            dynamic_planner,
+            "_open_meteo_pv",
+            return_value=(latest, previous, temperatures),
+        ),
+    ):
+        await dynamic_planner.async_update_forecast(mock_hass)
+    result = mock_hass.data[DOMAIN]["forecast"]
+    assert result["load_model"] == model
+    assert result["heating_slope"] == slope
+    # Profile 24 kWh at 10 °C; the temperature model adds 1 kWh per °C colder
+    assert result["load_tomorrow"] == pytest.approx(load_tomorrow)
+    assert result["yesterday_load_kwh"] == pytest.approx(24.0)
+
+
 async def test_heat_pump_is_removed_from_the_load(mock_hass):
     """Test that the heat pump's draw is measured and taken out of the load history."""
     means = statistics()
