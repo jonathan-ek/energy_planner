@@ -22,6 +22,20 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             },
         )
         for i in range(1, SLOT_COUNT + 1)
+    ] + [
+        EnergyPlannerDateTimeEntity(
+            hass,
+            {
+                # A trip: the car should have its need charged by then, if that is
+                # before the next working morning (planner/ev.py). Past ones are
+                # ignored
+                "id": "ev_departure",
+                "name": "Car departure",
+                "enabled": True,
+                "data_store": "config",
+                "icon": "mdi:car-clock",
+            },
+        )
     ]
 
     hass.data[DOMAIN][DATE_TIME_ENTITIES] = datetimes

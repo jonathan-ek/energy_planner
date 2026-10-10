@@ -35,7 +35,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `expected_soc` |
 | `battery_action.py` | Pure: `resolve` turns slot 1 and the plan into the action now (slot state, source, SOC, current, import target, until), mode ↔ slot state maps |
 | `heat_pump.py` | Pure heat pump economy: COP curve per outdoor temperature (`COP_CURVES`), district heating price per month (`DISTRICT_HEATING_PRESETS`), `evaluate` compares a kWh of heat from both. See "Heat pump" |
-| `ev.py` | Pure car charging: `is_plugged` (charger state), `need_from_history` (90th percentile of the charging nights, noon to noon), `need_from_soc`, `deadline_index` (the next ready time), `ev_action` (charge/wait now). See "Car" |
+| `ev.py` | Pure car charging: `is_plugged` (charger state), `need_from_history` (the largest charging night, noon to noon), `need_from_soc`, `ready_time` / `deadline_index` (the next working morning's ready time, or an earlier departure), `ev_action` (charge/wait now). See "Car" |
 | `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price now (`hass.data[DOMAIN]["prices"]`, stored by the battery plan), the tariff and the plan's export now |
 | `price_estimate.py` | Pure: tomorrow's prices before they are published (same-type days + a learned correction per hour, Swedish holidays). See "Battery plan" |
 | `../comfort/schedule.py`, `../comfort/thermal.py` | WIP comfort control, not wired into HA yet. See "Comfort" |
@@ -87,7 +87,9 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   `price_peak_planner_{cheap,expensive,inbetween}_state`, `forecast_load_model`
   (`profile`, default; `temperature`) and `forecast_pv_calibration` (`daily`, default;
   `hourly`), see "Forecast"
-- `time`: `earliest_charge_time` (22:00), `earliest_discharge_time` (06:00)
+- `time`: `earliest_charge_time` (22:00), `earliest_discharge_time` (06:00),
+  `ev_ready_time` (06:30)
+- `datetime`: `ev_departure` (a trip, see "Car")
 - `number`: `basic_nr_of_charge_hours`, `basic_nr_of_discharge_hours`,
   `cheapest_hours_nr_of_charge_hours`, `price_peak_nr_of_charge_hours`,
   `price_peak_nr_of_discharge_hours`, `price_peak_efficiency_factor` (%),
@@ -380,7 +382,12 @@ heat: district heating at the season's energy price against electricity / COP.
 
 While the car is plugged in, the battery plan plans it with the battery (`_vehicle` in
 `battery_plan.py`, `Vehicle` in the optimizer): its need by the next
-`time.energy_planner_ev_ready_time` (default 06:30), at
+`time.energy_planner_ev_ready_time` (default 06:30) on a working day
+(`price_estimate.is_offday`: weekends, holidays and the eves that price alike), or by
+`datetime.energy_planner_ev_departure` if that is earlier and still ahead (a trip; past
+ones are ignored, so it needs no clearing). Plugged in on Friday, the car charges in
+the weekend's cheapest hours; past the horizon the optimizer only charges where it
+beats the end price. At
 `number.energy_planner_ev_charger_max_power` (default 11 kW; with
 `ev_charger_min_power` > 0 also powers in between). Config store only:
 `ev_charger_status_sensor` (no default: without it the car is not planned; any state
@@ -396,8 +403,9 @@ but `disconnected`/`unavailable`/`unknown`/`off` means plugged in, so Zaptec's
   full; the 90th percentile was 19 kWh where nights reach 33), so once the session
   has taken more than that, or without either, the car is not planned and the
   action falls back to charging. The plan publishes `ev` (None while unplugged): `power` per quarter (kW),
-  `need_kwh`, `need_source` (`soc`/`history`), `ready`, `planned_kwh`, `missing_kwh`.
-  Plugging in or out and the car settings trigger a new plan.
+  `need_kwh`, `need_source` (`soc`/`history`), `ready` (the deadline, also past the
+horizon), `planned_kwh`, `missing_kwh`.
+  Plugging in or out and the car settings (incl. the departure) trigger a new plan.
 - `sensor.energy_planner_ev_action`: `charge`/`wait` from the plan (source `plan`,
   `until`, `power_kw`); without a fresh plan `charge` (source `fallback`, the car
   charges as without the planner); unplugged no state.

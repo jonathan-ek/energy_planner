@@ -255,7 +255,9 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
         source = "history"
     max_kw = float(config.get("ev_charger_max_power", 11000)) / 1000
     min_kw = float(config.get("ev_charger_min_power", 0)) / 1000
-    deadline = ev.deadline_index(starts, config.get("ev_ready_time") or dt.time(6, 30))
+    ready = config.get("ev_ready_time") or dt.time(6, 30)
+    departure = config.get("ev_departure")
+    deadline = ev.deadline_index(starts, ready, departure)
     vehicle = Vehicle(
         powers_kw=charger_powers(min_kw, max_kw) if min_kw > 0 else (max_kw,),
         need_kwh=need,
@@ -265,7 +267,7 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
     info = {
         "need_kwh": round(need, 2),
         "need_source": source,
-        "ready": starts[deadline].isoformat() if deadline < len(starts) else None,
+        "ready": ev.ready_time(starts[0], ready, departure).isoformat(),
     }
     return vehicle, info
 

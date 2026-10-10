@@ -61,13 +61,43 @@ def test_need_from_soc():
 
 def test_deadline_is_the_next_ready_time():
     """Test that the deadline is the coming morning's ready time."""
-    evening = dt.datetime(2026, 10, 10, 17, 0, tzinfo=TZ)
+    evening = dt.datetime(2026, 10, 13, 17, 0, tzinfo=TZ)  # Tuesday
     starts = [evening + dt.timedelta(minutes=15 * i) for i in range(96)]
     index = ev.deadline_index(starts, dt.time(6, 30))
-    assert starts[index] == dt.datetime(2026, 10, 11, 6, 30, tzinfo=TZ)
+    assert starts[index] == dt.datetime(2026, 10, 14, 6, 30, tzinfo=TZ)
     early = [s - dt.timedelta(hours=15) for s in starts]  # from 02:00
     assert early[ev.deadline_index(early, dt.time(6, 30))].hour == 6
     assert ev.deadline_index(starts[:8], dt.time(6, 30)) == 8
+
+
+def test_ready_on_working_days_only():
+    """Test that weekends and holidays wait for the next working morning."""
+    friday = dt.datetime(2026, 10, 9, 17, 0, tzinfo=TZ)
+    monday = dt.datetime(2026, 10, 12, 6, 30, tzinfo=TZ)
+    assert ev.ready_time(friday, dt.time(6, 30)) == monday
+    # Saturday morning, before the ready time
+    assert ev.ready_time(monday - dt.timedelta(days=2, hours=2), dt.time(6, 30)) == (
+        monday
+    )
+    # Christmas Eve to Boxing Day are holidays; 2026-12-28 is a Monday
+    assert ev.ready_time(
+        dt.datetime(2026, 12, 23, 18, 0, tzinfo=TZ), dt.time(6, 30)
+    ) == dt.datetime(2026, 12, 28, 6, 30, tzinfo=TZ)
+    starts = [friday + dt.timedelta(minutes=15 * i) for i in range(96)]
+    assert ev.deadline_index(starts, dt.time(6, 30)) == len(starts)
+
+
+def test_departure_comes_first():
+    """Test that a trip before the next working morning sets the deadline."""
+    friday = dt.datetime(2026, 10, 9, 17, 0, tzinfo=TZ)
+    trip = dt.datetime(2026, 10, 10, 9, 0, tzinfo=TZ)
+    assert ev.ready_time(friday, dt.time(6, 30), trip) == trip
+    starts = [friday + dt.timedelta(minutes=15 * i) for i in range(96)]
+    assert starts[ev.deadline_index(starts, dt.time(6, 30), trip)] == trip
+    # Past, or after the working morning: ignored
+    monday = dt.datetime(2026, 10, 12, 6, 30, tzinfo=TZ)
+    for departure in (friday - dt.timedelta(hours=1), monday + dt.timedelta(days=1)):
+        assert ev.ready_time(friday, dt.time(6, 30), departure) == monday
 
 
 def plan(updated, power):

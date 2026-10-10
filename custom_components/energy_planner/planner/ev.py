@@ -13,10 +13,16 @@ cheap, as the car stops by itself when it is full and the rest of the planned
 quarters pass without charging. Underestimating is not (the plan would pause a car
 that is not full), so once a session has taken more than that the car is not
 planned and charges as without the planner.
+
+The car is needed by the ready time on working days only: plugged in before a
+weekend it is charged in the cheapest hours before Monday morning, unless a
+departure (`datetime.energy_planner_ev_departure`, for a trip) comes first.
 """
 
 import datetime as dt
 from collections.abc import Mapping, Sequence
+
+from .price_estimate import is_offday
 
 # Charger states that mean no car (others, e.g. Zaptec's connected_requesting,
 # connected_charging, connected_finished, mean plugged in)
@@ -78,20 +84,38 @@ def need_from_soc(soc: float, limit: float, capacity_kwh: float) -> float:
     return max(limit - soc, 0.0) / 100 * capacity_kwh / CHARGE_EFFICIENCY
 
 
-def deadline_index(starts: Sequence[dt.datetime], ready: dt.time) -> int:
-    """Return the index of the first quarter at or after the next ready time.
+def ready_time(
+    first: dt.datetime, ready: dt.time, departure: dt.datetime | None = None
+) -> dt.datetime:
+    """Return when the car should have its need charged.
 
-    The next ready time is the first one after the first quarter's start, so the
-    plan always aims at the coming morning. len(starts) when it is past the end.
+    The first ready time after first on a working day: the car is only needed for
+    work, so on weekends and holidays the charging can wait for the cheapest hours
+    before the next working morning. A departure (a trip) after first wins when it
+    is earlier.
+    """
+    day = first.date()
+    target = dt.datetime.combine(day, ready, first.tzinfo)
+    while target <= first or is_offday(day):
+        day += dt.timedelta(days=1)
+        target = dt.datetime.combine(day, ready, first.tzinfo)
+    if departure is not None and first < departure < target:
+        return departure
+    return target
+
+
+def deadline_index(
+    starts: Sequence[dt.datetime],
+    ready: dt.time,
+    departure: dt.datetime | None = None,
+) -> int:
+    """Return the index of the first quarter at or after ready_time.
+
+    len(starts) when it is past the end.
     """
     if not starts:
         return 0
-    first = starts[0]
-    target = dt.datetime.combine(first.date(), ready, first.tzinfo)
-    if target <= first:
-        target = dt.datetime.combine(
-            first.date() + dt.timedelta(days=1), ready, first.tzinfo
-        )
+    target = ready_time(starts[0], ready, departure)
     return next((i for i, start in enumerate(starts) if start >= target), len(starts))
 
 

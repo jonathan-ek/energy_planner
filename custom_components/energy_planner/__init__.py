@@ -126,6 +126,8 @@ def parse_stored_data(hass: HomeAssistant):
     for key in ["earliest_charge_time", "earliest_discharge_time", "ev_ready_time"]:
         if type(config.get(key)) is str:
             config[key] = dt.time.fromisoformat(config[key])
+    if type(config.get("ev_departure")) is str:
+        config["ev_departure"] = dt_utils.parse_datetime(config["ev_departure"])
     for slot in hass.data[DOMAIN]["manual_slots"]:
         for key in ["start", "end"]:
             if type(slot.get(key)) is str:
@@ -351,6 +353,7 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
             [
                 *(f"number.{DOMAIN}_{key}" for key in PLAN_SETTINGS),
                 f"time.{DOMAIN}_ev_ready_time",
+                f"datetime.{DOMAIN}_ev_departure",
             ],
             setting_changed,
         )
