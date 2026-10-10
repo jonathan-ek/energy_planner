@@ -236,6 +236,24 @@ def test_action_follows_the_plan():
     assert action["until"] == starts[2].isoformat()
 
 
+def test_action_without_heat_pump():
+    """Test a plan made with heat_pump_power 0: no marginal prices, always off."""
+    starts = [QUARTER + dt.timedelta(minutes=15 * i) for i in range(4)]
+    plan = {
+        "updated": QUARTER.isoformat(),
+        "starts": [s.isoformat() for s in starts],
+        "heat_pump": [False] * 4,
+        "marginal": [],
+        "heat_pump_cop": [3.0] * 4,
+    }
+    hass = plan_hass({}, plan)
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        action = heating.heat_pump_action(hass)
+    assert action["state"] == "off"
+    assert action["marginal"] is None
+    assert action["until"] == (starts[-1] + dt.timedelta(minutes=15)).isoformat()
+
+
 def test_action_falls_back_to_the_economy_now():
     """Test that without a plan the saving now and the heating limit decide."""
     hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, {})

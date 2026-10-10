@@ -187,11 +187,13 @@ def heat_pump_action(hass: HomeAssistant) -> dict:
             last = index
             while last + 1 < len(flags) and flags[last + 1] == flags[index]:
                 last += 1
+            # Without a heat pump (heat_pump_power 0) the plan prices no extra load
+            marginal = plan.get("marginal") or []
             return {
                 "state": "on" if flags[index] else "off",
                 "source": "plan",
                 "until": (starts[last] + QUARTER).isoformat(),
-                "marginal": plan["marginal"][index],
+                "marginal": marginal[index] if index < len(marginal) else None,
                 "cop": plan["heat_pump_cop"][index],
             }
     economy = heat_pump_economy(hass)
