@@ -163,6 +163,7 @@ class EnergyPlannerPlanSensor(SensorEntity):
             "temperature",
             "heat_pump_cop",
             "heat_pump_power",
+            "ev",
         }
     )
 

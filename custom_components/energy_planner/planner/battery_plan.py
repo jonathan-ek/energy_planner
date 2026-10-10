@@ -229,45 +229,50 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
     """Return the car to plan with the battery, and what the plan publishes on it.
 
     Only while it is plugged in. The need is from the car's SOC and charge limit when
-    both are known, else the largest recent charging night minus what this session
-    has delivered (see planner/ev.py). Without either, or once the session has taken
-    more than the history's need, the car is not planned and the action falls back
-    to charging, so a car that is not full is never paused.
+    both are known. Otherwise it is the largest recent charging night minus what this
+    session has delivered (see planner/ev.py), or for a trip (the departure comes
+    before the next working morning) a full battery, as the car stops at its own
+    charge limit. Without either, or once the session has taken more than the
+    history's need, the car is not planned and the action falls back to charging, so
+    a car that is not full is never paused.
     """
-    if not ev_plugged(hass):
+    if not starts or not ev_plugged(hass):
         return None, None
     config = hass.data[DOMAIN]["config"]
+    capacity = float(config.get("ev_battery_capacity", 75))
+    ready = config.get("ev_ready_time") or dt.time(6, 30)
+    departure = config.get("ev_departure")
+    target = ev.ready_time(starts[0], ready, departure)
     soc = _state_float(hass, config.get("ev_soc_sensor") or "")
     limit = _state_float(hass, config.get("ev_charge_limit_sensor") or "")
     if soc is not None and limit is not None:
-        need = ev.need_from_soc(
-            soc, limit, float(config.get("ev_battery_capacity", 75))
-        )
+        need = ev.need_from_soc(soc, limit, capacity)
         source = "soc"
     else:
-        need = (hass.data[DOMAIN].get("forecast") or {}).get("ev_need_kwh")
-        if need is None:
-            return None, None
         delivered = _state_float(hass, config.get("ev_session_energy_sensor") or "")
+        if target == departure:
+            need = ev.need_from_soc(0, 100, capacity)
+            source = "trip"
+        else:
+            need = (hass.data[DOMAIN].get("forecast") or {}).get("ev_need_kwh")
+            if need is None:
+                return None, None
+            source = "history"
         need -= delivered or 0.0
         if need <= 0:
             return None, None
-        source = "history"
     max_kw = float(config.get("ev_charger_max_power", 11000)) / 1000
     min_kw = float(config.get("ev_charger_min_power", 0)) / 1000
-    ready = config.get("ev_ready_time") or dt.time(6, 30)
-    departure = config.get("ev_departure")
-    deadline = ev.deadline_index(starts, ready, departure)
     vehicle = Vehicle(
         powers_kw=charger_powers(min_kw, max_kw) if min_kw > 0 else (max_kw,),
         need_kwh=need,
         plugged=[True] * len(starts),
-        deadline=deadline,
+        deadline=ev.deadline_index(starts, ready, departure),
     )
     info = {
         "need_kwh": round(need, 2),
         "need_source": source,
-        "ready": ev.ready_time(starts[0], ready, departure).isoformat(),
+        "ready": target.isoformat(),
     }
     return vehicle, info
 
