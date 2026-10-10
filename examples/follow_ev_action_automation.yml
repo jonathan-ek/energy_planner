@@ -1,0 +1,58 @@
+# Starts and stops the car charger (here a Zaptec, "Garaget") from
+# sensor.energy_planner_ev_action: charge in the plan's cheapest quarters before the
+# ready time, wait otherwise (see AGENTS.md, "Car").
+#
+# Planner config store: ev_charger_status_sensor = sensor.garaget_laddstatus,
+# ev_session_energy_sensor = sensor.garaget_session_total_charge, and once the car
+# reports them (ESPHome Tesla BLE) ev_soc_sensor and ev_charge_limit_sensor.
+# Turn off the car's own scheduled charging, or it may wait when the plan charges.
+#
+# Without a fresh plan the action is `charge`, so the car charges as without the
+# planner; unplugged it has no state and nothing is done. Only writes when the
+# charger differs from the action, and Zaptec's cloud API is rate limited, so the
+# timer only runs every 15 minutes.
+#
+# Zaptec's charging switch is on while it charges; turning it off pauses
+# (stop_charging_final: connected_finished with a final stop), and only then can it
+# be turned on again. While the car itself is full or waits (connected_finished
+# without a final stop, connected_requesting) the switch is unavailable, so nothing
+# is sent.
+alias: Follow car charging action
+description: ""
+triggers:
+  - trigger: state
+    entity_id:
+      - sensor.energy_planner_ev_action
+  # A car just plugged in starts charging at once: apply the action right away
+  - trigger: state
+    entity_id:
+      - sensor.garaget_laddstatus
+    from: disconnected
+  - trigger: time_pattern
+    minutes: /15
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: sensor.energy_planner_ev_action
+            state: charge
+          - condition: state
+            entity_id: switch.garaget_laddar
+            state: "off"
+        sequence:
+          - action: switch.turn_on
+            target:
+              entity_id: switch.garaget_laddar
+      - conditions:
+          - condition: state
+            entity_id: sensor.energy_planner_ev_action
+            state: wait
+          - condition: state
+            entity_id: switch.garaget_laddar
+            state: "on"
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.garaget_laddar
+mode: single

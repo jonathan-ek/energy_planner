@@ -36,6 +36,18 @@ async def async_setup_entry(
                 "data_store": "config",
             },
         ),
+        EnergyPlannerTimeEntity(
+            hass,
+            {
+                # The car should have its need charged by this time (the next one
+                # after now), see planner/ev.py
+                "id": "ev_ready_time",
+                "default": dt.time(6, 30),
+                "name": "Car ready time",
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
     ]
 
     hass.data[DOMAIN][TIME_ENTITIES] = times

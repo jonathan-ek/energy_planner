@@ -12,6 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_utils
 
+from . import ev as ev_need
 from . import forecast, heat_pump, heating
 from .battery_plan import async_request_plan
 from .manual_slots import add_manual_slots
@@ -296,6 +297,11 @@ def _list_total(values):
     return round(sum(v for v in values if v is not None), 2)
 
 
+def _rounded_value(value: float | None) -> float | None:
+    """Round a value to 2 decimals, keeping None."""
+    return None if value is None else round(value, 2)
+
+
 def _rounded(values):
     return (
         None if values is None else [None if v is None else round(v, 3) for v in values]
@@ -528,6 +534,10 @@ async def async_update_forecast(hass: HomeAssistant):
         "heat_pump_loss": None if loss is None else round(loss, 3),
         "heat_pump_loss_hours": loss_hours,
         "load_model": load_model,
+        # The car's need from its charging nights (kWh at the plug), see planner/ev.py
+        "ev_need_kwh": _rounded_value(
+            ev_need.need_from_history(_local_hours(ev), today)
+        ),
         # Temperature model: daily load change per °C warmer (kWh/°C), 0 = none
         "heating_slope": None if slope is None else round(slope, 2),
         "planned_events": [

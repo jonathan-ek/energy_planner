@@ -25,7 +25,15 @@ from ..const import (
     PLAN_SENSORS,
 )
 from .battery_action import QUARTER, SLOT_MODES, BatteryState, Slot, resolve
-from .battery_optimizer import QUARTER_HOURS, Battery, Limit, optimize
+from . import ev
+from .battery_optimizer import (
+    QUARTER_HOURS,
+    Battery,
+    Limit,
+    Vehicle,
+    charger_powers,
+    optimize,
+)
 from .forecast import quarter_starts
 from .heat_pump import schedule
 from .heating import plan_inputs
@@ -210,6 +218,55 @@ def _battery(hass: HomeAssistant) -> Battery | None:
     )
 
 
+def ev_plugged(hass: HomeAssistant) -> bool:
+    """Return whether the car is plugged in (False without a charger status)."""
+    status_id = hass.data[DOMAIN]["config"].get("ev_charger_status_sensor")
+    state = hass.states.get(status_id) if status_id else None
+    return ev.is_plugged(state.state if state is not None else None)
+
+
+def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
+    """Return the car to plan with the battery, and what the plan publishes on it.
+
+    Only while it is plugged in. The need is from the car's SOC and charge limit when
+    both are known, else the charging nights' percentile minus what this session has
+    delivered (see planner/ev.py); without either the car is not planned, and the
+    action falls back to charging.
+    """
+    if not ev_plugged(hass):
+        return None, None
+    config = hass.data[DOMAIN]["config"]
+    soc = _state_float(hass, config.get("ev_soc_sensor") or "")
+    limit = _state_float(hass, config.get("ev_charge_limit_sensor") or "")
+    if soc is not None and limit is not None:
+        need = ev.need_from_soc(
+            soc, limit, float(config.get("ev_battery_capacity", 75))
+        )
+        source = "soc"
+    else:
+        need = (hass.data[DOMAIN].get("forecast") or {}).get("ev_need_kwh")
+        if need is None:
+            return None, None
+        delivered = _state_float(hass, config.get("ev_session_energy_sensor") or "")
+        need = max(need - (delivered or 0.0), 0.0)
+        source = "history"
+    max_kw = float(config.get("ev_charger_max_power", 11000)) / 1000
+    min_kw = float(config.get("ev_charger_min_power", 0)) / 1000
+    deadline = ev.deadline_index(starts, config.get("ev_ready_time") or dt.time(6, 30))
+    vehicle = Vehicle(
+        powers_kw=charger_powers(min_kw, max_kw) if min_kw > 0 else (max_kw,),
+        need_kwh=need,
+        plugged=[True] * len(starts),
+        deadline=deadline,
+    )
+    info = {
+        "need_kwh": round(need, 2),
+        "need_source": source,
+        "ready": starts[deadline].isoformat() if deadline < len(starts) else None,
+    }
+    return vehicle, info
+
+
 def _forced(hass: HomeAssistant, starts) -> list[str | None]:
     """Return the mode of the manual slot covering each quarter (None: no slot).
 
@@ -366,6 +423,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         int(config.get("grid_import_limit_start", 6)),
         int(config.get("grid_import_limit_end", 23)),
     )
+    vehicle, car = _vehicle(hass, starts)
     month_start = dt_utils.start_of_local_day(now.date().replace(day=1))
     history = await _hourly_import(
         hass,
@@ -383,6 +441,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         history=history,
         forced=_forced(hass, starts),
         current_mode=_planned_mode(hass, now),
+        vehicle=vehicle,
     )
     # The heat pump runs where its heat is cheaper than district heating at what more
     # load costs in this plan (Plan.marginal); then the battery is planned with it.
@@ -431,6 +490,16 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         "temperature": [None if t is None else round(t, 1) for t in heat.temperatures],
         "heat_pump_cop": [None if c is None else round(c, 2) for c in heat.cops],
         "heat_pump_power": [round(kwh / QUARTER_HOURS, 3) for kwh in heat.draws],
+        # The car while plugged in: charging power per quarter (kW), the need and
+        # what the plan can not deliver by the ready time (None: not planned)
+        "ev": None
+        if car is None
+        else {
+            **car,
+            "power": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.ev_kwh],
+            "planned_kwh": round(sum(plan.ev_kwh), 2),
+            "missing_kwh": round(plan.ev_missing_kwh, 2),
+        },
         "mode": plan.modes[0],
         "target_kw": None if plan.targets[0] is None else round(plan.targets[0], 2),
         "energy_cost": round(plan.energy_cost, 2),

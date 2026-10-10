@@ -31,6 +31,7 @@ from .const import (
     TIME_ENTITIES,
     SLOT_COUNT,
 )
+from .planner.ev import is_plugged as ev_is_plugged
 from .planner import (
     async_request_plan,
     async_update_forecast,
@@ -66,6 +67,9 @@ PLAN_SETTINGS = (
     "heat_pump_power",
     "heat_pump_margin",
     "heat_pump_heating_limit",
+    "ev_charger_min_power",
+    "ev_charger_max_power",
+    "ev_battery_capacity",
 )
 # Recalculate the plan when the actual SOC is this many % from the plan
 SOC_DRIFT = 5.0
@@ -119,7 +123,7 @@ def parse_stored_data(hass: HomeAssistant):
         if type(values.get(key)) is str:
             values[key] = dt_utils.parse_datetime(values[key])
     config = hass.data[DOMAIN]["config"]
-    for key in ["earliest_charge_time", "earliest_discharge_time"]:
+    for key in ["earliest_charge_time", "earliest_discharge_time", "ev_ready_time"]:
         if type(config.get(key)) is str:
             config[key] = dt.time.fromisoformat(config[key])
     for slot in hass.data[DOMAIN]["manual_slots"]:
@@ -344,10 +348,24 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
     entry.async_on_unload(
         async_track_state_change_event(
             hass,
-            [f"number.{DOMAIN}_{key}" for key in PLAN_SETTINGS],
+            [
+                *(f"number.{DOMAIN}_{key}" for key in PLAN_SETTINGS),
+                f"time.{DOMAIN}_ev_ready_time",
+            ],
             setting_changed,
         )
     )
+
+    async def car_plugged(event: Event[EventStateChangedData]):
+        old, new = event.data["old_state"], event.data["new_state"]
+        was = ev_is_plugged(old.state if old is not None else None)
+        now = ev_is_plugged(new.state if new is not None else None)
+        if was != now:
+            await async_request_plan(hass, "car plugged in" if now else "car unplugged")
+
+    status = config.get("ev_charger_status_sensor")
+    if status:
+        entry.async_on_unload(async_track_state_change_event(hass, status, car_plugged))
 
     async def soc_changed(event: Event[EventStateChangedData]):
         new = event.data["new_state"]

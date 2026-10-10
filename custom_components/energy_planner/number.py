@@ -368,6 +368,51 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
+                # The car charger's highest power, and its lowest (0: only on/off at
+                # the highest, as the automation then only starts and stops it)
+                "id": "ev_charger_max_power",
+                "name": "Car charger max power",
+                "default": 11000,
+                "min_val": 1000,
+                "max_val": 22000,
+                "step": 100,
+                "unit_of_measurement": UnitOfPower.WATT,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                "id": "ev_charger_min_power",
+                "name": "Car charger min power",
+                "default": 0,
+                "min_val": 0,
+                "max_val": 22000,
+                "step": 100,
+                "unit_of_measurement": UnitOfPower.WATT,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                # Usable battery of the car, for the need from its SOC
+                "id": "ev_battery_capacity",
+                "name": "Car battery capacity",
+                "default": 75,
+                "min_val": 10,
+                "max_val": 200,
+                "step": 1,
+                "unit_of_measurement": UnitOfEnergy.KILO_WATT_HOUR,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
                 # The heat pump only runs when its heat is at least this much cheaper
                 # than district heating (öre per kWh of heat)
                 "id": "heat_pump_margin",

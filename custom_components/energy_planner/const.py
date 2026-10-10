@@ -41,3 +41,9 @@ DEFAULT_DISTRICT_HEATING = "tekniska_verken_2026"
 # The heat pump's climate entity: hours in `heat` mode measure its draw and take it
 # out of the load history, the battery plan adds the heat pump where it plans it
 DEFAULT_HEAT_PUMP_CLIMATE = "climate.hallen"
+
+# Electric car (planner/ev.py): its sensors are in the config store only, with no
+# defaults. The car is planned only while ev_charger_status_sensor says it is plugged
+# in. ev_session_energy_sensor: kWh delivered since it was plugged in (Zaptec session
+# total charge); ev_soc_sensor / ev_charge_limit_sensor: the car's SOC and charge
+# limit (%), used for the need when both are known

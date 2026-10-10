@@ -7,9 +7,11 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
+from homeassistant.util import dt as dt_utils
 
 from .const import DOMAIN, FORECAST_SENSORS, PLAN_SENSORS
-from .planner.battery_plan import current_action
+from .planner.battery_plan import current_action, ev_plugged
+from .planner.ev import ev_action
 from .planner.heating import heat_pump_action, heat_pump_economy
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +41,7 @@ EXTRA_ATTRIBUTES = {
         "heat_pump_loss_hours",
         "load_model",
         "heating_slope",
+        "ev_need_kwh",
     ),
     "pv_forecast": (
         "pv_today_remaining",
@@ -80,6 +83,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerActionSensor(hass),
         *(EnergyPlannerHeatPumpSensor(hass, key) for key in HEAT_PUMP_SENSORS),
         EnergyPlannerHeatPumpActionSensor(hass),
+        EnergyPlannerEvActionSensor(hass),
     ]
     hass.data[DOMAIN][PLAN_SENSORS] = plan_sensors
     async_add_devices([*sensors, *plan_sensors])
@@ -302,4 +306,46 @@ class EnergyPlannerHeatPumpActionSensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         """Return where it comes from, until when, the electricity cost and COP."""
+        return {key: value for key, value in self._action.items() if key != "state"}
+
+
+class EnergyPlannerEvActionSensor(SensorEntity):
+    """Whether the car should charge now (`charge`/`wait`, no state while unplugged).
+
+    From the battery plan while it is fresh, otherwise `charge` (source `fallback`),
+    so the car charges as without the planner. See planner/ev.py.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_name = "Car charging action"
+    _attr_icon = "mdi:ev-station"
+
+    def __init__(self, hass):
+        """Initialize the car action sensor."""
+        self._hass = hass
+        self.entity_id = f"sensor.{DOMAIN}_ev_action"
+        self._attr_unique_id = f"{DOMAIN}_ev_action"
+        self._action: dict = {}
+
+    def resolve(self) -> None:
+        """Resolve the action now; write_plan_sensors calls it before each write."""
+        plan = self._hass.data[DOMAIN].get("plan")
+        self._action = ev_action(plan, dt_utils.now(), ev_plugged(self._hass))
+        car = (plan or {}).get("ev") or {}
+        for key in ("need_kwh", "need_source", "ready", "planned_kwh", "missing_kwh"):
+            self._action[key] = car.get(key)
+
+    async def async_added_to_hass(self) -> None:
+        """Resolve the action when the sensor is added."""
+        self.resolve()
+
+    @property
+    def native_value(self):
+        """Return charge or wait."""
+        return self._action.get("state")
+
+    @property
+    def extra_state_attributes(self):
+        """Return where it comes from, until when, the power and the need."""
         return {key: value for key, value in self._action.items() if key != "state"}

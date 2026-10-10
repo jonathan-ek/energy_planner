@@ -35,6 +35,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `expected_soc` |
 | `battery_action.py` | Pure: `resolve` turns slot 1 and the plan into the action now (slot state, source, SOC, current, import target, until), mode ↔ slot state maps |
 | `heat_pump.py` | Pure heat pump economy: COP curve per outdoor temperature (`COP_CURVES`), district heating price per month (`DISTRICT_HEATING_PRESETS`), `evaluate` compares a kWh of heat from both. See "Heat pump" |
+| `ev.py` | Pure car charging: `is_plugged` (charger state), `need_from_history` (90th percentile of the charging nights, noon to noon), `need_from_soc`, `deadline_index` (the next ready time), `ev_action` (charge/wait now). See "Car" |
 | `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price now (`hass.data[DOMAIN]["prices"]`, stored by the battery plan), the tariff and the plan's export now |
 | `price_estimate.py` | Pure: tomorrow's prices before they are published (same-type days + a learned correction per hour, Swedish holidays). See "Battery plan" |
 | `../comfort/schedule.py`, `../comfort/thermal.py` | WIP comfort control, not wired into HA yet. See "Comfort" |
@@ -289,8 +290,8 @@ planners the plan is a preview and ignores them.
   import target (`reserve: true`): the inverter's peak shaving only uses the reserve,
   down to the shutdown SOC, for import that would raise the power charge; without a
   power charge the battery is just kept.
-- Car (prototype, not wired into HA yet): `optimize(vehicle=Vehicle(...))` plans an
-  EV with the battery. `Vehicle`: charger powers (`charger_powers(min, max)`, 0 or one
+- Car: `optimize(vehicle=Vehicle(...))` plans an EV with the battery (in HA see
+  "Car" below). `Vehicle`: charger powers (`charger_powers(min, max)`, 0 or one
   of them per quarter), the energy needed at the plug, when it is plugged in and the
   deadline (quarter index; past the horizon: the part the charger can still deliver
   after it costs the end price). Missing energy costs `shortfall_price` (10 SEK/kWh).
@@ -374,6 +375,38 @@ heat: district heating at the season's energy price against electricity / COP.
   `examples/follow_heat_pump_action_automation.yml` sets `climate.hallen` to `heat` or
   `off` (only from `off` / `heat`, so cooling is left alone); the target stays at
   24 °C for now, to see how much it changes the use.
+
+## Car
+
+While the car is plugged in, the battery plan plans it with the battery (`_vehicle` in
+`battery_plan.py`, `Vehicle` in the optimizer): its need by the next
+`time.energy_planner_ev_ready_time` (default 06:30), at
+`number.energy_planner_ev_charger_max_power` (default 11 kW; with
+`ev_charger_min_power` > 0 also powers in between). Config store only:
+`ev_charger_status_sensor` (no default: without it the car is not planned; any state
+but `disconnected`/`unavailable`/`unknown`/`off` means plugged in, so Zaptec's
+`connected_*`), `ev_session_energy_sensor` (kWh since plugged in),
+`ev_soc_sensor` / `ev_charge_limit_sensor` (%, with `ev_battery_capacity`, kWh).
+
+- Need: (limit − SOC) × capacity / 0.9 when the car reports both; otherwise the 90th
+  percentile of the ended charging nights (noon to noon) in the 35 days of
+  `forecast_ev_sensor` history (`ev_need_kwh` in the forecast) minus the session's
+  energy. Overestimating is cheap: a full car stops by itself, and the plan then
+  charges in the next cheapest quarters to no effect. Without either the car is not
+  planned. The plan publishes `ev` (None while unplugged): `power` per quarter (kW),
+  `need_kwh`, `need_source` (`soc`/`history`), `ready`, `planned_kwh`, `missing_kwh`.
+  Plugging in or out and the car settings trigger a new plan.
+- `sensor.energy_planner_ev_action`: `charge`/`wait` from the plan (source `plan`,
+  `until`, `power_kw`); without a fresh plan `charge` (source `fallback`, the car
+  charges as without the planner); unplugged no state.
+  `examples/follow_ev_action_automation.yml` starts/stops a Zaptec with its charging
+  switch.
+- The owner's parents (Oct 2026): Tesla on a Zaptec (`sensor.garaget_laddstatus`,
+  `sensor.garaget_session_total_charge`, `switch.garaget_laddar`), plugged in about
+  16-19 until about 06:45, charging 1.5-2 h at ~11 kW at once; median night 18 kWh,
+  90th percentile 33. Moving the evening charging to the night's cheapest hours saved
+  about 57 öre/kWh on the nights with prices (~1 500 kr/year). The car's SOC is to
+  come from ESPHome Tesla BLE (M5Stack NanoC6).
 
 ## Comfort (work in progress)
 

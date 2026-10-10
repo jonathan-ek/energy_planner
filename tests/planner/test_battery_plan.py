@@ -252,3 +252,57 @@ async def test_no_estimate_without_history(mock_hass):
     plan = mock_hass.data[DOMAIN]["plan"]
     assert not any(plan["estimated"])
     assert plan["starts"][-1] == STARTS[95].isoformat()
+
+
+async def test_plugged_car_charges_at_night(mock_hass):
+    """Test that a plugged-in car is charged in the cheap night before 06:30."""
+    STATES["sensor.charger_status"] = "connected_charging"
+    STATES["sensor.charger_session"] = "4.0"
+    try:
+        config = mock_hass.data[DOMAIN]["config"]
+        config["ev_charger_status_sensor"] = "sensor.charger_status"
+        config["ev_session_energy_sensor"] = "sensor.charger_session"
+        config["ev_ready_time"] = dt.time(6, 30)
+        mock_hass.data[DOMAIN]["forecast"]["ev_need_kwh"] = 20.0
+        plan = await run(mock_hass)
+    finally:
+        del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
+    car = plan["ev"]
+    # 20 kWh from the history, 4 already delivered this session
+    assert car["need_kwh"] == pytest.approx(16.0)
+    assert car["need_source"] == "history"
+    assert car["ready"] == dt.datetime(2026, 1, 14, 6, 30, tzinfo=TZ).isoformat()
+    assert car["planned_kwh"] == pytest.approx(16.0, abs=0.5)
+    assert car["missing_kwh"] == pytest.approx(0.0, abs=0.5)
+    starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
+    charging = [s for s, kw in zip(starts, car["power"], strict=True) if kw > 0]
+    # In the 00-06 cheap hours, at the charger's 11 kW
+    assert all(s.hour < 6 for s in charging)
+    assert {kw for kw in car["power"] if kw > 0} == {11.0}
+
+
+async def test_car_from_soc(mock_hass):
+    """Test that the car's SOC and charge limit give the need when known."""
+    STATES.update(
+        {"sensor.charger_status": "connected_finished", "sensor.car_soc": "60"}
+    )
+    STATES["sensor.car_limit"] = "80"
+    try:
+        config = mock_hass.data[DOMAIN]["config"]
+        config["ev_charger_status_sensor"] = "sensor.charger_status"
+        config["ev_soc_sensor"] = "sensor.car_soc"
+        config["ev_charge_limit_sensor"] = "sensor.car_limit"
+        config["ev_battery_capacity"] = 45
+        plan = await run(mock_hass)
+    finally:
+        for key in ("sensor.charger_status", "sensor.car_soc", "sensor.car_limit"):
+            del STATES[key]
+    assert plan["ev"]["need_source"] == "soc"
+    assert plan["ev"]["need_kwh"] == pytest.approx(0.2 * 45 / 0.9)
+
+
+async def test_unplugged_car_is_not_planned(mock_hass):
+    """Test that without a plugged-in car the plan has no car."""
+    mock_hass.data[DOMAIN]["config"]["ev_charger_status_sensor"] = "sensor.missing"
+    plan = await run(mock_hass)
+    assert plan["ev"] is None
