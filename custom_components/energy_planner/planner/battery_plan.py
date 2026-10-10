@@ -229,9 +229,10 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
     """Return the car to plan with the battery, and what the plan publishes on it.
 
     Only while it is plugged in. The need is from the car's SOC and charge limit when
-    both are known, else the charging nights' percentile minus what this session has
-    delivered (see planner/ev.py); without either the car is not planned, and the
-    action falls back to charging.
+    both are known, else the largest recent charging night minus what this session
+    has delivered (see planner/ev.py). Without either, or once the session has taken
+    more than the history's need, the car is not planned and the action falls back
+    to charging, so a car that is not full is never paused.
     """
     if not ev_plugged(hass):
         return None, None
@@ -248,7 +249,9 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
         if need is None:
             return None, None
         delivered = _state_float(hass, config.get("ev_session_energy_sensor") or "")
-        need = max(need - (delivered or 0.0), 0.0)
+        need -= delivered or 0.0
+        if need <= 0:
+            return None, None
         source = "history"
     max_kw = float(config.get("ev_charger_max_power", 11000)) / 1000
     min_kw = float(config.get("ev_charger_min_power", 0)) / 1000

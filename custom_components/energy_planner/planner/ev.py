@@ -7,10 +7,12 @@ plan (battery_plan.py) plans it together with the battery
 makes the charger follow it (examples/follow_ev_action_automation.yml).
 
 The need is (charge limit - SOC) x battery capacity when the car reports both (e.g.
-ESPHome Tesla BLE). Otherwise it is a high percentile of the recent charging nights
-from the charger's power history, minus what this session has delivered:
-overestimating is cheap, as the car stops by itself when it is full, and charging
-then simply continues in the next cheapest quarters.
+ESPHome Tesla BLE). Otherwise it is the largest recent charging night from the
+charger's power history, minus what this session has delivered: overestimating is
+cheap, as the car stops by itself when it is full and the rest of the planned
+quarters pass without charging. Underestimating is not (the plan would pause a car
+that is not full), so once a session has taken more than that the car is not
+planned and charges as without the planner.
 """
 
 import datetime as dt
@@ -23,7 +25,9 @@ UNPLUGGED_STATES = ("disconnected", "unavailable", "unknown", "off", "none", "")
 # for the same morning count together
 NIGHT_START_HOUR = 12
 NIGHT_MIN_KWH = 1.0  # less is not a charging night
-NEED_PERCENTILE = 0.9
+# Of the charging nights; 1.0 = the largest. The 90th percentile (19 kWh at the
+# parents' in Oct 2026, nights up to 33) would pause cars that are not full
+NEED_PERCENTILE = 1.0
 NEED_MIN_NIGHTS = 5
 # Energy at the plug per kWh into the car's battery
 CHARGE_EFFICIENCY = 0.9

@@ -388,12 +388,14 @@ but `disconnected`/`unavailable`/`unknown`/`off` means plugged in, so Zaptec's
 `connected_*`), `ev_session_energy_sensor` (kWh since plugged in),
 `ev_soc_sensor` / `ev_charge_limit_sensor` (%, with `ev_battery_capacity`, kWh).
 
-- Need: (limit − SOC) × capacity / 0.9 when the car reports both; otherwise the 90th
-  percentile of the ended charging nights (noon to noon) in the 35 days of
-  `forecast_ev_sensor` history (`ev_need_kwh` in the forecast) minus the session's
-  energy. Overestimating is cheap: a full car stops by itself, and the plan then
-  charges in the next cheapest quarters to no effect. Without either the car is not
-  planned. The plan publishes `ev` (None while unplugged): `power` per quarter (kW),
+- Need: (limit − SOC) × capacity / 0.9 when the car reports both; otherwise the
+  largest ended charging night (noon to noon) in the 35 days of `forecast_ev_sensor`
+  history (`ev_need_kwh` in the forecast) minus the session's energy. Overestimating
+  is cheap: a full car stops by itself, and the rest of the planned quarters pass
+  without charging. Underestimating is not (the plan would pause a car that is not
+  full; the 90th percentile was 19 kWh where nights reach 33), so once the session
+  has taken more than that, or without either, the car is not planned and the
+  action falls back to charging. The plan publishes `ev` (None while unplugged): `power` per quarter (kW),
   `need_kwh`, `need_source` (`soc`/`history`), `ready`, `planned_kwh`, `missing_kwh`.
   Plugging in or out and the car settings trigger a new plan.
 - `sensor.energy_planner_ev_action`: `charge`/`wait` from the plan (source `plan`,
@@ -404,7 +406,7 @@ but `disconnected`/`unavailable`/`unknown`/`off` means plugged in, so Zaptec's
 - The owner's parents (Oct 2026): Tesla on a Zaptec (`sensor.garaget_laddstatus`,
   `sensor.garaget_session_total_charge`, `switch.garaget_laddar`), plugged in about
   16-19 until about 06:45, charging 1.5-2 h at ~11 kW at once; median night 18 kWh,
-  90th percentile 33. Moving the evening charging to the night's cheapest hours saved
+  90th percentile 33 (2025-08 - 2026-10). Moving the evening charging to the night's cheapest hours saved
   about 57 öre/kWh on the nights with prices (~1 500 kr/year). The car's SOC is to
   come from ESPHome Tesla BLE (M5Stack NanoC6).
 

@@ -38,8 +38,8 @@ def test_charging_nights_run_noon_to_noon():
     assert ev.charging_nights(hourly) == {day: 18.0}
 
 
-def test_need_from_history_percentile():
-    """Test the 90th percentile of the ended nights."""
+def test_need_from_history_largest_night():
+    """Test the largest of the ended nights."""
     hourly = {
         (TODAY - dt.timedelta(days=i), 18): float(kwh)
         for i, kwh in zip(

@@ -306,3 +306,18 @@ async def test_unplugged_car_is_not_planned(mock_hass):
     mock_hass.data[DOMAIN]["config"]["ev_charger_status_sensor"] = "sensor.missing"
     plan = await run(mock_hass)
     assert plan["ev"] is None
+
+
+async def test_car_past_its_history_need_is_not_planned(mock_hass):
+    """Test that a session past the history's need is left to charge as usual."""
+    STATES["sensor.charger_status"] = "connected_charging"
+    STATES["sensor.charger_session"] = "25.0"
+    try:
+        config = mock_hass.data[DOMAIN]["config"]
+        config["ev_charger_status_sensor"] = "sensor.charger_status"
+        config["ev_session_energy_sensor"] = "sensor.charger_session"
+        mock_hass.data[DOMAIN]["forecast"]["ev_need_kwh"] = 20.0
+        plan = await run(mock_hass)
+    finally:
+        del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
+    assert plan["ev"] is None
