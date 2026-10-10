@@ -49,6 +49,13 @@ TEMPERATURE_MIN_SPREAD = 1.0
 # PV calibration settings
 CALIBRATION_MIN_FORECAST_KWH = 5.0
 CALIBRATION_LIMITS = (0.3, 2.5)
+# PV calibrations (setting forecast_pv_calibration): one factor for the day, or one
+# per local hour of the day (pv_hourly_calibration), for panels shaded part of the day
+PV_CALIBRATIONS = ("daily", "hourly")
+# Hourly calibration: forecast energy an hour of the day needs over the window, and
+# the factor's range (shade can take most of an hour)
+HOURLY_CALIBRATION_MIN_FORECAST_KWH = 1.0
+HOURLY_CALIBRATION_LIMITS = (0.05, 3.0)
 
 # Hours more than this above the median of the same hour in the previous two weeks
 # are capped in the history. Backtested: no loss of accuracy, removes ~0.1 kWh/day
@@ -369,6 +376,46 @@ def pv_calibration(
         return 1.0
     ratio = sum(actual[h] for h in hours) / total_forecast
     return min(max(ratio, CALIBRATION_LIMITS[0]), CALIBRATION_LIMITS[1])
+
+
+def pv_hourly_calibration(
+    actual: Mapping[tuple[dt.date, int], float],
+    forecast: Mapping[tuple[dt.date, int], float],
+) -> dict[int, float]:
+    """Actual / forecast PV energy per local hour of the day, limited to a range.
+
+    For panels shaded part of the day (trees, buildings): the weather models assume
+    an open horizon, so a single daily factor spreads the lost hours over the whole
+    day. Keys are (local date, hour) over the calibration window. An hour of the day
+    with less than HOURLY_CALIBRATION_MIN_FORECAST_KWH of forecast in the window is
+    left out, and the daily factor is used there. Backtested on a house shaded from
+    about 15:00 (Mar-Oct): hourly error 1.07 -> 0.71 kWh, daily 14% -> 15%.
+    """
+    totals: dict[int, list[float]] = {}
+    for key in actual.keys() & forecast.keys():
+        sums = totals.setdefault(key[1], [0.0, 0.0])
+        sums[0] += actual[key]
+        sums[1] += forecast[key]
+    low, high = HOURLY_CALIBRATION_LIMITS
+    return {
+        hour: min(max(produced / predicted, low), high)
+        for hour, (produced, predicted) in totals.items()
+        if predicted >= HOURLY_CALIBRATION_MIN_FORECAST_KWH
+    }
+
+
+def calibrated_quarters(
+    raw: Sequence[float],
+    quarters: Sequence[dt.datetime],
+    daily: float,
+    hourly: Mapping[int, float] | None = None,
+) -> list[float]:
+    """Scale raw PV per quarter by its local hour's factor, else the daily factor."""
+    hourly = hourly or {}
+    return [
+        value * hourly.get(start.hour, daily)
+        for value, start in zip(raw, quarters, strict=True)
+    ]
 
 
 def reserve_quarters(

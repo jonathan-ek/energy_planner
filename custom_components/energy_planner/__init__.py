@@ -290,14 +290,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
     entry.async_on_unload(async_at_started(hass, update_forecast))
 
-    async def load_model_changed(event: Event[EventStateChangedData]):
+    async def forecast_setting_changed(event: Event[EventStateChangedData]):
         old, new = event.data["old_state"], event.data["new_state"]
         if old is not None and new is not None and old.state != new.state:
             await update_forecast()
 
     entry.async_on_unload(
         async_track_state_change_event(
-            hass, f"select.{DOMAIN}_forecast_load_model", load_model_changed
+            hass,
+            [
+                f"select.{DOMAIN}_forecast_load_model",
+                f"select.{DOMAIN}_forecast_pv_calibration",
+            ],
+            forecast_setting_changed,
         )
     )
 

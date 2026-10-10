@@ -370,3 +370,35 @@ class TestTemperatureLoad:
             self.history, self.quarters, self.today, self.measured, {}
         )
         assert load == forecast.load_quarters(self.history, self.quarters, self.today)
+
+
+def test_pv_hourly_calibration_learns_shade():
+    """Test a factor per hour of the day: shade from 15 lowers only those hours."""
+    days = [dt.date(2026, 9, 1) + dt.timedelta(days=i) for i in range(14)]
+    predicted = {(d, h): 2.0 for d in days for h in range(8, 18)}
+    produced = {(d, h): 0.5 if h >= 15 else 2.4 for d in days for h in range(8, 18)}
+    # Too little forecast at 7 for a factor of its own
+    predicted[(days[0], 7)] = 0.5
+    produced[(days[0], 7)] = 0.1
+    factors = forecast.pv_hourly_calibration(produced, predicted)
+    assert sorted(factors) == list(range(8, 18))
+    assert factors[12] == pytest.approx(1.2)
+    assert factors[16] == pytest.approx(0.25)
+
+
+def test_pv_hourly_calibration_limits():
+    """Test that the factor stays in its range."""
+    day = dt.date(2026, 9, 1)
+    factors = forecast.pv_hourly_calibration(
+        {(day, 12): 0.0, (day, 13): 20.0}, {(day, 12): 2.0, (day, 13): 2.0}
+    )
+    assert factors == {12: 0.05, 13: 3.0}
+
+
+def test_calibrated_quarters():
+    """Test the hour's factor per quarter, the daily factor for other hours."""
+    start = dt.datetime(2026, 9, 1, 14, 30, tzinfo=TZ)
+    quarters = forecast.quarter_starts(start, start + dt.timedelta(hours=1))
+    pv = forecast.calibrated_quarters([1.0] * 4, quarters, 1.5, {15: 0.5})
+    assert pv == [1.5, 1.5, 0.5, 0.5]
+    assert forecast.calibrated_quarters([1.0], quarters[:1], 1.5) == [1.5]

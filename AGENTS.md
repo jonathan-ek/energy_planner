@@ -84,7 +84,8 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 
 - `select`: `planner_state` (`basic`, `cheapest hours`, `dynamic`, `price peak`, `off`),
   `price_peak_planner_{cheap,expensive,inbetween}_state`, `forecast_load_model`
-  (`profile`, default; `temperature`, see "Forecast")
+  (`profile`, default; `temperature`) and `forecast_pv_calibration` (`daily`, default;
+  `hourly`), see "Forecast"
 - `time`: `earliest_charge_time` (22:00), `earliest_discharge_time` (06:00)
 - `number`: `basic_nr_of_charge_hours`, `basic_nr_of_discharge_hours`,
   `cheapest_hours_nr_of_charge_hours`, `price_peak_nr_of_charge_hours`,
@@ -170,7 +171,14 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   `actual / day-before forecast` over the last 14 days (actual: Solis `total_pv_power`
   with glitches above 25 kW dropped), limited to 0.3–2.5, 1.0 until 5 kWh of forecast
   exist. Day-ahead backtest (448 days): 0.63 kWh hourly, 11% daily error
-  (Forecast.Solar with the same correction: 1.02 kWh, 17%). If Open-Meteo fails,
+  (Forecast.Solar with the same correction: 1.02 kWh, 17%).
+  `forecast_pv_calibration` = `hourly` (for panels shaded part of the day;
+  `pv_hourly_calibration`) uses a factor per local hour of the day instead, over the
+  same 14 days, limited to 0.05-3.0; hours with under 1 kWh of forecast in the window
+  keep the daily factor. The weather models assume an open horizon, so a daily factor
+  spreads lost shaded hours over the whole day. Backtest on the parents' house (trees
+  from about 15:00 in spring and autumn, 425 days): hourly error 1.07 -> 0.71 kWh,
+  daily 14% -> 15%. Published as `pv_hourly_calibration` (hour -> factor). If Open-Meteo fails,
   Forecast.Solar `watts` with its `power_production_now` history is used instead;
   `pv_source` says which.
 - **Planned loads** come from timed events in the local calendar

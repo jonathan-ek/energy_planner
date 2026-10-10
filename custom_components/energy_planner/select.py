@@ -4,7 +4,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN, SLOT_COUNT, SELECT_ENTITIES
-from .planner.forecast import LOAD_MODELS
+from .planner.forecast import LOAD_MODELS, PV_CALIBRATIONS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -124,6 +124,19 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 "options": list(LOAD_MODELS),
                 "default": "profile",
                 "name": "Forecast load model",
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerSelectEntity(
+            hass,
+            {
+                # daily: one PV calibration factor for the day; hourly: one per hour of
+                # the day, for panels shaded part of the day
+                "id": "forecast_pv_calibration",
+                "options": list(PV_CALIBRATIONS),
+                "default": "daily",
+                "name": "Forecast PV calibration",
                 "enabled": True,
                 "data_store": "config",
             },

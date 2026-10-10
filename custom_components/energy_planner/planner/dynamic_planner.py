@@ -421,6 +421,18 @@ async def async_update_forecast(hass: HomeAssistant):
     pv_source = None
     temperature = None
     temperatures = {}
+    # Hourly calibration: a factor per local hour of the day, for shaded panels
+    pv_model = config.get("forecast_pv_calibration", "daily")
+    hourly = None
+
+    def hour_factors(produced, predicted):
+        """Return the factor per local hour with the hourly calibration, else None."""
+        if pv_model != "hourly":
+            return None
+        return forecast.pv_hourly_calibration(
+            _local_hours(produced), _local_hours(predicted)
+        )
+
     location, planes = _solar_planes(hass)
     if location and planes:
         try:
@@ -430,9 +442,9 @@ async def async_update_forecast(hass: HomeAssistant):
         except (aiohttp.ClientError, TimeoutError, KeyError, ValueError) as err:
             _LOGGER.warning("Open-Meteo failed, using Forecast.Solar: %s", err)
         else:
-            calibration = forecast.pv_calibration(
-                actual, {hour: kw for hour, kw in previous.items() if hour >= since}
-            )
+            recent = {hour: kw for hour, kw in previous.items() if hour >= since}
+            calibration = forecast.pv_calibration(actual, recent)
+            hourly = hour_factors(actual, recent)
             raw = forecast.pv_quarters(forecast.hourly_power_to_watts(latest), quarters)
             pv_source = "open-meteo"
             temperature = forecast.temperature_quarters(temperatures, quarters)
@@ -441,16 +453,20 @@ async def async_update_forecast(hass: HomeAssistant):
                 yesterday_start - dt.timedelta(days=CALIBRATION_DAYS),
                 yesterday_start,
             )
-            yesterday_calibration = forecast.pv_calibration(
-                {h: kw for h, kw in pv_actual.items() if window[0] <= h < window[1]},
-                {h: kw for h, kw in previous.items() if window[0] <= h < window[1]},
-            )
-            yesterday_pv = [
-                value * yesterday_calibration
-                for value in forecast.pv_quarters(
+            produced = {
+                h: kw for h, kw in pv_actual.items() if window[0] <= h < window[1]
+            }
+            predicted = {
+                h: kw for h, kw in previous.items() if window[0] <= h < window[1]
+            }
+            yesterday_pv = forecast.calibrated_quarters(
+                forecast.pv_quarters(
                     forecast.hourly_power_to_watts(previous), yesterday_quarters
-                )
-            ]
+                ),
+                yesterday_quarters,
+                forecast.pv_calibration(produced, predicted),
+                hour_factors(produced, predicted),
+            )
     if raw is None and sources:
         predicted = {}
         for entity in forecast_ids:
@@ -458,6 +474,7 @@ async def async_update_forecast(hass: HomeAssistant):
                 if hour >= since:
                     predicted[hour] = predicted.get(hour, 0.0) + kw
         calibration = forecast.pv_calibration(actual, predicted)
+        hourly = hour_factors(actual, predicted)
         raw = [0.0] * len(quarters)
         for watts, _ in sources:
             plane = forecast.pv_quarters(watts, quarters)
@@ -465,7 +482,7 @@ async def async_update_forecast(hass: HomeAssistant):
         pv_source = "forecast.solar"
     if raw is not None and calibration is not None:
         raw_totals = _daily_totals(quarters, raw, current)
-        pv = [value * calibration for value in raw]
+        pv = forecast.calibrated_quarters(raw, quarters, calibration, hourly)
 
     # Houses heated with electricity: the profile corrected for the outdoor temperature,
     # measured for the history days, Open-Meteo's for the forecast days
@@ -537,6 +554,11 @@ async def async_update_forecast(hass: HomeAssistant):
         if tomorrow in raw_totals
         else None,
         "pv_calibration": None if calibration is None else round(calibration, 3),
+        "pv_calibration_model": pv_model,
+        # Hourly calibration: the factor per local hour of the day (others: daily)
+        "pv_hourly_calibration": None
+        if hourly is None
+        else {hour: round(factor, 3) for hour, factor in sorted(hourly.items())},
         "pv_source": pv_source,
         "yesterday_starts": [q.isoformat() for q in yesterday_quarters],
         "yesterday_load": _rounded(yesterday_expected),

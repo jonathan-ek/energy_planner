@@ -285,6 +285,45 @@ async def test_temperature_load_model(mock_hass, model, load_tomorrow, slope):
     assert result["yesterday_load_kwh"] == pytest.approx(24.0)
 
 
+@pytest.mark.parametrize("model", ["daily", "hourly"])
+async def test_pv_hourly_calibration(mock_hass, model):
+    """Test that the hourly calibration scales each hour by its own factor."""
+    means = statistics()
+    # Shade from 15: actual 0.5 kW there, 3 kW the rest of the day
+    for hour in hours(14):
+        if 15 <= hour.astimezone(TZ).hour < 18:
+            means[PV][hour] = 0.5
+    mock_hass.data[DOMAIN]["config"]["forecast_pv_calibration"] = model
+    with (
+        patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
+        patch.object(dynamic_planner, "_forecast_solar_sources", return_value=[]),
+        patch.object(dynamic_planner, "_hourly_means", return_value=means),
+        patch.object(dynamic_planner, "_calendar_events", return_value=[]),
+        patch.object(
+            dynamic_planner, "_solar_planes", return_value=((58.4, 15.6), [(27, 75, 6)])
+        ),
+        patch.object(
+            dynamic_planner, "_open_meteo_pv", return_value=open_meteo_forecast()
+        ),
+    ):
+        await dynamic_planner.async_update_forecast(mock_hass)
+    result = mock_hass.data[DOMAIN]["forecast"]
+    assert result["pv_calibration_model"] == model
+    if model == "daily":
+        assert result["pv_hourly_calibration"] is None
+        return
+    # Day-before forecast 2 kW: 3 / 2 before 15, 0.5 / 2 from 15
+    factors = result["pv_hourly_calibration"]
+    assert factors[12] == pytest.approx(1.5)
+    assert factors[16] == pytest.approx(0.25)
+    # Tomorrow's triangle (10-14) is all before the shade: 8 kWh x 1.5
+    assert result["pv_tomorrow"] == pytest.approx(12.0)
+    # Yesterday: 9 h at 2 kW x 1.5 and 3 h at 2 kW x 0.25, as produced (the
+    # interpolation smears a little energy over the hour edges, at other factors)
+    assert result["yesterday_pv_kwh"] == pytest.approx(28.5, abs=0.2)
+    assert result["yesterday_pv_actual_kwh"] == pytest.approx(28.5)
+
+
 async def test_heat_pump_is_removed_from_the_load(mock_hass):
     """Test that the heat pump's draw is measured and taken out of the load history."""
     means = statistics()

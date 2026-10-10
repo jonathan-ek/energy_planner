@@ -44,6 +44,8 @@ EXTRA_ATTRIBUTES = {
         "pv_today_remaining",
         "pv_tomorrow_uncalibrated",
         "pv_calibration",
+        "pv_calibration_model",
+        "pv_hourly_calibration",
         "pv_source",
         "yesterday_pv_kwh",
         "yesterday_pv_actual_kwh",
