@@ -1,0 +1,219 @@
+# Remote Dispatch tests for the modes the battery script still runs on time-of-use
+# and peak shaving (docs/solis_remote_dispatch_2026_10.md, "Not tested yet"), for the
+# owner's S6-EH3P (solis_modbus 4.2.6). Needs script.solis_dispatch_sample from
+# solis_dispatch_test.yaml (it logs every 30 s to the Logbook as "Dispatch test").
+#
+# Paste both scripts into scripts.yaml (or Settings > Scripts > Edit in YAML), reload
+# scripts and run:
+#
+# script.solis_dispatch_sun_test, in sunshine (it stops by itself unless the PV is at
+# least 1.5 kW above the house), about 20 minutes:
+#   1  baseline, no dispatch                    (self-use: the surplus into the battery)
+#   2  self_consumption                         (the same as 1?)
+#   3  feed_in_priority                         (sell-excess: the surplus to the grid,
+#                                                the battery about 0)
+#   4  self_consumption, soc_max = SOC now      (the SOC window's end: the battery
+#                                                stops, the surplus is exported)
+#   5  as 4, export limit 0                     (discard-excess: the PV curtailed,
+#                                                export about 0)
+#   6  battery_charge 5 kW, import limit 500 W  (charging in the sun: PV + at most
+#                                                0.5 kW from the grid)
+#   7  battery_charge 3 kW, soc_max = SOC now   (charging at the window's end)
+#   8  solis_dispatch_stop
+#
+# script.solis_dispatch_hold_test, without PV (evening), about 13 minutes:
+#   1  baseline, no dispatch
+#   2  grid_import 500 W, no grid charging      (hold: import 500 W, the battery covers
+#                                                the rest)
+#   3  grid_import 2000 W, no grid charging     (hold below the target: import = the
+#                                                house, the battery idle, not charging)
+#   4  battery_hold, import limit 500 W         (does it shave above the limit?)
+#   5  battery_discharge 2 kW, soc_min = SOC now  (discharging at the window's end)
+#   6  solis_dispatch_stop
+#
+# Both pause the battery automations (the dispatch one and the old one) and turn back
+# on the ones that were on. The grid import stays at or below the house's load or
+# 0.5 kW, so the month's power peak does not rise. If something looks wrong, run
+# solis_modbus.solis_dispatch_stop; every command also ends by itself after its
+# 5 minute failsafe. If a script is stopped halfway, turn the automation back on.
+
+solis_dispatch_sun_test:
+  alias: Dispatch test - sun
+  mode: single
+  sequence:
+    - variables:
+        automations:
+          - automation.follow_battery_action_dispatch
+          - automation.update_battery_action
+        were_on: "{{ automations | select('is_state', 'on') | list }}"
+        soc_now: "{{ states('sensor.solis_s6_solis_battery_soc') | int(50) }}"
+        surplus: >-
+          {{ states('sensor.solis_s6_solis_total_pv_power') | float(0)
+             - states('sensor.solis_s6_solis_household_load_power') | float(0) }}
+    - if: "{{ surplus < 1500 or soc_now > 95 }}"
+      then:
+        - action: logbook.log
+          data:
+            name: Dispatch test
+            message: >-
+              sun: not run, PV surplus {{ surplus | round }} W (needs 1500), SOC
+              {{ soc_now }} % (needs at most 95)
+        - stop: Not enough sun
+    - if: "{{ were_on | count > 0 }}"
+      then:
+        - action: automation.turn_off
+          target:
+            entity_id: "{{ were_on }}"
+          data:
+            stop_actions: true
+    - action: logbook.log
+      data:
+        name: Dispatch test
+        message: "sun: start, surplus {{ surplus | round }} W, SOC {{ soc_now }} %"
+    - action: solis_modbus.solis_dispatch_stop
+    - action: script.solis_dispatch_sample
+      data: {step: "sun 1 baseline", samples: 2}
+    - action: solis_modbus.solis_dispatch
+      data: {mode: self_consumption, soc_min: 20, soc_max: 100, failsafe_minutes: 5}
+    - action: script.solis_dispatch_sample
+      data: {step: "sun 2 self_consumption", samples: 4}
+    - action: solis_modbus.solis_dispatch
+      data: {mode: feed_in_priority, soc_min: 20, soc_max: 100, failsafe_minutes: 5}
+    - action: script.solis_dispatch_sample
+      data: {step: "sun 3 feed_in_priority", samples: 6}
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: self_consumption
+        soc_min: 20
+        soc_max: "{{ soc_now }}"
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "sun 4 self_consumption soc_max {{ soc_now }}", samples: 6}
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: self_consumption
+        soc_min: 20
+        soc_max: "{{ soc_now }}"
+        export_limit_watts: 0
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "sun 5 self_consumption soc_max {{ soc_now }}, export limit 0", samples: 6}
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: battery_charge
+        power_watts: 5000
+        allow_grid_charge: true
+        import_limit_watts: 500
+        soc_min: 20
+        soc_max: 100
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "sun 6 battery_charge 5000, import limit 500", samples: 6}
+    - variables:
+        soc_now: "{{ states('sensor.solis_s6_solis_battery_soc') | int(50) }}"
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: battery_charge
+        power_watts: 3000
+        allow_grid_charge: true
+        soc_min: 20
+        soc_max: "{{ soc_now }}"
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "sun 7 battery_charge 3000, soc_max {{ soc_now }}", samples: 4}
+    - action: solis_modbus.solis_dispatch_stop
+    - action: script.solis_dispatch_sample
+      data: {step: "sun 8 after stop", samples: 2}
+    - if: "{{ were_on | count > 0 }}"
+      then:
+        - action: automation.turn_on
+          target:
+            entity_id: "{{ were_on }}"
+    - action: logbook.log
+      data:
+        name: Dispatch test
+        message: "sun: done"
+
+solis_dispatch_hold_test:
+  alias: Dispatch test - hold
+  mode: single
+  sequence:
+    - variables:
+        automations:
+          - automation.follow_battery_action_dispatch
+          - automation.update_battery_action
+        were_on: "{{ automations | select('is_state', 'on') | list }}"
+        soc_now: "{{ states('sensor.solis_s6_solis_battery_soc') | int(50) }}"
+    - if: "{{ soc_now < 25 }}"
+      then:
+        - action: logbook.log
+          data:
+            name: Dispatch test
+            message: "hold: not run, SOC {{ soc_now }} % (needs 25)"
+        - stop: SOC too low
+    - if: "{{ were_on | count > 0 }}"
+      then:
+        - action: automation.turn_off
+          target:
+            entity_id: "{{ were_on }}"
+          data:
+            stop_actions: true
+    - action: logbook.log
+      data:
+        name: Dispatch test
+        message: "hold: start, SOC {{ soc_now }} %"
+    - action: solis_modbus.solis_dispatch_stop
+    - action: script.solis_dispatch_sample
+      data: {step: "hold 1 baseline", samples: 2}
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: grid_import
+        power_watts: 500
+        allow_grid_charge: false
+        soc_min: 20
+        soc_max: 100
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "hold 2 grid_import 500, no grid charge", samples: 6}
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: grid_import
+        power_watts: 2000
+        allow_grid_charge: false
+        soc_min: 20
+        soc_max: 100
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "hold 3 grid_import 2000, no grid charge", samples: 4}
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: battery_hold
+        import_limit_watts: 500
+        soc_min: 20
+        soc_max: 100
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "hold 4 battery_hold, import limit 500", samples: 6}
+    - variables:
+        soc_now: "{{ states('sensor.solis_s6_solis_battery_soc') | int(50) }}"
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: battery_discharge
+        power_watts: 2000
+        soc_min: "{{ soc_now }}"
+        soc_max: 100
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "hold 5 battery_discharge 2000, soc_min {{ soc_now }}", samples: 4}
+    - action: solis_modbus.solis_dispatch_stop
+    - action: script.solis_dispatch_sample
+      data: {step: "hold 6 after stop", samples: 2}
+    - if: "{{ were_on | count > 0 }}"
+      then:
+        - action: automation.turn_on
+          target:
+            entity_id: "{{ were_on }}"
+    - action: logbook.log
+      data:
+        name: Dispatch test
+        message: "hold: done"

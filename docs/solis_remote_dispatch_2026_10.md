@@ -72,6 +72,10 @@ off.
 
 ## Not tested yet
 
+`examples/battery/solis_dispatch_mode_test.yaml` tests these (a sunshine and an
+evening script), so the battery script can use dispatch for every mode and stop
+writing time-of-use and peak shaving settings:
+
 - What the inverter does at the SOC window's end (`soc_max` while charging, `soc_min`
   while discharging).
 - `battery_charge` with the house above the import limit: whether the battery then

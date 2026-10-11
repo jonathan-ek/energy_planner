@@ -14,6 +14,7 @@ MELCloud), so check them before copying. `python_script`s go in
 | `follow_battery_action_automation.yml` | Runs it every minute and on changes, with `input_boolean.follow_battery_action` as an on/off switch |
 | `follow_battery_action_dispatch_automation.yml` | Runs the `DISPATCH = True` copy (`follow_battery_action_dispatch.py`); the plain one stays as the fallback |
 | `solis_dispatch_test.yaml` | Two HA scripts that test Remote Dispatch step by step (grid import, charge, the import limit, the failsafe) and log every 30 s; results in `docs/solis_remote_dispatch_2026_10.md` |
+| `solis_dispatch_mode_test.yaml` | Tests for the modes that still use time-of-use and peak shaving: `script.solis_dispatch_sun_test` (in sunshine: self-consumption, feed-in priority, the SOC window's end, an export limit of 0, charging with PV) and `script.solis_dispatch_hold_test` (without PV: hold as a grid import target without grid charging, `battery_hold` with an import limit, discharging at the window's end) |
 | `update_battery_action.py`, `update_battery_action_automation.yml` | The older script, rewrites every setting from slot 1; replaced by `follow_battery_action.py` |
 
 ## `ev/`
