@@ -101,7 +101,8 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   `forecast_weekend_reserve` (kWh, default 4), `forecast_reserve_start` /
   `forecast_reserve_end` (h, default 18 / 22), `grid_import_limit` (kW hourly mean the
   planner may import, 0 = off), `grid_import_limit_start` / `grid_import_limit_end`
-  (h, default 6 / 23), `battery_wear_cost` (öre per kWh taken out of the battery,
+  (h, default 6 / 23), `main_fuse` (A per phase, three phases, 0 = off; see "Battery
+  plan"), `battery_wear_cost` (öre per kWh taken out of the battery,
   default 20), `heat_pump_power` (W while heating until the draw is measured,
   default 300, 0 = not planned),
   `heat_pump_margin` (öre per kWh of heat, default 5), `heat_pump_heating_limit`
@@ -268,7 +269,9 @@ planners the plan is a preview and ignores them.
   `sell_excess`) are named after the simplest.
 - Costs: import at `spot * 1.25 + tariff.buy_fee`, export at `spot +
   tariff.sell_fee`, import above `grid_import_limit` at `LIMIT_PENALTY` (20 SEK/kWh, so
-  only when unavoidable), battery wear `battery_wear_cost` per kWh taken out of the
+  only when unavoidable), import above the main fuse (`main_fuse` × 3 × 230 V,
+  `tariff.fuse_power`) at the same penalty, for all load (the car and the heat pump
+  too), battery wear `battery_wear_cost` per kWh taken out of the
   battery, energy left at the end valued at the cheapest buy price in the horizon's
   last 24 h (times the discharge efficiency) minus the wear: it can be refilled then,
   so a higher value (the median price was tried) makes the plan hoard energy and
@@ -287,11 +290,11 @@ planners the plan is a preview and ignores them.
   no mode discharges below it, a SOC below it (after a peak) is allowed, and the
   energy missing at the end is valued at the end price, so the plan refills it. The
   plan publishes `peak_levels` (the quarter's power charge level, kW, without the
-  household import limit). When the live SOC is at or below the reserve, the action
+  household import limit, capped at the main fuse). When the live SOC is at or below the reserve, the action
   turns the plan's `self_use`, `sell_excess` and `hold` into `hold` with that level as
   import target (`reserve: true`): the inverter's peak shaving only uses the reserve,
-  down to the shutdown SOC, for import that would raise the power charge; without a
-  power charge the battery is just kept.
+  down to the shutdown SOC, for import that would raise the power charge or trip the fuse; without a
+  power charge or fuse the battery is just kept.
 - Car: `optimize(vehicle=Vehicle(...))` plans an EV with the battery (in HA see
   "Car" below). `Vehicle`: charger powers (`charger_powers(min, max)`, 0 or one
   of them per quarter), the energy needed at the plug, when it is plugged in and the
@@ -299,7 +302,9 @@ planners the plan is a preview and ignores them.
   after it costs the end price). Missing energy costs `shortfall_price` (10 SEK/kWh).
   The dynamic program's second state is the energy delivered (0.5 kWh steps); the
   car is exempt from the household import limit but not from the power charge
-  levels. The target search uses 2 kW steps, then 0.5 kW around the best
+  levels or the main fuse. The import targets include the car's planned charging
+  and are capped at the fuse, so the inverter's peak shaving slows the battery's
+  charging while the car charges. The target search uses 2 kW steps, then 0.5 kW around the best
   (`_candidate_levels`, same results, half the time). Searching the levels with the
   car as a fixed load was 2-3 times faster but lost up to 3 kr/day, so every search
   run is joint. Plan fields: `ev_kwh`, `ev_missing_kwh`, `ev_missing_cost`.

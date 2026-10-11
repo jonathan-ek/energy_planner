@@ -26,6 +26,11 @@ target, starting at the peak already reached this month (import up to it is free
 and raised in steps while the total cost, power charges included, goes down. Raising
 it lets the battery charge faster in the cheapest hours, at the price of a higher peak.
 
+The main fuse (`Limit.fuse_kw`) caps all grid import, the car and the heat pump
+included, at `LIMIT_PENALTY` per kWh above it, and the import targets are capped at
+it: the inverter's peak shaving then slows the battery's charging while the car
+charges, instead of tripping the fuse.
+
 The plan does not discharge below `Battery.reserve_kwh` (a soft minimum above the
 shutdown SOC `min_kwh`): the inverter may use that energy to shave unexpected
 peaks. Below the reserve the SOC can be (after such a peak), and the energy missing
@@ -105,11 +110,16 @@ class Battery:
 
 @dataclasses.dataclass(frozen=True)
 class Limit:
-    """The household's grid import limit (see tariff.import_limit)."""
+    """The household's grid import limit (see tariff.import_limit) and main fuse.
+
+    `fuse_kw` (0: none) is the most the grid connection can take, all the time and
+    for every load: the quarter's mean import, as for the other limits.
+    """
 
     kw: float = 0.0
     start_hour: int = 6
     end_hour: int = 23
+    fuse_kw: float = 0.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -175,6 +185,7 @@ class Plan:
     ev_kwh: list[float] = dataclasses.field(default_factory=list)
     ev_missing_kwh: float = 0.0
     ev_missing_cost: float = 0.0
+    fuse_excess_kwh: float = 0.0  # import above the main fuse
 
 
 @dataclasses.dataclass(frozen=True)
@@ -193,6 +204,7 @@ class _Inputs:
     probe_kwh: float  # extra load per quarter that Plan.marginal prices, 0: none
     vehicle: Vehicle | None = None  # a car to charge, None: no car
     ev_end_price: float = 0.0  # SEK per kWh the car still needs after the horizon
+    fuse_kwh: float = math.inf  # the main fuse, kWh per quarter, inf if none
 
 
 def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh, extra=0.0):
@@ -235,13 +247,19 @@ def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh, extra=0.0):
 def _quarter_cost(
     inputs: _Inputs, index: int, grid_import, grid_export, caps, exempt=0.0
 ):
-    """Energy cost plus penalties for import above the limit and the targets.
+    """Energy cost plus penalties for import above the limit, the fuse and targets.
 
-    `exempt` is extra load that the limit does not apply to (for Plan.marginal).
+    `exempt` is extra load that the limit does not apply to (for Plan.marginal); the
+    fuse applies to all of it.
     """
     cost = grid_import * inputs.buy[index] - grid_export * inputs.sell[index]
-    cost = cost + (
-        np.maximum(grid_import - inputs.limit[index] - exempt, 0.0) * LIMIT_PENALTY
+    cost = (
+        cost
+        + (
+            np.maximum(grid_import - inputs.limit[index] - exempt, 0.0)
+            + np.maximum(grid_import - inputs.fuse_kwh, 0.0)
+        )
+        * LIMIT_PENALTY
     )
     # A kWh above a target in one quarter raises that hour's mean by 1 kW
     for cap_kwh, kr_per_kw in caps:
@@ -397,7 +415,7 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
     level_caps, other_caps = targets
 
     def target(index: int, ev_kwh: float) -> float:
-        return min(level_caps[index], other_caps[index] + ev_kwh)
+        return min(level_caps[index], other_caps[index] + ev_kwh, inputs.fuse_kwh)
 
     # values[t][previous mode, soc level, car level]: the cost from the start of
     # quarter t on. The car axis has one level after the deadline
@@ -635,6 +653,7 @@ def optimize(
         # The car's missing energy after the horizon: bought at the cheapest price of
         # the horizon's last day
         float(np.min(buy[-END_WINDOW:])) if len(buy) else 0.0,
+        limit.fuse_kw * QUARTER_HOURS if limit.fuse_kw > 0 else math.inf,
     )
 
     # The power charges in the horizon, per month, and the peak already reached
@@ -659,10 +678,11 @@ def optimize(
 
     def run(levels: dict[str, float]) -> Plan:
         """Plan for fixed import target levels."""
-        targets, caps, peak_levels = [], [], []
+        caps, peak_levels = [], []
         level_caps, other_caps = [], []
+        fuse = [limit.fuse_kw] if limit.fuse_kw > 0 else []
         for index, keys in enumerate(quarter_keys):
-            peak_levels.append(min((levels[k] for k in keys), default=None))
+            peak_levels.append(min([*(levels[k] for k in keys), *fuse], default=None))
             level_caps.append(
                 min((levels[k] * QUARTER_HOURS for k in keys), default=math.inf)
             )
@@ -673,7 +693,6 @@ def optimize(
                     + max(inputs.net[index], 0.0),
                 )
             )
-            targets.append(min(level_caps[-1], other_caps[-1]))
             caps.append(
                 [
                     (
@@ -686,6 +705,13 @@ def optimize(
         modes, socs, imports, exports, switches, marginal, ev_kwh, missing = _optimize(
             inputs, (level_caps, other_caps), caps
         )
+        # As in _optimize: the car's charging comes on top of the battery's
+        targets = [
+            min(level, other + car_kwh, inputs.fuse_kwh)
+            for level, other, car_kwh in zip(
+                level_caps, other_caps, ev_kwh, strict=True
+            )
+        ]
         ev_missing_cost = 0.0
         car = inputs.vehicle
         if car is not None and car.need_kwh > 0:
@@ -716,6 +742,9 @@ def optimize(
         excess = float(
             np.sum(np.maximum(np.array(imports) - inputs.limit - np.array(ev_kwh), 0.0))
         )
+        fuse_excess = float(
+            np.sum(np.maximum(np.array(imports) - inputs.fuse_kwh, 0.0))
+        )
         end_value = (socs[-1] - battery.floor_kwh) * end_price if socs else 0.0
         return Plan(
             list(starts),
@@ -735,13 +764,14 @@ def optimize(
             + wear
             + amortized
             - end_value
-            + excess * LIMIT_PENALTY
+            + (excess + fuse_excess) * LIMIT_PENALTY
             + switches * SWITCH_COST
             + ev_missing_cost,
             marginal,
             ev_kwh,
             missing,
             ev_missing_cost,
+            fuse_excess,
         )
 
     # Coordinate search over the import targets, starting at the peaks already paid.

@@ -181,3 +181,10 @@ class TestGetTariff:
         """Test that a broken custom tariff falls back to the flat settings."""
         options = {"tariff_preset": "custom", "tariff": {"energy_fees": [{}]}}
         assert utils.get_tariff(self.hass(options)).buy_fee(at(1, 5, 12)) == 60
+
+
+def test_fuse_power():
+    """Test the power of a three-phase main fuse."""
+    assert tariff.fuse_power(20) == pytest.approx(13.8)
+    assert tariff.fuse_power(35) == pytest.approx(24.15)
+    assert tariff.fuse_power(0) == 0.0

@@ -348,3 +348,13 @@ async def test_car_trip_charges_full(mock_hass):
     charging = [s for s, kw in zip(starts, car["power"], strict=True) if kw > 0]
     assert charging
     assert max(charging) < departure
+
+
+async def test_main_fuse_caps_the_import(mock_hass):
+    """Test that the main fuse setting caps the import targets."""
+    mock_hass.data[DOMAIN]["config"].update({"grid_import_limit": 0, "main_fuse": 10})
+    plan = await run(mock_hass)
+    fuse = 3 * 230 * 10 / 1000
+    assert all(t is not None and t <= fuse + 1e-9 for t in plan["targets"])
+    assert max(plan["grid_import"]) <= fuse + 0.01
+    assert plan["fuse_excess_kwh"] == 0.0

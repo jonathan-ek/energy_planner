@@ -39,6 +39,7 @@ from .heat_pump import schedule
 from .heating import plan_inputs
 from .nordpool_utils import fetch_nordpool_data
 from .price_estimate import estimate
+from .tariff import fuse_power
 from .utils import get_tariff
 
 _LOGGER = logging.getLogger(__name__)
@@ -432,6 +433,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         float(config.get("grid_import_limit", 0)),
         int(config.get("grid_import_limit_start", 6)),
         int(config.get("grid_import_limit_end", 23)),
+        fuse_power(float(config.get("main_fuse", 0) or 0)),
     )
     vehicle, car = _vehicle(hass, starts)
     month_start = dt_utils.start_of_local_day(now.date().replace(day=1))
@@ -517,6 +519,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         "power_cost": round(plan.power_cost, 2),
         "end_value": round(plan.end_value, 2),
         "limit_excess_kwh": round(plan.limit_excess_kwh, 2),
+        "fuse_excess_kwh": round(plan.fuse_excess_kwh, 2),
         "peaks": [
             {
                 **_peak_label(tariff, key),

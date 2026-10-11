@@ -227,6 +227,18 @@ TARIFF_PRESETS: dict[str, dict[str, Any]] = {
 }
 
 
+# V between a phase and neutral (Swedish mains)
+PHASE_VOLTAGE = 230.0
+
+
+def fuse_power(amps: float, phases: int = 3) -> float:
+    """Return the power in kW a main fuse of `amps` per phase carries, 0 if none.
+
+    Swedish houses have three phases: a 20 A fuse carries 13.8 kW, 35 A 24.15 kW.
+    """
+    return max(amps, 0.0) * phases * PHASE_VOLTAGE / 1000
+
+
 def import_limit(
     moment: dt.datetime, limit_kw: float, start_hour: int, end_hour: int
 ) -> float | None:

@@ -562,3 +562,34 @@ def test_car_and_battery_share_the_power_charge():
     assert sum(plan.ev_kwh) == pytest.approx(8.0)
     # 8 kWh car + 6 kWh battery + 6 kWh load in 6 hours: about 3.3 kW, not 8+
     assert peak(plan.grid_import, 0, 6) < 4.5
+
+
+def test_main_fuse_limits_car_and_battery_together():
+    """Test that the car and the battery share the fuse in the cheap hours."""
+    prices = [100.0 if 2 <= s.hour < 4 else 1000.0 for s in STARTS]
+
+    def run(fuse_kw):
+        return opt.optimize(
+            STARTS,
+            prices,
+            LOAD,
+            NO_PV,
+            battery(),
+            NO_FEES,
+            limit=opt.Limit(fuse_kw=fuse_kw),
+            vehicle=car(),
+        )
+
+    free, fused = run(0.0), run(12.0)
+    # Without a fuse both charge at full power: 8 + 10 + 1 kW
+    assert max(free.grid_import) / 0.25 == pytest.approx(19.0)
+    assert max(fused.grid_import) / 0.25 <= 12.0 + 1e-9
+    assert fused.fuse_excess_kwh == 0.0
+    assert sum(fused.ev_kwh) == pytest.approx(8.0)
+    # The inverter's import target includes the car and stays below the fuse
+    for target, kwh in zip(fused.targets, fused.ev_kwh, strict=True):
+        assert target is not None
+        assert target <= 12.0 + 1e-9
+        if kwh > 0:
+            assert target >= kwh / 0.25
+    assert all(level == 12.0 for level in fused.peak_levels)

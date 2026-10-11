@@ -64,6 +64,7 @@ PLAN_SETTINGS = (
     "grid_import_limit",
     "grid_import_limit_start",
     "grid_import_limit_end",
+    "main_fuse",
     "heat_pump_power",
     "heat_pump_margin",
     "heat_pump_heating_limit",

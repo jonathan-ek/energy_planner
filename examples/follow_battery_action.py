@@ -50,10 +50,6 @@ PEAK_BASELINE_SOC = "number.solis_s6_eh1p_peak_baseline_soc"  # %
 TIME_OF_USE = None
 CHARGE_PERIOD = None
 DISCHARGE_PERIOD = None
-# W the import target is capped at, below the main fuse (e.g. 12000 for 3 x 20 A,
-# 13.8 kW), so peak shaving also slows the battery's charging while a car charges;
-# None: no cap
-MAX_GRID_POWER = None
 
 BATTERY_SOC = "sensor.solis_s6_solis_battery_soc"
 PV_POWER = "sensor.solis_s6_solis_total_pv_power"  # W
@@ -139,8 +135,6 @@ discharge = None  # (current, soc) for the discharge window, None: off
 peak = None  # (max grid power W, baseline soc) for peak shaving, None: off
 target = attributes.get("import_target_kw")
 grid_limit = None if target is None else int(round(target * 10)) * 100  # W
-if grid_limit is not None and MAX_GRID_POWER:
-    grid_limit = min(grid_limit, MAX_GRID_POWER)
 
 if state == "charge" and soc is not None:
     if grid_limit is not None:
