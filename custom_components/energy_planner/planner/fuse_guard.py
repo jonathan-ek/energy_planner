@@ -29,11 +29,26 @@ from .ev import ev_action
 
 _LOGGER = logging.getLogger(__name__)
 
-# Phase readings older than this are not used (the meter reports every 10-20 s)
+# Readings older than this are not used (the meter reports every 10-20 s)
 MAX_AGE_SECONDS = 120
 
 
-def _value(hass: HomeAssistant, entity_id: str, now, *, kilo: bool) -> float | None:
+def _fresh(hass: HomeAssistant, entity_ids: list[str], now) -> bool:
+    """Return whether any of the entities reported within `MAX_AGE_SECONDS`.
+
+    MQTT sensors (the parents' HAN port) do not write an unchanged value, so a phase
+    that stays at 0 looks old; the meter is alive while any of its sensors reports.
+    """
+    return any(
+        (state := hass.states.get(entity_id)) is not None
+        and (now - state.last_reported).total_seconds() <= MAX_AGE_SECONDS
+        for entity_id in entity_ids
+    )
+
+
+def _value(
+    hass: HomeAssistant, entity_id: str, now, *, kilo: bool, check_age: bool = True
+) -> float | None:
     """Return a sensor's value (kW when `kilo`, by its unit), None if missing or old."""
     state = hass.states.get(entity_id)
     if state is None:
@@ -42,7 +57,7 @@ def _value(hass: HomeAssistant, entity_id: str, now, *, kilo: bool) -> float | N
         value = float(state.state)
     except ValueError:
         return None
-    if (now - state.last_reported).total_seconds() > MAX_AGE_SECONDS:
+    if check_age and (now - state.last_reported).total_seconds() > MAX_AGE_SECONDS:
         return None
     unit = state.attributes.get("unit_of_measurement")
     if kilo and unit == "W":
@@ -67,16 +82,18 @@ def config_entities(config: dict) -> list[str]:
 
 
 def _reading(hass: HomeAssistant, config: dict, now) -> fuse.Reading | None:
-    """Return the live reading, None if a phase is missing."""
+    """Return the live reading, None if a phase is missing or the meter is silent."""
     imports = config.get("grid_phase_import_sensors") or []
     exports = config.get("grid_phase_export_sensors") or []
+    if not _fresh(hass, [*imports, *exports], now):
+        return None
     phase_kw = []
     for index, entity_id in enumerate(imports):
-        kw = _value(hass, entity_id, now, kilo=True)
+        kw = _value(hass, entity_id, now, kilo=True, check_age=False)
         if kw is None:
             return None
         if index < len(exports):
-            kw -= _value(hass, exports[index], now, kilo=True) or 0.0
+            kw -= _value(hass, exports[index], now, kilo=True, check_age=False) or 0.0
         phase_kw.append(kw)
     inverter = config.get("inverter_ac_power_sensor")
     delivered = _value(hass, inverter, now, kilo=True) if inverter else None

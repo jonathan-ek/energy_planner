@@ -93,12 +93,12 @@ def test_smooth_lowers_at_once_and_raises_slowly():
     assert raised == (12.0, NOW + 20 * minute)
 
 
-def state(value, unit=None):
-    """Return a fresh state."""
+def state(value, unit=None, reported=NOW):
+    """Return a state, fresh by default."""
     return SimpleNamespace(
         state=str(value),
         attributes={"unit_of_measurement": unit} if unit else {},
-        last_reported=NOW,
+        last_reported=reported,
     )
 
 
@@ -142,6 +142,17 @@ def test_update_guard_reads_the_sensors():
     guard = hass.data[DOMAIN]["fuse_guard"]
     assert guard["inverter_meter_offset_kw"] == pytest.approx(1.28, abs=0.01)
     assert guard["grid_limit_kw"] == pytest.approx(18.65 - 1.28, abs=0.06)
+    # An unchanged phase is not reported again (MQTT): used while the meter reports
+    states["sensor.l1"] = state(5.832, "kW", NOW - dt.timedelta(minutes=10))
+    with patch.object(fuse_guard.dt_utils, "now", return_value=NOW):
+        fuse_guard.update_guard(hass)
+    assert hass.data[DOMAIN]["fuse_guard"] is not guard
+    guard = hass.data[DOMAIN]["fuse_guard"]
+    # A silent meter keeps the last guard
+    later = NOW + dt.timedelta(minutes=5)
+    with patch.object(fuse_guard.dt_utils, "now", return_value=later):
+        fuse_guard.update_guard(hass)
+    assert hass.data[DOMAIN]["fuse_guard"] is guard
     # A missing phase keeps the last guard
     states["sensor.l2"] = state("unavailable")
     with patch.object(fuse_guard.dt_utils, "now", return_value=NOW):
