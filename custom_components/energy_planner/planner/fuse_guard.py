@@ -132,14 +132,18 @@ def update_guard(hass: HomeAssistant) -> None:
     if reading is None:
         return
     max_power = float(config.get("ev_charger_max_power") or 11000)
+    # A car that has finished draws nothing: no room is kept for it
+    status_id = config.get("ev_charger_status_sensor")
+    status = hass.states.get(status_id) if status_id else None
+    finished = status is not None and status.state.lower().endswith("finished")
     guard = fuse.limits(
         reading,
         fuse_a,
         float(config.get("fuse_margin", 2) or 0),
         # An 11 kW charger is 16 A
         round(max_power / (len(reading.phase_kw) * fuse.VOLTAGE)),
-        ev_wanted=ev_action(data.get("plan"), now, ev_plugged(hass))["state"]
-        == "charge",
+        ev_wanted=not finished
+        and ev_action(data.get("plan"), now, ev_plugged(hass))["state"] == "charge",
     )
     meter_id = config.get("inverter_grid_power_sensor")
     meter_kw = _value(hass, meter_id, now, kilo=True) if meter_id else None

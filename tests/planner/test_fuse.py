@@ -142,6 +142,26 @@ def test_update_guard_reads_the_sensors():
     guard = hass.data[DOMAIN]["fuse_guard"]
     assert guard["inverter_meter_offset_kw"] == pytest.approx(1.28, abs=0.01)
     assert guard["grid_limit_kw"] == pytest.approx(18.65 - 1.28, abs=0.06)
+    # While the car should charge, room is kept for it, unless it has finished
+    states["sensor.charger"] = state("connected_charging")
+    hass.data[DOMAIN]["config"]["ev_charger_status_sensor"] = "sensor.charger"
+    del hass.data[DOMAIN]["fuse_guard_smoothing"]
+    charge = {"state": "charge"}
+    with (
+        patch.object(fuse_guard.dt_utils, "now", return_value=NOW),
+        patch.object(fuse_guard, "ev_action", return_value=charge),
+    ):
+        fuse_guard.update_guard(hass)
+        guard = hass.data[DOMAIN]["fuse_guard"]
+        # 16 A per phase kept for the car
+        assert guard["grid_limit_kw"] == pytest.approx(
+            18.65 - 1.28 - 3 * CAR_KW, abs=0.06
+        )
+        states["sensor.charger"] = state("connected_finished")
+        del hass.data[DOMAIN]["fuse_guard_smoothing"]
+        fuse_guard.update_guard(hass)
+    guard = hass.data[DOMAIN]["fuse_guard"]
+    assert guard["grid_limit_kw"] == pytest.approx(18.65 - 1.28, abs=0.06)
     # An unchanged phase is not reported again (MQTT): used while the meter reports
     states["sensor.l1"] = state(5.832, "kW", NOW - dt.timedelta(minutes=10))
     with patch.object(fuse_guard.dt_utils, "now", return_value=NOW):
