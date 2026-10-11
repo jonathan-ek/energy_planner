@@ -7,17 +7,20 @@ import pytest
 
 from custom_components.energy_planner.comfort import thermal
 
-# Like the bedroom last winter: slow, and heats about 0.3 °C/h
-ROOM = thermal.RoomModel(loss=0.004, gain=0.02, heat=0.4)
+# Like the hall in the step test (Oct 2026): a time constant of about 80 h, heats
+# about 0.25 °C/h at 18 °C
+ROOM = thermal.RoomModel(loss=0.012, gain=0.02, heat=0.4)
 
 
 def test_step_moves_towards_the_equilibrium():
     """Test the exact solution and the equilibrium."""
-    assert ROOM.equilibrium(0.0, 0.0) == pytest.approx(5.0)
-    assert ROOM.equilibrium(0.0, 1.0) == pytest.approx(105.0)
+    assert ROOM.equilibrium(0.0, 0.0) == pytest.approx(0.02 / 0.012)
+    assert ROOM.equilibrium(0.0, 1.0) == pytest.approx(0.42 / 0.012)
     after = ROOM.step(20.0, 0.0, 0.0, 10.0)
-    assert after == pytest.approx(5 + 15 * math.exp(-0.04))
-    assert 19.0 < after < 20.0
+    base = 0.02 / 0.012
+    assert after == pytest.approx(base + (20 - base) * math.exp(-0.12))
+    # About 0.2 °C/h at 20 °C indoor, 0 °C outdoor
+    assert 17.5 < after < 18.5
 
 
 def test_warmup_hours():
@@ -26,7 +29,7 @@ def test_warmup_hours():
     assert hours is not None
     assert ROOM.step(18.0, 0.0, 1.0, hours) == pytest.approx(19.0)
     assert thermal.warmup_hours(ROOM, 20.0, 19.0, 0.0) == 0.0
-    weak = thermal.RoomModel(loss=0.004, gain=0.0, heat=0.06)
+    weak = thermal.RoomModel(loss=0.012, gain=0.0, heat=0.18)
     assert thermal.max_temperature(weak, -5.0) == pytest.approx(10.0)
     assert thermal.warmup_hours(weak, 18.0, 19.0, -5.0) is None
 
@@ -55,18 +58,18 @@ def test_fit_needs_heating_and_not_heating():
 
 
 def test_plan_starts_early_to_reach_the_target():
-    """Test optimum start: 18 -> 20 at step 40, heating starts hours before."""
-    targets = [18.0] * 40 + [20.0] * 20
-    outdoor = [0.0] * 60
+    """Test optimum start: 18 -> 20 at step 60, heating starts hours before."""
+    targets = [18.0] * 60 + [20.0] * 20
+    outdoor = [0.0] * 80
     result = thermal.plan(ROOM, 18.0, targets, outdoor)
     # Before it the thermostat only holds 18
     first = result.setpoints.index(20.0)
     hours = thermal.warmup_hours(ROOM, result.temperatures[first - 1], 20.0, 0.0)
     assert hours is not None
-    assert 0 < first < 40
-    assert (40 - first) * 0.25 == pytest.approx(hours, abs=0.5)
+    assert 0 < first < 60
+    assert (60 - first) * 0.25 == pytest.approx(hours, abs=0.5)
     assert result.setpoints[0] == 18.0
-    assert result.temperatures[39] == pytest.approx(20.0, abs=0.1)
+    assert result.temperatures[59] == pytest.approx(20.0, abs=0.1)
     # The thermostat holds it, no overshoot
     assert max(result.temperatures) <= 20.0 + 1e-6
 
@@ -82,7 +85,7 @@ def test_plan_coasts_down():
 
 def test_plan_caps_an_unreachable_target():
     """Test that a weak room heats as much as it can without an endless start."""
-    weak = thermal.RoomModel(loss=0.004, gain=0.0, heat=0.1)
+    weak = thermal.RoomModel(loss=0.012, gain=0.0, heat=0.25)
     targets = [18.0] * 8 + [24.0] * 8
     result = thermal.plan(weak, 20.0, targets, [0.0] * 16)
     assert all(

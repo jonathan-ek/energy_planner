@@ -503,12 +503,18 @@ open. Radiator supply/return: `sensor.utgaende_radiatortemperatur` /
 outdoor, 40 at 0, 43 at -10, 50 at -20.
 
 Last winter's Tado data: with the valve closed rooms cool 0.03-0.10 °C/h at 20 °C
-(time constant 230-270 h); with it fully open they rise at most about 0.3 °C/h, some
+(time constant 230-270 h, but the rooms around them were warm; with the whole house
+cooling it is 48-100 h, see below); with it fully open they rise at most about 0.3 °C/h, some
 not at all in the cold (Elise's room, the basement office), so the radiators, not the
 control, limit setbacks. The heat pump is the only fast source. A weekend step test
 (2026-10-09 - 11, `packages/heating_test.yaml` in HA, phase in
 `input_select.heating_test_phase`): everything off, then district heating only, then
-the heat pump only, to fit the rooms and how heat spreads.
+the heat pump only, to fit the rooms and how heat spreads. Results in
+`docs/heating_step_test_2026_10.md`: with the whole house cooling, the rooms above
+ground lose 0.010-0.021 /h (48-100 h), the basement 0.004; the supply stays at the
+curve's floor (about 32 °C) whatever the valves do, so 17.6 -> 20.1 °C took 20 h and no
+room reached 22; the Tado sensors read 1.5-3 °C high while their valve heats; the heat
+pump drew about 0.4 kW and held the hall at about 20.5 °C with a 22 °C setpoint.
 
 The RVA36 (manual SE1G2455): curve slope row 17, parallel shift row 64, min/max supply
 rows 68/69, its own time program rows 5-11 with reduced setpoint row 14, summer/winter

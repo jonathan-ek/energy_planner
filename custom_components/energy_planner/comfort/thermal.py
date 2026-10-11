@@ -9,15 +9,23 @@ neighbours) and `heat` °C/h at full heating (u = 1, the share of the hour the r
 heats). Over a step with constant inputs the solution is exact: T moves exponentially
 towards the equilibrium `outdoor + (gain + heat * u) / loss`.
 
-The rooms are slow (Oct 2026, last winter's Tado data with the valve closed: loss
-about 0.004 /h, a time constant of 230-270 h) and the radiators weak, so a target
+The weekend step test (Oct 2026, `docs/heating_step_test_2026_10.md`) gave, with the
+whole house cooling, a loss of 0.010-0.021 /h above ground (time constants of 48-100
+h) and 0.004 /h in the basement. Last winter's Tado data gave 0.004 /h above ground
+too, with the valve closed but the rooms around it warm: the neighbours' heat shows up
+as `gain`, so a model fitted on one room depends on how warm the rest of the house is.
+The radiators are weak: the supply stays at the curve's floor (about 32 °C above +5
+°C outdoor) whatever the valves do, so the hall warmed at most about 0.25 °C/h
+(`heat` about 0.4 °C/h) and a 3 °C setback took about a day to recover. A target
 change needs hours of heating, and some targets can not be reached at all
 (`max_temperature`). `plan` starts heating early enough to reach each target on time
 (optimum start), assuming the thermostat heats fully below its setpoint.
 
 `heat` depends on the radiator supply temperature, which the district heating
-controller sets from the outdoor temperature; it is a constant here until the step
-test (Oct 2026) and a winter give data for more.
+controller sets from the outdoor temperature (40 °C at 0, 43 at -10); it is a constant
+here until a winter gives data for more. The Tado sensors sit in the valve head and
+read 1.5-3 °C high while the valve heats, so fit on a room sensor away from the
+radiator, or leave out the samples just after the valve opens or closes.
 """
 
 from collections.abc import Sequence
