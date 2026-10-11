@@ -4,7 +4,10 @@ Config store only (no defaults: without them there is no guard):
 `grid_phase_import_sensors` and optionally `grid_phase_export_sensors` (one per
 phase, W or kW, e.g. the HAN port's `sensor.l1_aktiv_effekt_uttag_momentan_effekt`),
 `inverter_ac_power_sensor` (W or kW, positive while the inverter delivers power to
-the house, e.g. Solis `ac_grid_port_power`), `ev_phase_current_sensors` (the
+the house, e.g. Solis `ac_grid_port_power`), `inverter_grid_power_sensor` (W or kW,
+the grid import as the inverter's own meter sees it, which its peak shaving limits;
+at the owner's parents it reads about 1.3 kW less than the electricity meter, so the
+grid limit is shifted by the difference), `ev_phase_current_sensors` (the
 charger's current per phase, A) and `ev_charger_current_number` (its current
 setting, A). The fuse is `number.energy_planner_main_fuse`, the margin
 `number.energy_planner_fuse_margin`.
@@ -55,9 +58,9 @@ def config_entities(config: dict) -> list[str]:
         *(config.get("grid_phase_import_sensors") or []),
         *(config.get("grid_phase_export_sensors") or []),
         *(
-            [config["inverter_ac_power_sensor"]]
-            if config.get("inverter_ac_power_sensor")
-            else []
+            config[key]
+            for key in ("inverter_ac_power_sensor", "inverter_grid_power_sensor")
+            if config.get(key)
         ),
         *(config.get("ev_phase_current_sensors") or []),
     ]
@@ -121,6 +124,13 @@ def update_guard(hass: HomeAssistant) -> None:
         ev_wanted=ev_action(data.get("plan"), now, ev_plugged(hass))["state"]
         == "charge",
     )
+    meter_id = config.get("inverter_grid_power_sensor")
+    meter_kw = _value(hass, meter_id, now, kilo=True) if meter_id else None
+    if meter_kw is not None:
+        # The inverter limits its own meter's reading: shift by what it misses
+        offset = sum(reading.phase_kw) - meter_kw
+        guard["grid_limit_kw"] = max(guard["grid_limit_kw"] - offset, 0.0)
+        guard["inverter_meter_offset_kw"] = round(offset, 2)
     smoothing = data.setdefault("fuse_guard_smoothing", {})
     smoothing["grid"] = fuse.smooth(
         smoothing.get("grid"),

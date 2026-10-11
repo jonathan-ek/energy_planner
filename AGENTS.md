@@ -118,7 +118,8 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   `heat_pump_climate` (`climate.hallen`), `indoor_temperature_sensor`
   (`sensor.gw1100a_indoor_temperature`); fuse guard inputs (no defaults, see "Main
   fuse") `grid_phase_import_sensors`, `grid_phase_export_sensors`,
-  `inverter_ac_power_sensor`, `ev_phase_current_sensors`, `ev_charger_current_number`
+  `inverter_ac_power_sensor`, `inverter_grid_power_sensor`, `ev_phase_current_sensors`,
+  `ev_charger_current_number`
 
 ## Control flow
 
@@ -452,7 +453,10 @@ three-phase and balanced: the car charger's current and the battery's grid charg
   left alone.
 - The battery gets the rest: `grid_limit_kw` = house + car + the room left per phase
   (after the car's setting) × 3. Above it the inverter's peak shaving covers the load
-  from the battery, so it also shaves house peaks in `charge` and `hold`.
+  from the battery, so it also shaves house peaks in `charge` and `hold`. With
+  `inverter_grid_power_sensor` (the import the inverter's own meter sees) the limit
+  is shifted by what that meter misses (the parents': about 1.3 kW,
+  `inverter_meter_offset_kw`).
 - `fuse.smooth`: lower values apply at once (the grid limit 0.2 kW lower, so small
   rises do not write again), higher ones once a step higher (0.5 kW, 1 A) and the last
   change is 1 min (grid) / 15 min (charger, Zaptec's cloud API is rate limited) old.
@@ -467,7 +471,7 @@ three-phase and balanced: the car charger's current and the battery's grid charg
   charge slots without an import target.
 - The parents: phases `sensor.l{1,2,3}_aktiv_effekt_uttag_momentan_effekt` /
   `_inmatning_` (HAN, kW), inverter `sensor.solis_s6_solis_ac_grid_port_power` (W,
-  negative while charging), car `sensor.garaget_current_phase_{1,2,3}`, setting
+  negative while charging) and `sensor.solis_s6_eh3p_grid_power_net` (W), car `sensor.garaget_current_phase_{1,2,3}`, setting
   `number.garaget_charger_max_current` (the installation's available current is
   unavailable to their account).
 

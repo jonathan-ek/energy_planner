@@ -132,6 +132,16 @@ def test_update_guard_reads_the_sensors():
     assert guard["phase_a"] == [25.4, 26.6, 34.9]
     assert guard["grid_limit_kw"] == pytest.approx(18.6, abs=0.05)
     assert guard["ev_current_a"] == 16
+    # The inverter's own meter reads 1.3 kW less: its limit is 1.3 kW lower
+    states["sensor.meter"] = state(18705, "W")
+    hass.data[DOMAIN]["config"]["inverter_grid_power_sensor"] = "sensor.meter"
+    # (a fresh start: lowering it would also take the smoothing margin off)
+    del hass.data[DOMAIN]["fuse_guard_smoothing"]
+    with patch.object(fuse_guard.dt_utils, "now", return_value=NOW):
+        fuse_guard.update_guard(hass)
+    guard = hass.data[DOMAIN]["fuse_guard"]
+    assert guard["inverter_meter_offset_kw"] == pytest.approx(1.28, abs=0.01)
+    assert guard["grid_limit_kw"] == pytest.approx(18.65 - 1.28, abs=0.06)
     # A missing phase keeps the last guard
     states["sensor.l2"] = state("unavailable")
     with patch.object(fuse_guard.dt_utils, "now", return_value=NOW):
