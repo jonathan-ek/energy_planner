@@ -13,7 +13,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `custom_components/energy_planner/planner/` | All planning logic (see below) |
 | `custom_components/energy_planner/button.py` | `button.energy_planner_update_battery_plan`, recalculates the battery plan |
 | `custom_components/energy_planner/{datetime,number,select,switch,time}.py` | Entity platforms; each holds its entity definitions as dicts plus one generic entity class |
-| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`) `sensor.energy_planner_battery_plan`, `sensor.energy_planner_battery_action` (what the inverter should do now, `battery_plan.current_action`) the heat pump sensors `heat_pump_cop`, `district_heating_price`, `heat_pump_saving` (`heating.heat_pump_economy`) and `heat_pump_action` (`heating.heat_pump_action`); they only read `hass.data` |
+| `custom_components/energy_planner/sensor.py` | The two forecast sensors (`sensor.energy_planner_load_forecast`, `sensor.energy_planner_pv_forecast`) `sensor.energy_planner_battery_plan`, `sensor.energy_planner_battery_action` (what the inverter should do now, `battery_plan.current_action`) the heat pump sensors `heat_pump_cop`, `district_heating_price`, `heat_pump_saving` (`heating.heat_pump_economy`) and `heat_pump_action` (`heating.heat_pump_action`) and `fuse_guard` (`fuse_guard.update_guard`); they only read `hass.data` |
 | `custom_components/energy_planner/store.py` | Thin wrapper around HA `Store` (`.storage/energy_planner.<key>`) |
 | `custom_components/energy_planner/config_flow.py` | Setup asks for `nordpool_entity_id`; the options flow chooses the grid tariff (flat, a preset or custom YAML) |
 | `custom_components/energy_planner/services.yaml`, `translations/en.json` | Service descriptions |
@@ -36,6 +36,8 @@ outside the integration by scripts/automations (see `examples/`).
 | `battery_action.py` | Pure: `resolve` turns slot 1 and the plan into the action now (slot state, source, SOC, current, import target, until), mode ↔ slot state maps |
 | `heat_pump.py` | Pure heat pump economy: COP curve per outdoor temperature (`COP_CURVES`), district heating price per month (`DISTRICT_HEATING_PRESETS`), `evaluate` compares a kWh of heat from both. See "Heat pump" |
 | `ev.py` | Pure car charging: `is_plugged` (charger state), `need_from_history` (the largest charging night, noon to noon), `need_from_soc`, `ready_time` / `deadline_index` (the next working morning's ready time, or an earlier departure), `ev_action` (charge/wait now). See "Car" |
+| `fuse.py` | Pure main fuse guard: `limits` splits the room on the busiest phase between the car charger and the battery's grid charging, `smooth` (hysteresis for the devices). See "Main fuse" |
+| `fuse_guard.py` | HA glue for `fuse.py`: live phase readings → `hass.data[DOMAIN]["fuse_guard"]` |
 | `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price now (`hass.data[DOMAIN]["prices"]`, stored by the battery plan), the tariff and the plan's export now |
 | `price_estimate.py` | Pure: tomorrow's prices before they are published (same-type days + a learned correction per hour, Swedish holidays). See "Battery plan" |
 | `../comfort/schedule.py`, `../comfort/thermal.py` | WIP comfort control, not wired into HA yet. See "Comfort" |
@@ -101,8 +103,8 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   `forecast_weekend_reserve` (kWh, default 4), `forecast_reserve_start` /
   `forecast_reserve_end` (h, default 18 / 22), `grid_import_limit` (kW hourly mean the
   planner may import, 0 = off), `grid_import_limit_start` / `grid_import_limit_end`
-  (h, default 6 / 23), `main_fuse` (A per phase, three phases, 0 = off; see "Battery
-  plan"), `battery_wear_cost` (öre per kWh taken out of the battery,
+  (h, default 6 / 23), `main_fuse` (A per phase, three phases, 0 = off) and
+  `fuse_margin` (A, default 2; see "Main fuse"), `battery_wear_cost` (öre per kWh taken out of the battery,
   default 20), `heat_pump_power` (W while heating until the draw is measured,
   default 300, 0 = not planned),
   `heat_pump_margin` (öre per kWh of heat, default 5), `heat_pump_heating_limit`
@@ -114,7 +116,9 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   `outdoor_temperature_sensor` (`sensor.gw1100a_outdoor_temperature`),
   `heat_pump_model` (`msz_ap42`), `district_heating` (`tekniska_verken_2026`),
   `heat_pump_climate` (`climate.hallen`), `indoor_temperature_sensor`
-  (`sensor.gw1100a_indoor_temperature`)
+  (`sensor.gw1100a_indoor_temperature`); fuse guard inputs (no defaults, see "Main
+  fuse") `grid_phase_import_sensors`, `grid_phase_export_sensors`,
+  `inverter_ac_power_sensor`, `ev_phase_current_sensors`, `ev_charger_current_number`
 
 ## Control flow
 
@@ -424,6 +428,48 @@ horizon), `planned_kwh`, `missing_kwh`.
   90th percentile 33 (2025-08 - 2026-10). Moving the evening charging to the night's cheapest hours saved
   about 57 öre/kWh on the nights with prices (~1 500 kr/year). The car's SOC is to
   come from ESPHome Tesla BLE (M5Stack NanoC6).
+
+## Main fuse
+
+The battery plan keeps each quarter's mean import below `main_fuse` × 3 × 230 V, as if
+the load were even over the phases. It is not: at the owner's parents (35 A, Oct
+2026) the battery charged from the grid at 20 kW with the phases at 25, 27 and 35 A
+(most of the house is on L3). So a guard (`planner/fuse.py`, glue `fuse_guard.py`)
+works on the live import per phase, with the two loads that can be controlled, both
+three-phase and balanced: the car charger's current and the battery's grid charging
+(the inverter's peak shaving max usable grid power, a limit on the total import).
+
+- House load per phase = the phase's import − the inverter's draw / 3 − the car's
+  current; the room per phase = (`main_fuse` − `fuse_margin`) × 230 V − that, the
+  busiest phase sets it (the sensor's state, A).
+- The car comes first while `ev_action` is `charge`: its current (`ev_current_a`) is
+  raised to the room up to the charger's highest (`ev_charger_max_power` / 690,
+  rounded: 16 A), and lowered only while a phase is over and the battery can not take
+  enough off, by the excess; below 6 A it is 0 (the automation pauses the car).
+  Zaptec reports the car's current about once a minute and the meter every 10-20 s,
+  so a car that just started looks like house load; lowering only on a real excess
+  keeps that from cutting the car. While the car should not charge its setting is
+  left alone.
+- The battery gets the rest: `grid_limit_kw` = house + car + the room left per phase
+  (after the car's setting) × 3. Above it the inverter's peak shaving covers the load
+  from the battery, so it also shaves house peaks in `charge` and `hold`.
+- `fuse.smooth`: lower values apply at once (the grid limit 0.2 kW lower, so small
+  rises do not write again), higher ones once a step higher (0.5 kW, 1 A) and the last
+  change is 1 min (grid) / 15 min (charger, Zaptec's cloud API is rate limited) old.
+- Updated on every change of the configured sensors (at most every 5 s) and every
+  minute; a missing phase keeps the last result. `sensor.energy_planner_fuse_guard`:
+  state the room (A), attributes `grid_limit_kw`, `ev_current_a` (None without
+  `ev_charger_current_number`), `phase_a`, `house_a`, `over_a`, `updated`.
+- `examples/follow_battery_action.py` caps the import target at `grid_limit_kw` (a
+  guard older than 2 min is ignored) and its automation triggers on it;
+  `follow_ev_action_automation.yml` sets the charger's current and pauses at 0. Not
+  covered: `self_use` (the battery already covers the load) and manual time-of-use
+  charge slots without an import target.
+- The parents: phases `sensor.l{1,2,3}_aktiv_effekt_uttag_momentan_effekt` /
+  `_inmatning_` (HAN, kW), inverter `sensor.solis_s6_solis_ac_grid_port_power` (W,
+  negative while charging), car `sensor.garaget_current_phase_{1,2,3}`, setting
+  `number.garaget_charger_max_current` (the installation's available current is
+  unavailable to their account).
 
 ## Comfort (work in progress)
 

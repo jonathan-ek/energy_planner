@@ -339,6 +339,22 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
+                # Current per phase kept free below the main fuse by the fuse guard
+                # (planner/fuse.py), for loads that start before it reacts
+                "id": "fuse_margin",
+                "name": "Fuse margin",
+                "default": 2,
+                "min_val": 0,
+                "max_val": 20,
+                "step": 1,
+                "unit_of_measurement": UnitOfElectricCurrent.AMPERE,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
                 "id": "grid_import_limit_start",
                 "name": "Grid import limit from",
                 "default": 6,

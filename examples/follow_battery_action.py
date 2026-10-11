@@ -29,6 +29,10 @@ dt_util = None
 # ---------------------------- Start of the actual code ----------------------------
 
 ACTION = "sensor.energy_planner_battery_action"
+# Keeps the busiest phase below the main fuse (planner/fuse.py): its grid_limit_kw
+# caps the import target; not used when older than GUARD_MAX_AGE seconds
+FUSE_GUARD = "sensor.energy_planner_fuse_guard"
+GUARD_MAX_AGE = 120
 
 CHARGE_CURRENT = "number.solis_s6_eh1p_grid_time_of_use_charge_battery_current_slot_6"
 CHARGE_SOC = "number.solis_s6_eh1p_grid_time_of_use_charge_cut_off_soc_slot_6"
@@ -135,6 +139,16 @@ discharge = None  # (current, soc) for the discharge window, None: off
 peak = None  # (max grid power W, baseline soc) for peak shaving, None: off
 target = attributes.get("import_target_kw")
 grid_limit = None if target is None else int(round(target * 10)) * 100  # W
+guard = hass.states.get(FUSE_GUARD)
+guard_kw = guard.attributes.get("grid_limit_kw") if guard else None
+checked = dt_util.parse_datetime(guard.attributes.get("updated") or "") if guard else None
+if (
+    grid_limit is not None
+    and guard_kw is not None
+    and checked is not None
+    and (dt_util.now() - checked).total_seconds() < GUARD_MAX_AGE
+):
+    grid_limit = min(grid_limit, int(guard_kw * 10) * 100)
 
 if state == "charge" and soc is not None:
     if grid_limit is not None:

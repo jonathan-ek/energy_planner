@@ -19,6 +19,11 @@ triggers:
     entity_id:
       - sensor.energy_planner_battery_action
     # Attributes too (target SOC, current, until), not only the state
+  # The fuse guard's grid limit follows the meter (every 10-20 s)
+  - trigger: state
+    entity_id:
+      - sensor.energy_planner_fuse_guard
+    attribute: grid_limit_kw
   - trigger: state
     entity_id:
       - input_boolean.follow_battery_action

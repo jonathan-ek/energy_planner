@@ -17,6 +17,12 @@
 # be turned on again. While the car itself is full or waits (connected_finished
 # without a final stop, connected_requesting) the switch is unavailable, so nothing
 # is sent.
+#
+# The fuse guard (sensor.energy_planner_fuse_guard, planner/fuse.py) sets the
+# charger's current (number.garaget_charger_max_current, also the planner's
+# ev_charger_current_number) so the busiest phase stays below the main fuse; at 0 A
+# (below the charger's lowest current) the car pauses. It lowers the current at once
+# and raises it at most every 15 minutes.
 alias: Follow car charging action
 description: ""
 triggers:
@@ -30,13 +36,33 @@ triggers:
     from: disconnected
   - trigger: time_pattern
     minutes: /15
+  - trigger: state
+    entity_id:
+      - sensor.energy_planner_fuse_guard
+    attribute: ev_current_a
 conditions: []
+variables:
+  # None without a guard
+  guard_a: "{{ state_attr('sensor.energy_planner_fuse_guard', 'ev_current_a') }}"
 actions:
+  - if:
+      - condition: template
+        value_template: >-
+          {{ guard_a is number and guard_a >= 6
+             and guard_a != states('number.garaget_charger_max_current') | float(0) }}
+    then:
+      - action: number.set_value
+        target:
+          entity_id: number.garaget_charger_max_current
+        data:
+          value: "{{ guard_a }}"
   - choose:
       - conditions:
           - condition: state
             entity_id: sensor.energy_planner_ev_action
             state: charge
+          - condition: template
+            value_template: "{{ guard_a != 0 }}"
           - condition: state
             entity_id: switch.garaget_laddar
             state: "off"
@@ -45,9 +71,13 @@ actions:
             target:
               entity_id: switch.garaget_laddar
       - conditions:
-          - condition: state
-            entity_id: sensor.energy_planner_ev_action
-            state: wait
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: sensor.energy_planner_ev_action
+                state: wait
+              - condition: template
+                value_template: "{{ guard_a == 0 }}"
           - condition: state
             entity_id: switch.garaget_laddar
             state: "on"

@@ -6,10 +6,10 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import UnitOfElectricCurrent, UnitOfEnergy
 from homeassistant.util import dt as dt_utils
 
-from .const import DOMAIN, FORECAST_SENSORS, PLAN_SENSORS
+from .const import DOMAIN, FORECAST_SENSORS, FUSE_GUARD_SENSOR, PLAN_SENSORS
 from .planner.battery_plan import current_action, ev_plugged
 from .planner.ev import ev_action
 from .planner.heating import heat_pump_action, heat_pump_economy
@@ -86,7 +86,9 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerEvActionSensor(hass),
     ]
     hass.data[DOMAIN][PLAN_SENSORS] = plan_sensors
-    async_add_devices([*sensors, *plan_sensors])
+    guard = EnergyPlannerFuseGuardSensor(hass)
+    hass.data[DOMAIN][FUSE_GUARD_SENSOR] = guard
+    async_add_devices([*sensors, *plan_sensors, guard])
     return True
 
 
@@ -350,3 +352,40 @@ class EnergyPlannerEvActionSensor(SensorEntity):
     def extra_state_attributes(self):
         """Return where it comes from, until when, the power and the need."""
         return {key: value for key, value in self._action.items() if key != "state"}
+
+
+class EnergyPlannerFuseGuardSensor(SensorEntity):
+    """Room on the busiest phase below the main fuse (A), and the limits to apply.
+
+    Attributes: `grid_limit_kw` (the inverter's max usable grid power) and
+    `ev_current_a` (the charger's current), the currents per phase. No state without
+    a fuse or phase sensors. See planner/fuse.py.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_name = "Fuse guard"
+    _attr_icon = "mdi:fuse"
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+
+    def __init__(self, hass):
+        """Initialize the fuse guard sensor."""
+        self._hass = hass
+        self.entity_id = f"sensor.{DOMAIN}_fuse_guard"
+        self._attr_unique_id = f"{DOMAIN}_fuse_guard"
+
+    @property
+    def native_value(self):
+        """Return the room on the busiest phase (A, negative: over)."""
+        guard = self._hass.data[DOMAIN].get("fuse_guard")
+        return guard["room_a"] if guard else None
+
+    @property
+    def extra_state_attributes(self):
+        """Return the limits and the currents per phase."""
+        guard = self._hass.data[DOMAIN].get("fuse_guard")
+        if not guard:
+            return None
+        return {key: value for key, value in guard.items() if key != "room_a"}

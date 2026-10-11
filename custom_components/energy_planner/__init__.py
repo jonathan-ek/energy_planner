@@ -25,6 +25,7 @@ from .const import (
     DEFAULT_BATTERY_SOC_SENSOR,
     DOMAIN,
     DATE_TIME_ENTITIES,
+    FUSE_GUARD_SENSOR,
     NUMBER_ENTITIES,
     SWITCH_ENTITIES,
     SELECT_ENTITIES,
@@ -32,6 +33,7 @@ from .const import (
     SLOT_COUNT,
 )
 from .planner.ev import is_plugged as ev_is_plugged
+from .planner.fuse_guard import config_entities, update_guard
 from .planner import (
     async_request_plan,
     async_update_forecast,
@@ -76,6 +78,8 @@ PLAN_SETTINGS = (
 SOC_DRIFT = 5.0
 # ... but not more often than this
 SOC_DRIFT_INTERVAL = dt.timedelta(minutes=5)
+# The fuse guard follows the meter's phase readings, at most this often
+FUSE_GUARD_INTERVAL = dt.timedelta(seconds=5)
 PLATFORMS = [
     Platform.BUTTON,
     Platform.DATETIME,
@@ -321,7 +325,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         async_track_utc_time_change(hass, update_plan, minute="/15", second=30)
     )
     _track_plan_triggers(hass, entry)
+    _track_fuse_guard(hass, entry)
     return True
+
+
+def _track_fuse_guard(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Update the fuse guard on new meter readings and every minute."""
+    last: list[dt.datetime] = []
+
+    async def update(*_):
+        now = dt_utils.utcnow()
+        if last and now - last[0] < FUSE_GUARD_INTERVAL:
+            return
+        last[:] = [now]
+        try:
+            update_guard(hass)
+        except Exception:
+            _LOGGER.exception("Failed to update the fuse guard")
+            return
+        sensor = hass.data[DOMAIN].get(FUSE_GUARD_SENSOR)
+        if sensor is not None and sensor.hass is not None:
+            sensor.async_write_ha_state()
+
+    entities = config_entities(hass.data[DOMAIN]["config"])
+    if entities:
+        entry.async_on_unload(async_track_state_change_event(hass, entities, update))
+    entry.async_on_unload(
+        async_track_time_interval(hass, update, dt.timedelta(minutes=1))
+    )
 
 
 def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
