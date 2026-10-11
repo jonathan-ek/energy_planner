@@ -1,7 +1,8 @@
 # Heating step test, 2026-10-09 - 11 (the owner's house)
 
 A weekend test of how the rooms cool and heat, for the comfort models
-(`comfort/thermal.py`). Run by `packages/heating_test.yaml` in HA, phase in
+(`comfort/thermal.py`). Run by `packages/heating_test.yaml` in HA
+(`examples/comfort/heating_test_package.yaml`), phase in
 `input_select.heating_test_phase`. Nobody was home (the owner at the cabin) from Fri
 15:46 to Sun 20:35.
 

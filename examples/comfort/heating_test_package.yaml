@@ -1,0 +1,134 @@
+# HA package for the weekend heating step test (config/packages/heating_test.yaml at
+# the owner's, 2026-10-09 - 11); results in docs/heating_step_test_2026_10.md. Kept as
+# a template for the next test (dates, rooms and setpoints are the owner's).
+#
+# Weekend step test of the heating (2026-10-09 - 10-11), for the room models.
+#   A  Fri 10:00 - Sat 08:00  everything off (cool-down)
+#   B  Sat 08:00 - Sun 04:00  district heating zones 22 °C, heat pump off
+#   C  Sun 04:00 - return     district heating zones normal, heat pump heat 22 °C
+# Restores the normal settings when jonathan comes home (after Fri 17:00), at the
+# latest Mon 08:00, or when input_boolean.heating_test is turned off. The phase is
+# recomputed every 5 minutes, so a restart does not skip a step. Remove this file
+# after the test. Turning input_boolean.heating_test off ends the test (phase done, kept over restarts).
+
+input_boolean:
+  heating_test:
+    name: Heating test
+    icon: mdi:thermometer-lines
+    initial: true
+
+input_select:
+  heating_test_phase:
+    name: Heating test phase
+    options: [idle, cool_down, district_heating, heat_pump, done]
+
+script:
+  heating_test_restore:
+    alias: Heating test - normal settings
+    sequence:
+      - action: climate.set_temperature
+        target: {entity_id: climate.arbetsrum_kallaren}
+        data: {hvac_mode: heat, temperature: 20}
+      - action: climate.set_hvac_mode
+        target: {entity_id: climate.arbetsrum_uppe}
+        data: {hvac_mode: auto}
+      - action: climate.set_temperature
+        target: {entity_id: climate.sovrum}
+        data: {hvac_mode: heat, temperature: 19}
+      - action: climate.set_temperature
+        target: {entity_id: climate.gastrum}
+        data: {hvac_mode: heat, temperature: 20.5}
+      - action: climate.set_temperature
+        target: {entity_id: [climate.gillestugan, climate.tvattstugan, climate.badrum]}
+        data: {temperature: 19}
+      - action: climate.set_temperature
+        target: {entity_id: climate.vardagsrum}
+        data: {temperature: 19.5}
+
+automation:
+  - id: heating_test_step
+    alias: Heating test - step
+    mode: queued
+    triggers:
+      - trigger: time_pattern
+        minutes: /5
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: [input_boolean.heating_test, person.jonathan]
+    variables:
+      current: "{{ states('input_select.heating_test_phase') }}"
+      wanted: >-
+        {%- set t = now() -%}
+        {%- if current == 'done' -%}done
+        {%- elif t < as_datetime('2026-10-09T10:00:00+02:00') -%}idle
+        {%- elif is_state('input_boolean.heating_test', 'off')
+             or t >= as_datetime('2026-10-12T08:00:00+02:00')
+             or (is_state('person.jonathan', 'home')
+                 and t >= as_datetime('2026-10-09T17:00:00+02:00')) -%}done
+        {%- elif t < as_datetime('2026-10-10T08:00:00+02:00') -%}cool_down
+        {%- elif t < as_datetime('2026-10-11T04:00:00+02:00') -%}district_heating
+        {%- else -%}heat_pump{%- endif %}
+    conditions:
+      - "{{ wanted != current and not (current == 'idle' and wanted == 'done') }}"
+    actions:
+      - action: input_select.select_option
+        target: {entity_id: input_select.heating_test_phase}
+        data: {option: "{{ wanted }}"}
+      - action: logbook.log
+        data:
+          name: Heating test
+          message: "{{ current }} -> {{ wanted }}"
+      - choose:
+          - conditions: "{{ wanted == 'cool_down' }}"
+            sequence:
+              - action: automation.turn_off
+                target: {entity_id: automation.follow_heat_pump_action}
+                data: {stop_actions: true}
+              - action: climate.set_hvac_mode
+                target: {entity_id: climate.hallen}
+                data: {hvac_mode: "off"}
+              - action: climate.set_hvac_mode
+                target:
+                  entity_id: [climate.arbetsrum_kallaren, climate.arbetsrum_uppe, climate.sovrum, climate.gastrum]
+                data: {hvac_mode: "off"}
+              - action: climate.set_temperature
+                target:
+                  entity_id: [climate.gillestugan, climate.tvattstugan, climate.vardagsrum, climate.badrum]
+                data: {temperature: 10}
+          - conditions: "{{ wanted == 'district_heating' }}"
+            sequence:
+              - action: automation.turn_off
+                target: {entity_id: automation.follow_heat_pump_action}
+                data: {stop_actions: true}
+              - action: climate.set_hvac_mode
+                target: {entity_id: climate.hallen}
+                data: {hvac_mode: "off"}
+              - action: climate.set_temperature
+                target:
+                  entity_id: [climate.arbetsrum_kallaren, climate.arbetsrum_uppe, climate.sovrum, climate.gastrum]
+                data: {hvac_mode: heat, temperature: 22}
+              - action: climate.set_temperature
+                target:
+                  entity_id: [climate.gillestugan, climate.tvattstugan, climate.vardagsrum, climate.badrum]
+                data: {temperature: 22}
+          - conditions: "{{ wanted == 'heat_pump' }}"
+            sequence:
+              - action: automation.turn_off
+                target: {entity_id: automation.follow_heat_pump_action}
+                data: {stop_actions: true}
+              - action: script.heating_test_restore
+              - action: climate.set_temperature
+                target: {entity_id: climate.hallen}
+                data: {hvac_mode: heat, temperature: 22}
+          - conditions: "{{ wanted == 'done' }}"
+            sequence:
+              - action: script.heating_test_restore
+              - action: climate.set_temperature
+                target: {entity_id: climate.hallen}
+                data: {temperature: 22}
+              - action: automation.turn_on
+                target: {entity_id: automation.follow_heat_pump_action}
+              - action: automation.trigger
+                target: {entity_id: automation.follow_heat_pump_action}
+                data: {skip_condition: false}

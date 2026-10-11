@@ -18,7 +18,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `custom_components/energy_planner/config_flow.py` | Setup asks for `nordpool_entity_id`; the options flow chooses the grid tariff (flat, a preset or custom YAML) |
 | `custom_components/energy_planner/services.yaml`, `translations/en.json` | Service descriptions |
 | `tests/planner/` | Tests for the basic planner, the price peak planner, the forecast functions and the forecast glue. The `.md`/`.txt`/`ARCHITECTURE.py` files in `tests/` are documentation |
-| `examples/` | Lovelace cards, `python_script`s and automations that consume the schedule; `follow_battery_action.py` + `_automation.yml` follow the action sensor and only write changed settings; `follow_heat_pump_action_automation.yml` switches `climate.hallen` |
+| `examples/` | Scripts, automations and cards that consume the schedule, by topic: `battery/` (the inverter scripts, incl. Remote Dispatch and its test), `ev/`, `heat_pump/`, `comfort/` (the heating test package), `dashboard/`; index in `examples/README.md` |
 | `energy_planner_extras.yaml`, `add_slot_form.yml`, `Basic_config_card.yml` | HA package + cards for the manual "add slot" form |
 | `local_deploy.sh` | Copies the component into `~/projects/ha_demo/config` and restarts its docker compose |
 
@@ -228,7 +228,7 @@ dynamic planner writes one `auto` slot, and `sensor.energy_planner_battery_actio
 resolves what to do now (`battery_action.resolve`): a running slot with a real state
 (manual, or from another planner) wins; an `auto` slot follows the plan (self-use if
 the plan is older than 30 min or ends); otherwise self-use. An inverter script follows
-the action sensor (`examples/follow_battery_action.py`). With the dynamic planner, manual
+the action sensor (`examples/battery/follow_battery_action.py`). With the dynamic planner, manual
 slots are also forced into the plan (`forced`), so it plans around them; with the other
 planners the plan is a preview and ignores them.
 
@@ -317,7 +317,7 @@ planners the plan is a preview and ignores them.
   (`battery_voltage_sensor`), SOC (`battery_soc_sensor`), round-trip efficiency
   `price_peak_efficiency_factor`. About 1 s per day of quarters, run in the executor.
 - The inverter follows the import target while charging and in `hold` with Solis peak
-  shaving (`examples/follow_battery_action.py`; works while no time-of-use window is
+  shaving (`examples/battery/follow_battery_action.py`; works while no time-of-use window is
   active): `number.solis_s6_eh1p_peak_max_usable_grid_power` = the import target, and
   `number.solis_s6_eh1p_peak_baseline_soc` = the SOC to charge to (for `hold` at most
   the live SOC, so it does not charge from the grid). Below the max grid power the
@@ -389,7 +389,7 @@ heat: district heating at the season's energy price against electricity / COP.
   against the margin and the heating limit (source `fallback`); without prices or
   an outdoor temperature (just after a restart) no state (source `none`), so the
   automation leaves the heat pump alone.
-  `examples/follow_heat_pump_action_automation.yml` sets `climate.hallen` to `heat` or
+  `examples/heat_pump/follow_heat_pump_action_automation.yml` sets `climate.hallen` to `heat` or
   `off` (only from `off` / `heat`, so cooling is left alone); the target stays at
   24 °C for now, to see how much it changes the use.
 
@@ -426,7 +426,7 @@ horizon), `planned_kwh`, `missing_kwh`.
 - `sensor.energy_planner_ev_action`: `charge`/`wait` from the plan (source `plan`,
   `until`, `power_kw`); without a fresh plan `charge` (source `fallback`, the car
   charges as without the planner); unplugged no state.
-  `examples/follow_ev_action_automation.yml` starts/stops a Zaptec with its charging
+  `examples/ev/follow_ev_action_automation.yml` starts/stops a Zaptec with its charging
   switch.
 - The owner's parents (Oct 2026): Tesla on a Zaptec (`sensor.garaget_laddstatus`,
   `sensor.garaget_session_total_charge`, `switch.garaget_laddar`), plugged in about
@@ -471,7 +471,7 @@ three-phase and balanced: the car charger's current and the battery's grid charg
   of its phase sensors counts, since MQTT does not write an unchanged value).
   `sensor.energy_planner_fuse_guard`: state the room (A), attributes `grid_limit_kw`,
   `ev_current_a` (None without `ev_charger_current_number`), `phase_a`, `house_a`, `over_a`, `updated`.
-- `examples/follow_battery_action.py` caps the import target at `grid_limit_kw` (a
+- `examples/battery/follow_battery_action.py` caps the import target at `grid_limit_kw` (a
   guard older than 2 min is ignored) and its automation triggers on it;
   `follow_ev_action_automation.yml` sets the charger's current and pauses at 0. Not
   covered: `self_use` (the battery already covers the load) and manual time-of-use
@@ -514,7 +514,8 @@ Last winter's Tado data: with the valve closed rooms cool 0.03-0.10 °C/h at 20 
 cooling it is 48-100 h, see below); with it fully open they rise at most about 0.3 °C/h, some
 not at all in the cold (Elise's room, the basement office), so the radiators, not the
 control, limit setbacks. The heat pump is the only fast source. A weekend step test
-(2026-10-09 - 11, `packages/heating_test.yaml` in HA, phase in
+(2026-10-09 - 11, `packages/heating_test.yaml` in HA, a copy in
+`examples/comfort/heating_test_package.yaml`, phase in
 `input_select.heating_test_phase`): everything off, then district heating only, then
 the heat pump only, to fit the rooms and how heat spreads. Results in
 `docs/heating_step_test_2026_10.md`: with the whole house cooling, the rooms above

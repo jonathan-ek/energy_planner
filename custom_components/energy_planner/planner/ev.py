@@ -4,7 +4,7 @@ Pure functions, no Home Assistant imports. While the car is plugged in, the batt
 plan (battery_plan.py) plans it together with the battery
 (`battery_optimizer.Vehicle`): the cheapest quarters until the ready time.
 `sensor.energy_planner_ev_action` says whether to charge now, and an automation
-makes the charger follow it (examples/follow_ev_action_automation.yml).
+makes the charger follow it (examples/ev/follow_ev_action_automation.yml).
 
 The need is (charge limit - SOC) x battery capacity when the car reports both (e.g.
 ESPHome Tesla BLE). Otherwise it is the largest recent charging night from the

@@ -1,4 +1,4 @@
-# Runs examples/follow_battery_action.py (copy it to config/python_scripts/).
+# Runs follow_battery_action.py (copy it to config/python_scripts/).
 #
 # Safety switch: create a toggle helper input_boolean.follow_battery_action
 # ("Följ batteriplanen"). While it is on this automation controls the inverter, so

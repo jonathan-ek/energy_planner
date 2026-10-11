@@ -31,7 +31,7 @@ owner's inverter.
 
 ## Test 1: grid and battery modes (22:10-22:28, dark, house ~1.0-1.2 kW, SOC 29 %)
 
-`script.solis_dispatch_test` (`~/solis_dispatch_test.yaml`), a sample every 30 s.
+`script.solis_dispatch_test` (`examples/battery/solis_dispatch_test.yaml`), a sample every 30 s.
 Inverter meter `sensor.solis_s6_eh1p_grid_power_net` (+ import) and the HAN meter
 agreed within ~50 W; battery `sensor.solis_s6_eh1p_battery_power_net` (+ discharge).
 
@@ -83,11 +83,12 @@ off.
 
 ## How it is used
 
-`examples/follow_battery_action.py` with `DISPATCH = True` sends `battery_charge` with
+`examples/battery/follow_battery_action.py` with `DISPATCH = True` sends `battery_charge` with
 `import_limit_watts` = the import target (capped by the fuse guard) for the plan's
 `charge`, and `battery_discharge` (current × battery voltage, `soc_min` = the target)
 for `sell`; everything else uses the inverter's own modes as before. At the owner's
 it runs as `python_scripts/follow_battery_action_dispatch.py` from the automation
-"Follow battery action (dispatch)"; the old script and `automation.update_battery_action`
+"Follow battery action (dispatch)"
+(`examples/battery/follow_battery_action_dispatch_automation.yml`); the old script and `automation.update_battery_action`
 stay as the fallback: turn the dispatch automation off and the old one on, and the
 failsafe ends any dispatch within 3 minutes.

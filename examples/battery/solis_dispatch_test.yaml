@@ -1,0 +1,194 @@
+# Remote Dispatch test for the owner's Solis S6-EH3P (5-10 kW; solis_modbus 4.2.6, configured as S6-EH1P)
+#
+# Checked against the owner's HA (2026-10-11): 34502 reads 43605 (0xAA55), the
+# function map 1; the inverter's own meter is sensor.solis_s6_eh1p_grid_power_net
+# (positive = import; meter_total_active_power has the opposite sign), the battery
+# sensor.solis_s6_eh1p_battery_power_net (positive = discharge, negative = charge;
+# battery_power is always positive); the HAN meter is logged too. The battery
+# follow automation is automation.update_battery_action ("Follow battery action").
+#
+# Run 2026-10-11, results in docs/solis_remote_dispatch_2026_10.md.
+#
+# Paste both scripts into scripts.yaml (or Settings > Scripts > three dots > Edit in
+# YAML, one script at a time) and run script.solis_dispatch_test. It takes about
+# 25 minutes and writes one logbook entry every 30 s (Logbook, filter on
+# "Dispatch test"). It turns automation.update_battery_action off while it runs
+# and back on at the end, and ends with solis_dispatch_stop.
+#
+# Check before running:
+# - that no time-of-use window is active (slots 00:00-00:00) and the peak shaving
+#   automations ("Peak +", "Peak -1") are still off
+# - SOC between about 30 and 90 % (the tests charge at most ~3 kW for a few minutes,
+#   step 3 discharges)
+# - the time: steps 4 and 5 import up to about 4 kW for a few minutes, which can raise
+#   this month's power peak (day 06-23: 23 kr/kW in Oct). After 23:00 the night peak
+#   is 8 kr/kW, or run it while the PV covers the charging.
+#
+# If something looks wrong: run the "Stop remote dispatch" action
+# (solis_modbus.solis_dispatch_stop); the failsafe also ends every step within
+# 5 minutes by itself. If the script is stopped halfway, turn
+# automation.update_battery_action back on by hand.
+#
+# Steps (the expected result in brackets):
+#  0  read 34502-34504 and the 44100 block           (34502 = 43605 = 0xAA55)
+#  1  baseline, no dispatch, 1 min
+#  2  grid_import 1000 W, grid charging allowed, 3 min  (meter ~ +1000 W, the battery
+#     takes or covers the rest)
+#  3  grid_import 0 W, 2 min                          (meter ~ 0)
+#  4  battery_charge 3000 W, no import limit, 3 min   (battery ~ 3000 W charge)
+#  5  battery_charge 3000 W, import limit 1500 W, 3 min  (KEY QUESTION: is the
+#     charging cut so the import stays at ~1500 W?)
+#  6  grid_import 500 W with failsafe 2 min, not refreshed, 4 min  (back to normal
+#     operation about 2 min in: running status 34504 changes, meter changes). Each
+#     solis_dispatch call rewrites the import/export limits (omitted = off), so
+#     step 5's limit does not carry over.
+#  7  solis_dispatch_stop, read the registers again, 1 min baseline
+
+solis_dispatch_sample:
+  alias: Dispatch test sample
+  mode: queued
+  fields:
+    step:
+      description: Step name for the log
+    samples:
+      description: Number of 30 s samples
+  sequence:
+    - repeat:
+        count: "{{ samples }}"
+        sequence:
+          - action: solis_modbus.solis_read_register
+            continue_on_error: true
+            data:
+              address: 34504
+              count: 1
+              register_type: input
+            response_variable: status
+          - action: logbook.log
+            data:
+              name: Dispatch test
+              message: >-
+                {{ step }} #{{ repeat.index }}:
+                inverter meter {{ states(meter) }} W (+import),
+                HAN {{ ((states(han_import) | float(0) - states(han_export) | float(0)) * 1000) | round }} W,
+                battery {{ states(battery) }} W (+discharge),
+                soc {{ states(soc) }} %,
+                load {{ states(load) }} W,
+                pv {{ states(pv) }} W,
+                34504 {{ status | default('?') }}
+          - delay: "00:00:30"
+  variables:
+    meter: sensor.solis_s6_eh1p_grid_power_net
+    han_import: sensor.aktiv_effekt_uttag_momentan_trefaseffekt
+    han_export: sensor.aktiv_effekt_inmatning_momentan_trefaseffekt
+    battery: sensor.solis_s6_eh1p_battery_power_net
+    soc: sensor.solis_s6_solis_battery_soc
+    load: sensor.solis_s6_solis_household_load_power
+    pv: sensor.solis_s6_solis_total_pv_power
+
+solis_dispatch_test:
+  alias: Dispatch test
+  mode: single
+  sequence:
+    - variables:
+        follow: automation.update_battery_action
+        was_following: "{{ is_state(follow, 'on') }}"
+        soc_now: "{{ states('sensor.solis_s6_solis_battery_soc') | int(50) }}"
+        soc_max: "{{ [soc_now + 10, 100] | min }}"
+    - action: automation.turn_off
+      target:
+        entity_id: "{{ follow }}"
+      data:
+        stop_actions: true
+    # 0: capability and the dispatch registers
+    - action: solis_modbus.solis_read_register
+      data: {address: 34502, count: 3, register_type: input}
+      response_variable: capability
+    - action: solis_modbus.solis_read_register
+      data: {address: 44100, count: 13, register_type: holding}
+      response_variable: block
+    - action: logbook.log
+      data:
+        name: Dispatch test
+        message: "0: 34502-34504 {{ capability }}, 44100-44112 {{ block }}"
+    # 1: baseline
+    - action: script.solis_dispatch_sample
+      data: {step: "1 baseline", samples: 2}
+    # 2: hold the import at 1 kW
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: grid_import
+        power_watts: 1000
+        allow_grid_charge: true
+        soc_min: 20
+        soc_max: "{{ soc_max }}"
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "2 grid_import 1000", samples: 6}
+    # 3: hold the import at 0
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: grid_import
+        power_watts: 0
+        allow_grid_charge: true
+        soc_min: 20
+        soc_max: "{{ soc_max }}"
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "3 grid_import 0", samples: 4}
+    # 4: charge at 3 kW
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: battery_charge
+        power_watts: 3000
+        allow_grid_charge: true
+        soc_min: 20
+        soc_max: "{{ soc_max }}"
+        failsafe_minutes: 5
+    - action: script.solis_dispatch_sample
+      data: {step: "4 battery_charge 3000", samples: 6}
+    # 5: charge at 3 kW with the import capped at 1.5 kW
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: battery_charge
+        power_watts: 3000
+        allow_grid_charge: true
+        soc_min: 20
+        soc_max: "{{ soc_max }}"
+        import_limit_watts: 1500
+        failsafe_minutes: 5
+    - action: solis_modbus.solis_read_register
+      data: {address: 44100, count: 13, register_type: holding}
+      response_variable: block
+    - action: logbook.log
+      data:
+        name: Dispatch test
+        message: "5: 44100-44112 {{ block }}"
+    - action: script.solis_dispatch_sample
+      data: {step: "5 battery_charge 3000, limit 1500", samples: 6}
+    # 6: the failsafe (2 min, not refreshed)
+    - action: solis_modbus.solis_dispatch
+      data:
+        mode: grid_import
+        power_watts: 500
+        allow_grid_charge: true
+        soc_min: 20
+        soc_max: "{{ soc_max }}"
+        failsafe_minutes: 2
+    - action: script.solis_dispatch_sample
+      data: {step: "6 failsafe 2 min", samples: 8}
+    # 7: release and check what is left set
+    - action: solis_modbus.solis_dispatch_stop
+    - action: solis_modbus.solis_read_register
+      data: {address: 44100, count: 13, register_type: holding}
+      response_variable: block
+    - action: logbook.log
+      data:
+        name: Dispatch test
+        message: "7: after stop 44100-44112 {{ block }}"
+    - action: script.solis_dispatch_sample
+      data: {step: "7 after stop", samples: 2}
+    - if: "{{ was_following }}"
+      then:
+        - action: automation.turn_on
+          target:
+            entity_id: "{{ follow }}"
