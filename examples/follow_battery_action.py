@@ -18,6 +18,14 @@
 # are turned off first. A manual `charge` or `pause` slot has no import target and
 # uses the time-of-use windows instead. The "Peak +/-" automations (slot 1) should be
 # off while this runs, peak shaving replaces them.
+#
+# With DISPATCH (Solis Remote Dispatch, firmware where register 34502 reads 0xAA55,
+# solis_modbus 4.2+), `charge` with an import target and `sell` use the inverter's
+# real-time dispatch instead (docs/solis_remote_dispatch_2026_10.md): peak shaving
+# does not limit grid charging on the S6-EH3P (19 kW with a 7.8 kW max usable grid
+# power), dispatch's import limit does. The command is repeated every minute and has
+# a failsafe of DISPATCH_FAILSAFE minutes: if this script stops (HA down, the
+# automation off), the inverter returns to its own mode by itself.
 
 # DO NOT COPY the following section, it is only used to prevent errors in the IDE
 from homeassistant.core import HomeAssistant
@@ -58,6 +66,15 @@ DISCHARGE_PERIOD = None
 BATTERY_SOC = "sensor.solis_s6_solis_battery_soc"
 PV_POWER = "sensor.solis_s6_solis_total_pv_power"  # W
 HOUSE_POWER = "sensor.solis_s6_solis_household_load_power"  # W
+
+# Remote Dispatch, see the top; False: peak shaving and the time-of-use windows only
+DISPATCH = False
+DISPATCH_STATE = "sensor.follow_battery_dispatch"  # the last command, set here
+DISPATCH_FAILSAFE = 3  # minutes
+DISPATCH_REFRESH = 50  # s between repeats of an unchanged command
+MAX_CHARGE_POWER = 10000  # W, the inverter and the BMS limit it further
+MAX_DISCHARGE_POWER = 10000  # W, for a `sell` without a current
+BATTERY_VOLTAGE = "sensor.solis_s6_solis_battery_voltage"  # V
 
 OFF = "00:00"
 # W of margin before leaving or returning to a mode after a fallback
@@ -150,7 +167,28 @@ if (
 ):
     grid_limit = min(grid_limit, int(guard_kw * 10) * 100)
 
-if state == "charge" and soc is not None:
+dispatch = None  # the solis_dispatch call's data, None: not used
+if DISPATCH and state == "charge" and soc is not None and grid_limit is not None:
+    # Charge from PV and the grid with the import capped at the target; the inverter
+    # stops at soc_max
+    dispatch = {
+        "mode": "battery_charge",
+        "power_watts": MAX_CHARGE_POWER,
+        "import_limit_watts": grid_limit,
+        "allow_grid_charge": True,
+        "soc_max": int(soc),
+    }
+elif DISPATCH and state == "sell" and soc is not None:
+    power = current * get_float(BATTERY_VOLTAGE) if current else MAX_DISCHARGE_POWER
+    dispatch = {
+        "mode": "battery_discharge",
+        "power_watts": int(power / 100) * 100,
+        "soc_min": int(soc),
+    }
+
+if dispatch is not None:
+    pass  # all the inverter's own modes off below
+elif state == "charge" and soc is not None:
     if grid_limit is not None:
         # Charge from PV and the grid up to the import target
         peak = (grid_limit, soc)
@@ -178,6 +216,11 @@ elif state == "sell-excess" and soc is not None:
         discharge = (0, soc)
 
 # Turn off what is not used first, so two modes are never active together
+sent = hass.states.get(DISPATCH_STATE)
+if dispatch is None and sent is not None and sent.state == "on":
+    logger.info("Stopping remote dispatch")
+    hass.services.call("solis_modbus", "solis_dispatch_stop", {}, False)
+    hass.states.set(DISPATCH_STATE, "off", {"friendly_name": "Battery dispatch"})
 if charge is None:
     if CHARGE_PERIOD:
         set_switch(CHARGE_PERIOD, False)
@@ -214,3 +257,24 @@ if peak is not None:
 
 # Curtail the PV surplus instead of exporting it (negative export price)
 set_switch(FEED_IN_LIMIT, state == "discard-excess")
+
+if dispatch is not None:
+    dispatch["failsafe_minutes"] = DISPATCH_FAILSAFE
+    command = str(dispatch)
+    last = sent.attributes if sent is not None and sent.state == "on" else {}
+    sent_at = dt_util.parse_datetime(last.get("sent") or "")
+    age = (dt_util.now() - sent_at).total_seconds() if sent_at else None
+    # Repeated so the failsafe does not end it, but not on every guard update
+    if last.get("command") != command or age is None or age >= DISPATCH_REFRESH:
+        if last.get("command") != command:
+            logger.info("Remote dispatch %s", command)
+        hass.services.call("solis_modbus", "solis_dispatch", dispatch, False)
+        hass.states.set(
+            DISPATCH_STATE,
+            "on",
+            {
+                "friendly_name": "Battery dispatch",
+                "command": command,
+                "sent": dt_util.now().isoformat(),
+            },
+        )

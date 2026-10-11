@@ -321,7 +321,12 @@ planners the plan is a preview and ignores them.
   active): `number.solis_s6_eh1p_peak_max_usable_grid_power` = the import target, and
   `number.solis_s6_eh1p_peak_baseline_soc` = the SOC to charge to (for `hold` at most
   the live SOC, so it does not charge from the grid). Below the max grid power the
-  inverter charges up to the baseline; above it the battery covers the load.
+  inverter charges up to the baseline; above it the battery covers the load. The
+  S6-EH3P does not keep to the max grid power while charging (19 kW from the grid with
+  it at 7.8 kW, Oct 2026), so with `DISPATCH = True` the script charges and sells
+  through Solis Remote Dispatch instead (`battery_charge` with an import limit,
+  `battery_discharge`, repeated every minute with a 3 min failsafe; needs register
+  34502 = 0xAA55). Tests and register map: `docs/solis_remote_dispatch_2026_10.md`.
 
 ## Heat pump
 
@@ -470,7 +475,9 @@ three-phase and balanced: the car charger's current and the battery's grid charg
   guard older than 2 min is ignored) and its automation triggers on it;
   `follow_ev_action_automation.yml` sets the charger's current and pauses at 0. Not
   covered: `self_use` (the battery already covers the load) and manual time-of-use
-  charge slots without an import target.
+  charge slots without an import target. Peak shaving does not limit the S6-EH3P's
+  grid charging (see "Battery plan"), so the cap only works with the script's
+  Remote Dispatch, which the parents' firmware lacks so far.
 - The parents: phases `sensor.l{1,2,3}_aktiv_effekt_uttag_momentan_effekt` /
   `_inmatning_` (HAN, kW), inverter `sensor.solis_s6_solis_ac_grid_port_power` (W,
   negative while charging) and `sensor.solis_s6_eh3p_grid_power_net` (W), car `sensor.garaget_current_phase_{1,2,3}`, setting
