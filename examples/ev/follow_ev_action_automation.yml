@@ -29,11 +29,13 @@ triggers:
   - trigger: state
     entity_id:
       - sensor.energy_planner_ev_action
-  # A car just plugged in starts charging at once: apply the action right away
+  # A car just plugged in starts charging at once, and the switch only turns on a
+  # moment after the action is set (it is unavailable until then): apply the action
+  # when charging starts
   - trigger: state
     entity_id:
-      - sensor.garaget_laddstatus
-    from: disconnected
+      - switch.garaget_laddar
+    to: "on"
   - trigger: time_pattern
     minutes: /15
   - trigger: state
