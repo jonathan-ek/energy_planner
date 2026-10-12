@@ -56,6 +56,9 @@ FEED_IN_LIMIT = "switch.solis_s6_eh1p_grid_feed_in_power_limit_switch"
 PEAK_SHAVING = "switch.solis_s6_eh1p_peak_shaving_mode"
 PEAK_GRID_POWER = "number.solis_s6_eh1p_peak_max_usable_grid_power"  # W
 PEAK_BASELINE_SOC = "number.solis_s6_eh1p_peak_baseline_soc"  # %
+# The most the inverter accepts as max usable grid power (W); it keeps the old
+# value when sent more (the S6-EH3P 10K: 10000). None: the entity's max
+PEAK_GRID_POWER_MAX = None
 # Inverters with an enable switch for time-of-use and each window (e.g. the
 # S6-EH3P: switch.time_of_use, switch.solis_s6_solis_grid_connected_charging_period_6
 # and ..._discharging_period_6); None where the times alone set the window (EH1P)
@@ -73,7 +76,7 @@ DISPATCH_STATE = "sensor.follow_battery_dispatch"  # the last command, set here
 DISPATCH_FAILSAFE = 3  # minutes
 DISPATCH_REFRESH = 50  # s between repeats of an unchanged command
 MAX_CHARGE_POWER = 10000  # W, the inverter and the BMS limit it further
-MAX_DISCHARGE_POWER = 10000  # W, for a `sell` without a current
+MAX_DISCHARGE_POWER = 10000  # W, the most a `sell` asks for
 BATTERY_VOLTAGE = "sensor.solis_s6_solis_battery_voltage"  # V
 
 OFF = "00:00"
@@ -179,7 +182,9 @@ if DISPATCH and state == "charge" and soc is not None and grid_limit is not None
         "soc_max": int(soc),
     }
 elif DISPATCH and state == "sell" and soc is not None:
-    power = current * get_float(BATTERY_VOLTAGE) if current else MAX_DISCHARGE_POWER
+    power = MAX_DISCHARGE_POWER
+    if current:
+        power = min(current * get_float(BATTERY_VOLTAGE), power)
     dispatch = {
         "mode": "battery_discharge",
         "power_watts": int(power / 100) * 100,
@@ -251,7 +256,10 @@ if discharge is not None:
     if DISCHARGE_PERIOD:
         set_switch(DISCHARGE_PERIOD, True)
 if peak is not None:
-    set_number(PEAK_GRID_POWER, peak[0])
+    grid_power = peak[0]
+    if PEAK_GRID_POWER_MAX is not None:
+        grid_power = min(grid_power, PEAK_GRID_POWER_MAX)
+    set_number(PEAK_GRID_POWER, grid_power)
     set_number(PEAK_BASELINE_SOC, peak[1])
     set_switch(PEAK_SHAVING, True)
 
