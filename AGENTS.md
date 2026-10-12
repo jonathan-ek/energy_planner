@@ -171,7 +171,8 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   parents' house (electric heating, 595 days 2025-01 - 2026-09): daily error 21% ->
   18%, Nov-Mar 18% -> 13%, summer unchanged. The owner's house keeps `profile`.
 - **PV** = Open-Meteo `global_tilted_irradiance` per panel plane (planes, kWp and
-  location read from the Forecast.Solar config, `_solar_planes`), averaged over the
+  location read from the Forecast.Solar config, `_solar_planes`; a disabled entry is
+  left out, e.g. panels with a fault), averaged over the
   models in `OPEN_METEO_MODELS` (MET Nordic, ECMWF, ICON), derated for cell
   temperature, summed over planes, then interpolated to quarters from mid-hour points
   (keeps the hourly energy). One request per plane to the previous-runs API returns the
@@ -579,7 +580,14 @@ under it.
 The owner's brother uses E.ON Energidistribution (Virserum), preset `eon_20a` from his
 price list: 32.30 öre/kWh transfer fee (+ 45 öre energy tax, assumed), 835 kr/month,
 no power charge, selling spot + 10 öre. He has separate meters on the spa and the
-ground-source heat pump, which could later feed load patterns. The model covers the common Swedish variants: mean of the N highest hourly means per
+ground-source heat pump, which could later feed load patterns. His forecast (backtest
+Oct 2026): the load follows the outdoor temperature (about -2.2 kWh/day per °C, 20
+kWh/day above 15 °C, 66 below 0), so he uses the `temperature` model (daily error 22% ->
+19%, Nov-Mar 18% -> 14%), with the Wallbox power as `forecast_ev_sensor` and, until he
+has an outdoor sensor, a template sensor from his SMHI weather entity (history imported
+from Open-Meteo). PV: the inverter clips at about 10 kW, "Platta" is shaded in the
+afternoon (`hourly` calibration) and "Frigge 1/2" seem faulty, so their Forecast.Solar
+entries are disabled. The model covers the common Swedish variants: mean of the N highest hourly means per
 month, optionally at most one per day, limited by months, weekdays and hours.
 Holidays are not detected.
 

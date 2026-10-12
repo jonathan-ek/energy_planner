@@ -121,10 +121,13 @@ def _solar_planes(
     """Return the location and the planes (tilt, compass azimuth, kWp).
 
     Taken from the Forecast.Solar configuration, so the planes are only set up once.
+    A disabled entry is left out (e.g. panels with a fault), as in the fallback.
     """
     location = None
     planes = []
     for entry in hass.config_entries.async_entries("forecast_solar"):
+        if entry.disabled_by is not None:
+            continue
         latitude = entry.data.get("latitude")
         longitude = entry.data.get("longitude")
         if latitude is None or longitude is None:

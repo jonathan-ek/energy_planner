@@ -411,21 +411,31 @@ async def test_pv_falls_back_to_forecast_solar(mock_hass):
 
 
 def test_solar_planes_from_forecast_solar():
-    """Test reading location and planes from the Forecast.Solar entries."""
-    with_subentries = MagicMock(data={"latitude": 58.4, "longitude": 15.6}, options={})
+    """Test reading location and planes from the Forecast.Solar entries.
+
+    A disabled entry is left out.
+    """
+    location = {"latitude": 58.4, "longitude": 15.6}
+    with_subentries = MagicMock(data=location, options={}, disabled_by=None)
     with_subentries.get_subentries_of_type.return_value = [
         SimpleNamespace(data={"declination": 27, "azimuth": 75, "modules_power": 6000})
     ]
     old_style = MagicMock(
-        data={"latitude": 58.4, "longitude": 15.6},
+        data=location,
         options={"declination": 3, "azimuth": 345, "modules_power": 5000},
+        disabled_by=None,
     )
     old_style.get_subentries_of_type.return_value = []
-    no_location = MagicMock(data={}, options={})
+    no_location = MagicMock(data={}, options={}, disabled_by=None)
+    disabled = MagicMock(data=location, options={}, disabled_by="user")
+    disabled.get_subentries_of_type.return_value = [
+        SimpleNamespace(data={"declination": 22, "azimuth": 78, "modules_power": 2250})
+    ]
     hass = MagicMock()
     hass.config_entries.async_entries.return_value = [
         no_location,
         with_subentries,
+        disabled,
         old_style,
     ]
     location, planes = dynamic_planner._solar_planes(hass)
