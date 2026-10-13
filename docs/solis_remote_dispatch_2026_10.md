@@ -96,10 +96,31 @@ set, so steps 1 and 2 ran in it; the test now clears the windows first.
 - Leaving the dispatch went straight to self-use, without the short grid charge seen
   after a discharge.
 
+## Test 4: `self_consumption` outside a time-of-use window (2026-10-13 12:36-12:50)
+
+The plan in self-use, no time-of-use window, peak shaving off, the battery taking the
+surplus (-1.6 to -2.2 kW) before each run; PV 2.7-5.3 kW, the house 1.4-1.6 kW,
+SOC 23-24 %. Commands from the HA API, a sample every 20 s.
+
+| Command | Result |
+| --- | --- |
+| `self_consumption`, SOC 20-100 (power 0, the integration's default) | **the battery 0, the whole surplus exported** (1.8-3.7 kW), 34504 = 2, for 3 min and again for 1.5 min |
+| `feed_in_priority` | the same |
+| `self_consumption`, `power_watts` 5000 | the same: the battery 0, export 1.4-1.6 kW |
+| `feed_in_priority`, `power_watts` 5000, the house above the PV for 40 s (2.5-2.9 kW) | **the battery 0, import 0.12 kW**: it does not discharge either |
+| `solis_dispatch_stop` | self-use again within 20-40 s, the battery -0.5 to -1.75 kW |
+
+- On this firmware modes 5 and 6 (44105) do the same: the battery idles, PV goes to
+  the house and the rest to the grid, the grid covers what the PV does not. So
+  `self_consumption` is no replacement for self-use: the script keeps the inverter's
+  own mode for it (no dispatch).
+- `feed_in_priority` works for `sell-excess` while the PV covers the house; below
+  that it imports instead of discharging, unlike the script's `sell-excess` (which
+  falls back to self-use). That only matters if the plan expects the battery to cover
+  the house then.
+
 ## Not tested yet
 
-- `self_consumption` with room in the battery outside a time-of-use window (step 2
-  above): does it charge from the surplus like self-use?
 - `script.solis_dispatch_hold_test` (evening): hold through `grid_import` without
   grid charging and `battery_hold`, `battery_charge` with the house above the import
   limit, and discharging at `soc_min`.
