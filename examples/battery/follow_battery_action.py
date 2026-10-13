@@ -59,6 +59,9 @@ PEAK_BASELINE_SOC = "number.solis_s6_eh1p_peak_baseline_soc"  # %
 # The most the inverter accepts as max usable grid power (W); it keeps the old
 # value when sent more (the S6-EH3P 10K: 10000). None: the entity's max
 PEAK_GRID_POWER_MAX = None
+# In `hold` the baseline is kept this far below the SOC: the S6-EH3P also charges
+# from the grid at the baseline (29 -> 31 % at 8.9 kW with it at 29, Oct 2026)
+HOLD_SOC_MARGIN = 3
 # Inverters with an enable switch for time-of-use and each window (e.g. the
 # S6-EH3P: switch.time_of_use, switch.solis_s6_solis_grid_connected_charging_period_6
 # and ..._discharging_period_6); None where the times alone set the window (EH1P)
@@ -202,11 +205,11 @@ elif state == "charge" and soc is not None:
 elif state == "pause":
     if grid_limit is not None:
         # Keep the battery, it only covers the load above the import target. The
-        # baseline is not raised above the battery's SOC, so it does not charge from
-        # the grid; it is only lowered when it is above it.
+        # baseline is kept HOLD_SOC_MARGIN below the battery's SOC, so it does not
+        # charge from the grid; it is only lowered, not raised.
         baseline = int(get_float(PEAK_BASELINE_SOC, 100.0))
-        if baseline > battery_soc:
-            baseline = int(battery_soc)
+        if baseline > battery_soc - HOLD_SOC_MARGIN:
+            baseline = int(battery_soc) - HOLD_SOC_MARGIN
         peak = (grid_limit, baseline)
     else:
         charge = (0, soc if soc is not None else 100)
