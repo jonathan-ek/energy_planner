@@ -143,10 +143,10 @@ and peak shaving off:
 
 ## How it is used
 
-`examples/battery/follow_battery_action.py` with `DISPATCH = True` sends `battery_charge` with
-`import_limit_watts` = the import target (capped by the fuse guard) for the plan's
-`charge`, and `battery_discharge` (current × battery voltage, `soc_min` = the target)
-for `sell`; everything else uses the inverter's own modes as before. At the owner's
+`examples/battery/follow_battery_action.py` with `DISPATCH = True` runs every mode
+through dispatch as in the table above (`hold` as `grid_import` at the import target
+without grid charging, until the hold test says otherwise), with the inverter's
+time-of-use windows, peak shaving and feed-in limit off. At the owner's
 it runs as `python_scripts/follow_battery_action_dispatch.py` from the automation
 "Follow battery action (dispatch)"
 (`examples/battery/follow_battery_action_dispatch_automation.yml`); the old script and `automation.update_battery_action`

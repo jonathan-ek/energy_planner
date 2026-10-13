@@ -324,10 +324,12 @@ planners the plan is a preview and ignores them.
   the live SOC, so it does not charge from the grid). Below the max grid power the
   inverter charges up to the baseline; above it the battery covers the load. The
   S6-EH3P does not keep to the max grid power while charging (19 kW from the grid with
-  it at 7.8 kW, Oct 2026), so with `DISPATCH = True` the script charges and sells
-  through Solis Remote Dispatch instead (`battery_charge` with an import limit,
-  `battery_discharge`, repeated every minute with a 3 min failsafe; needs register
-  34502 = 0xAA55). Tests and register map: `docs/solis_remote_dispatch_2026_10.md`.
+  it at 7.8 kW, Oct 2026), so with `DISPATCH = True` the script runs every mode
+  through Solis Remote Dispatch instead (kept in RAM, not flash: `battery_charge` with
+  an import limit, `battery_discharge`, `hold` as `grid_import` without grid charging,
+  `feed_in_priority` for `sell-excess`, `self_consumption` with export limit 0 for a
+  full battery in `discard-excess`; self-use without dispatch; repeated every minute
+  with a 3 min failsafe; needs register 34502 = 0xAA55). Tests and register map: `docs/solis_remote_dispatch_2026_10.md`.
 
 ## Heat pump
 

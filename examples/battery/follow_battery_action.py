@@ -20,12 +20,24 @@
 # off while this runs, peak shaving replaces them.
 #
 # With DISPATCH (Solis Remote Dispatch, firmware where register 34502 reads 0xAA55,
-# solis_modbus 4.2+), `charge` with an import target and `sell` use the inverter's
-# real-time dispatch instead (docs/solis_remote_dispatch_2026_10.md): peak shaving
-# does not limit grid charging on the S6-EH3P (19 kW with a 7.8 kW max usable grid
-# power), dispatch's import limit does. The command is repeated every minute and has
-# a failsafe of DISPATCH_FAILSAFE minutes: if this script stops (HA down, the
-# automation off), the inverter returns to its own mode by itself.
+# solis_modbus 4.2+), every mode uses the inverter's real-time dispatch instead
+# (docs/solis_remote_dispatch_2026_10.md, "Modes through dispatch"), and the inverter
+# stays in its own self-use with no time-of-use window, peak shaving and the feed-in
+# limit off. Dispatch is kept in RAM, the other settings are written to flash, and
+# peak shaving does not limit grid charging on the S6-EH3P (19 kW with a 7.8 kW max
+# usable grid power), dispatch's import limit does:
+#   charge          battery_charge, import limit = the import target
+#   sell            battery_discharge down to the target
+#   pause (hold)    grid_import at the import target without grid charging (the
+#                   battery covers the load above it), battery_hold without a target
+#   sell-excess     feed_in_priority while the PV covers the house, else self-use
+#   discard-excess  self-use until the battery is full, then self_consumption with
+#                   export limit 0 (curtailing while the battery has room is not
+#                   supported: the plan empties it before negative prices)
+#   discharge       no dispatch, the inverter's self-use
+# The command is repeated every minute and has a failsafe of DISPATCH_FAILSAFE
+# minutes: if this script stops (HA down, the automation off), the inverter returns
+# to its own mode by itself.
 
 # DO NOT COPY the following section, it is only used to prevent errors in the IDE
 from homeassistant.core import HomeAssistant
@@ -81,6 +93,12 @@ DISPATCH_REFRESH = 50  # s between repeats of an unchanged command
 MAX_CHARGE_POWER = 10000  # W, the inverter and the BMS limit it further
 MAX_DISCHARGE_POWER = 10000  # W, the most a `sell` asks for
 BATTERY_VOLTAGE = "sensor.solis_s6_solis_battery_voltage"  # V
+# The lowest SOC `hold` lets the battery cover peaks down to (the plan's reserve may
+# be used then, see AGENTS.md "Battery plan")
+SHUTDOWN_SOC = "number.energy_planner_battery_shutdown_soc"
+# `discard-excess` curtails from this SOC, until it is FULL_HYSTERESIS lower
+FULL_SOC = 99
+FULL_HYSTERESIS = 2
 
 OFF = "00:00"
 # W of margin before leaving or returning to a mode after a fallback
@@ -184,6 +202,17 @@ if DISPATCH and state == "charge" and soc is not None and grid_limit is not None
         "allow_grid_charge": True,
         "soc_max": int(soc),
     }
+elif DISPATCH and state == "charge" and soc is not None:
+    # A manual charge slot: at its current, without an import limit
+    power = MAX_CHARGE_POWER
+    if current:
+        power = min(current * get_float(BATTERY_VOLTAGE), power)
+    dispatch = {
+        "mode": "battery_charge",
+        "power_watts": int(power / 100) * 100,
+        "allow_grid_charge": True,
+        "soc_max": int(soc),
+    }
 elif DISPATCH and state == "sell" and soc is not None:
     power = MAX_DISCHARGE_POWER
     if current:
@@ -193,8 +222,37 @@ elif DISPATCH and state == "sell" and soc is not None:
         "power_watts": int(power / 100) * 100,
         "soc_min": int(soc),
     }
+elif DISPATCH and state == "pause":
+    if grid_limit is not None:
+        # Import up to the target, the battery covers the load above it
+        dispatch = {
+            "mode": "grid_import",
+            "power_watts": grid_limit,
+            "allow_grid_charge": False,
+            "soc_min": int(get_float(SHUTDOWN_SOC, 10.0)),
+        }
+    else:
+        dispatch = {"mode": "battery_hold"}
 
-if dispatch is not None:
+last_mode = None  # the running dispatch mode, for the fallbacks' hysteresis
+sent = hass.states.get(DISPATCH_STATE)
+if sent is not None and sent.state == "on":
+    last_mode = sent.attributes.get("mode")
+surplus = get_float(PV_POWER) - get_float(HOUSE_POWER)
+if DISPATCH and state == "sell-excess":
+    # Export the PV surplus; self-use while the PV does not cover the house (in
+    # feed_in_priority the grid would cover it instead of the battery)
+    if surplus > (0 if last_mode == "feed_in_priority" else HYSTERESIS):
+        dispatch = {"mode": "feed_in_priority"}
+elif DISPATCH and state == "discard-excess":
+    # Self-use fills the battery; once it is full curtail the surplus, until the
+    # house takes more than the PV or the SOC drops
+    curtailing = last_mode == "self_consumption"
+    full = battery_soc >= (FULL_SOC - FULL_HYSTERESIS if curtailing else FULL_SOC)
+    if full and surplus > (0 if curtailing else HYSTERESIS):
+        dispatch = {"mode": "self_consumption", "export_limit_watts": 0}
+
+if dispatch is not None or DISPATCH:
     pass  # all the inverter's own modes off below
 elif state == "charge" and soc is not None:
     if grid_limit is not None:
@@ -219,12 +277,10 @@ elif state == "sell" and soc is not None:
         discharge = (current, soc)
 elif state == "sell-excess" and soc is not None:
     # Self-use while the PV does not cover the house
-    surplus = get_float(PV_POWER) - get_float(HOUSE_POWER)
     if surplus > (0 if discharging else HYSTERESIS):
         discharge = (0, soc)
 
 # Turn off what is not used first, so two modes are never active together
-sent = hass.states.get(DISPATCH_STATE)
 if dispatch is None and sent is not None and sent.state == "on":
     logger.info("Stopping remote dispatch")
     hass.services.call("solis_modbus", "solis_dispatch_stop", {}, False)
@@ -267,7 +323,7 @@ if peak is not None:
     set_switch(PEAK_SHAVING, True)
 
 # Curtail the PV surplus instead of exporting it (negative export price)
-set_switch(FEED_IN_LIMIT, state == "discard-excess")
+set_switch(FEED_IN_LIMIT, state == "discard-excess" and not DISPATCH)
 
 if dispatch is not None:
     dispatch["failsafe_minutes"] = DISPATCH_FAILSAFE
@@ -286,6 +342,7 @@ if dispatch is not None:
             {
                 "friendly_name": "Battery dispatch",
                 "command": command,
+                "mode": dispatch["mode"],
                 "sent": dt_util.now().isoformat(),
             },
         )
