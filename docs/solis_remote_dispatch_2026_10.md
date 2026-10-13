@@ -119,6 +119,21 @@ SOC 23-24 %. Commands from the HA API, a sample every 20 s.
   falls back to self-use). That only matters if the plan expects the battery to cover
   the house then.
 
+## Modes through dispatch (plan, 2026-10-13)
+
+Dispatch writes RAM only (per the integration), the other settings flash, so the aim
+is every mode through dispatch, with the inverter set once to self-use, time-of-use
+and peak shaving off:
+
+| Plan mode | Dispatch |
+| --- | --- |
+| `charge` | `battery_charge`, `import_limit_watts` = the import target (tested) |
+| `sell` | `battery_discharge`, `soc_min` = the target (tested; the window's end not yet) |
+| `self_use` | none: stopped, the inverter's own self-use (tested) |
+| `sell-excess` | `feed_in_priority` while the PV covers the house, else none (both tested) |
+| `discard-excess` | none until the battery is full, then `self_consumption` with `export_limit_watts` 0 (tested). With room in the battery the surplus is not curtailed: the plan empties the battery before negative prices, so it fills first, and curtailing while it has room is not supported |
+| `hold` | `battery_hold` with `import_limit_watts`, or `grid_import` without grid charging: the hold test |
+
 ## Not tested yet
 
 - `script.solis_dispatch_hold_test` (evening): hold through `grid_import` without
