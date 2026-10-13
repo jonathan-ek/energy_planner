@@ -70,19 +70,39 @@ off.
   probably the self-use loop settling; stopping from a charge or a grid import did
   not.
 
+## Test 3: in sunshine (2026-10-13 12:12-12:31, SOC 23 %)
+
+`script.solis_dispatch_sun_test`, PV 2.0-2.6 kW under thin cloud, the house about
+0.55-0.7 kW (the heat pump and other loads off for the test). Until 12:15 the battery
+script's `sell-excess` time-of-use window (discharge 00:00-12:15 at 0 A) was still
+set, so steps 1 and 2 ran in it; the test now clears the windows first.
+
+| Step | Command | Result |
+| --- | --- | --- |
+| 1 | baseline (the `sell-excess` window) | export 1.64 kW, the battery 0 |
+| 2 | `self_consumption`, SOC 20-100 | **the same: export 1.4-1.6 kW, the battery 0**, 34504 = 2. Inside the time-of-use window, so not a test of self-use; to repeat |
+| 3 | `feed_in_priority` (window over) | export 1.35-1.6 kW (all the surplus), the battery 0 |
+| 4 | `self_consumption`, `soc_max` = SOC now (23) | export 1.5-1.65 kW, the battery 0: at the window's end the surplus is exported |
+| 5 | as 4, `export_limit_watts` 0 | **PV curtailed 2.3 -> 0.7 kW, export 0 (±20 W)** within 30 s |
+| 6 | `battery_charge` 5 kW, `import_limit_watts` 500 | the battery -1.95 to -2.25 kW (PV + grid), **import 0.40-0.46 kW** |
+| 7 | `battery_charge` 3 kW, `soc_max` = SOC now | the battery stops, export 1.9 kW (not curtailed) |
+| 8 | `solis_dispatch_stop` | 34504 = 0 within 30 s, then self-use: the battery takes the surplus (-1.79 kW), import ~0 |
+
+- `feed_in_priority` replaces `sell-excess`, and an export limit of 0 replaces the
+  feed-in limit switch for `discard-excess`.
+- The import limit holds while charging with PV too, again a little below it.
+- At the SOC window's end the battery stops and the surplus goes to the grid, both
+  in `self_consumption` and `battery_charge`.
+- Leaving the dispatch went straight to self-use, without the short grid charge seen
+  after a discharge.
+
 ## Not tested yet
 
-`examples/battery/solis_dispatch_mode_test.yaml` tests these (a sunshine and an
-evening script), so the battery script can use dispatch for every mode and stop
-writing time-of-use and peak shaving settings:
-
-- What the inverter does at the SOC window's end (`soc_max` while charging, `soc_min`
-  while discharging).
-- `battery_charge` with the house above the import limit: whether the battery then
-  covers the excess, as peak shaving does.
-- PV: charging and the import limit with PV running (the tests were in the dark), and
-  `feed_in_priority` / `self_consumption` as replacements for `sell-excess` and
-  self-use.
+- `self_consumption` with room in the battery outside a time-of-use window (step 2
+  above): does it charge from the surplus like self-use?
+- `script.solis_dispatch_hold_test` (evening): hold through `grid_import` without
+  grid charging and `battery_hold`, `battery_charge` with the house above the import
+  limit, and discharging at `soc_min`.
 - Long runs and many repeated commands.
 
 ## How it is used

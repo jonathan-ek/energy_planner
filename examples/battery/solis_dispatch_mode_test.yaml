@@ -66,6 +66,20 @@ solis_dispatch_sun_test:
             entity_id: "{{ were_on }}"
           data:
             stop_actions: true
+    # Self-use as the baseline: end the battery script's time-of-use windows (a
+    # sell-excess discharge window kept the battery at 0 during the first run)
+    - action: time.set_value
+      target:
+        entity_id:
+          - time.solis_s6_eh1p_grid_time_of_use_charge_start_slot_6
+          - time.solis_s6_eh1p_grid_time_of_use_charge_end_slot_6
+          - time.solis_s6_eh1p_grid_time_of_use_discharge_start_slot_6
+          - time.solis_s6_eh1p_grid_time_of_use_discharge_end_slot_6
+      data:
+        time: "00:00:00"
+    - action: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh1p_peak_shaving_mode
     - action: logbook.log
       data:
         name: Dispatch test
@@ -158,6 +172,20 @@ solis_dispatch_hold_test:
             entity_id: "{{ were_on }}"
           data:
             stop_actions: true
+    # Self-use as the baseline: end the battery script's time-of-use windows (a
+    # sell-excess discharge window kept the battery at 0 during the first run)
+    - action: time.set_value
+      target:
+        entity_id:
+          - time.solis_s6_eh1p_grid_time_of_use_charge_start_slot_6
+          - time.solis_s6_eh1p_grid_time_of_use_charge_end_slot_6
+          - time.solis_s6_eh1p_grid_time_of_use_discharge_start_slot_6
+          - time.solis_s6_eh1p_grid_time_of_use_discharge_end_slot_6
+      data:
+        time: "00:00:00"
+    - action: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh1p_peak_shaving_mode
     - action: logbook.log
       data:
         name: Dispatch test
