@@ -119,7 +119,30 @@ SOC 23-24 %. Commands from the HA API, a sample every 20 s.
   falls back to self-use). That only matters if the plan expects the battery to cover
   the house then.
 
-## Modes through dispatch (plan, 2026-10-13)
+## Test 5: hold (2026-10-14 01:45-01:58, dark, house 1.1-1.5 kW, SOC 76 %)
+
+From the API after the night's charge, at the start of the plan's `hold`; time-of-use
+windows and peak shaving off, a sample every 20 s.
+
+| Step | Command | Result |
+| --- | --- | --- |
+| 1 | baseline, no dispatch | self-use: the battery takes over the house within 40 s |
+| 2 | `grid_import` 500 W, `allow_grid_charge` false | **import 0.36-0.55 kW** (0.87 at a load step), the battery covers the rest (0.8-0.9 kW) |
+| 3 | `grid_import` 2000 W, `allow_grid_charge` false, the house below it | **the battery 0, import = the house** (1.14-1.35 kW): no grid charging |
+| 4 | `battery_hold`, `import_limit_watts` 500 | the battery 0, import 1.18-1.41 kW: **the import limit is not shaved** |
+| 5 | `battery_discharge` 2 kW, `soc_min` = SOC now | the battery 0 (±0.1 kW): it stops at `soc_min` |
+| 6 | `solis_dispatch_stop` | self-use within 40 s, no grid charge |
+
+- `grid_import` at the import target without grid charging is `hold`: the battery
+  covers only the load above the target and is not charged from the grid below it.
+- `battery_hold` only keeps the battery; an import limit does not make it discharge,
+  so it is only used for a manual pause slot (no target).
+- The script then ran the plan's `hold` with `grid_import` 7300 W (the night's power
+  charge level): the battery 0, import = the house (1.3-1.4 kW).
+- The night's charge (23:00-01:45, `battery_charge`, import target 7.3 kW): import
+  7.20-7.29 kW, the battery 3.8-6.0 kW, SOC 20 -> 76 %.
+
+## Modes through dispatch (2026-10-13, hold tested 2026-10-14)
 
 Dispatch writes RAM only (per the integration), the other settings flash, so the aim
 is every mode through dispatch, with the inverter set once to self-use, time-of-use
@@ -132,20 +155,19 @@ and peak shaving off:
 | `self_use` | none: stopped, the inverter's own self-use (tested) |
 | `sell-excess` | `feed_in_priority` while the PV covers the house, else none (both tested) |
 | `discard-excess` | none until the battery is full, then `self_consumption` with `export_limit_watts` 0 (tested). With room in the battery the surplus is not curtailed: the plan empties the battery before negative prices, so it fills first, and curtailing while it has room is not supported |
-| `hold` | `battery_hold` with `import_limit_watts`, or `grid_import` without grid charging: the hold test |
+| `hold` | `grid_import` at the import target, `allow_grid_charge` false, `soc_min` = the shutdown SOC (tested); `battery_hold` for a manual pause slot without a target |
 
 ## Not tested yet
 
-- `script.solis_dispatch_hold_test` (evening): hold through `grid_import` without
-  grid charging and `battery_hold`, `battery_charge` with the house above the import
-  limit, and discharging at `soc_min`.
+- `battery_charge` with the house above the import limit (does the battery then
+  cover the excess?), and `hold` with PV.
 - Long runs and many repeated commands.
 
 ## How it is used
 
 `examples/battery/follow_battery_action.py` with `DISPATCH = True` runs every mode
 through dispatch as in the table above (`hold` as `grid_import` at the import target
-without grid charging, until the hold test says otherwise), with the inverter's
+without grid charging), with the inverter's
 time-of-use windows, peak shaving and feed-in limit off. At the owner's
 it runs as `python_scripts/follow_battery_action_dispatch.py` from the automation
 "Follow battery action (dispatch)"
