@@ -142,6 +142,29 @@ windows and peak shaving off, a sample every 20 s.
 - The night's charge (23:00-01:45, `battery_charge`, import target 7.3 kW): import
   7.20-7.29 kW, the battery 3.8-6.0 kW, SOC 20 -> 76 %.
 
+## Test 6: hold in sunshine (2026-10-15 10:06-10:15, SOC 20 %)
+
+The plan's `hold` at the reserve (import target 1.96 kW) had run as `grid_import`
+since 08:45 and cut the PV from about 0.9 kW to 0.1 kW. From the API, a sample every
+20 s; the house about 1.0-1.1 kW, PV about 1.9 kW (self-use at the end).
+
+| Step | Command | Result |
+| --- | --- | --- |
+| 1 | `grid_import` 1960 W, `allow_grid_charge` false (the script's `hold`) | **PV curtailed to 0.11-0.14 kW, import 1.0 kW** = the house, the battery 0 |
+| 2 | `battery_charge` 5 kW, `import_limit_watts` 0 | PV 1.65-1.75 kW, **the battery -0.45 to -0.58 kW** (the surplus), export about 0.05 kW, no import |
+| 3 | `battery_hold` | PV 1.87 kW, the battery 0, **export 0.81-0.84 kW** |
+| 4 | `self_consumption`, SOC 20-100 | the same as 3: the battery 0, export 0.84-0.86 kW |
+| 5 | `solis_dispatch_stop` | self-use: the battery -0.73 kW, the grid about 0 |
+
+- `grid_import` covers the house from the grid first and curtails the PV to keep the
+  import, so it is no `hold` in daylight.
+- `battery_charge` without import keeps the battery and stores the surplus like
+  self-use (the PV slightly lower, 1.7 against 1.9 kW, partly the passing cloud):
+  the script uses it for `hold` while `sun.sun` is above the horizon. Not tested: the
+  PV below the house (the battery should not discharge, so the load above the import
+  target is not shaved in daylight).
+- `battery_hold` and `self_consumption` export the surplus instead.
+
 ## Modes through dispatch (2026-10-13, hold tested 2026-10-14)
 
 Dispatch writes RAM only (per the integration), the other settings flash, so the aim
@@ -155,12 +178,13 @@ and peak shaving off:
 | `self_use` | none: stopped, the inverter's own self-use (tested) |
 | `sell-excess` | `feed_in_priority` while the PV covers the house, else none (both tested) |
 | `discard-excess` | none until the battery is full, then `self_consumption` with `export_limit_watts` 0 (tested). With room in the battery the surplus is not curtailed: the plan empties the battery before negative prices, so it fills first, and curtailing while it has room is not supported |
-| `hold` | `grid_import` at the import target, `allow_grid_charge` false, `soc_min` = the shutdown SOC (tested); `battery_hold` for a manual pause slot without a target |
+| `hold` | in the dark `grid_import` at the import target, `allow_grid_charge` false, `soc_min` = the shutdown SOC (tested); in daylight `battery_charge` with `import_limit_watts` 0 up to the max SOC (test 6); `battery_hold` for a manual pause slot without a target |
 
 ## Not tested yet
 
 - `battery_charge` with the house above the import limit (does the battery then
-  cover the excess?), and `hold` with PV.
+  cover the excess?), and `hold` (`battery_charge` without import) with the PV below
+  the house.
 - Long runs and many repeated commands.
 
 ## How it is used

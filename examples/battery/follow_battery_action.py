@@ -29,7 +29,9 @@
 #   charge          battery_charge, import limit = the import target
 #   sell            battery_discharge down to the target
 #   pause (hold)    grid_import at the import target without grid charging (the
-#                   battery covers the load above it), battery_hold without a target
+#                   battery covers the load above it), battery_hold without a target;
+#                   in daylight battery_charge with import limit 0 (grid_import
+#                   curtails the PV), storing the PV surplus
 #   sell-excess     feed_in_priority while the PV covers the house, else self-use
 #   discard-excess  self-use until the battery is full, then self_consumption with
 #                   export limit 0 (curtailing while the battery has room is not
@@ -102,6 +104,8 @@ BATTERY_VOLTAGE = "sensor.solis_s6_solis_battery_voltage"  # V
 # The lowest SOC `hold` lets the battery cover peaks down to (the plan's reserve may
 # be used then, see AGENTS.md "Battery plan")
 SHUTDOWN_SOC = "number.energy_planner_battery_shutdown_soc"
+MAX_SOC = "number.energy_planner_battery_max_soc"  # `hold` stores PV up to it
+SUN = "sun.sun"  # `hold` in daylight, see below
 # `discard-excess` curtails from this SOC, until it is FULL_HYSTERESIS lower
 FULL_SOC = 99
 FULL_HYSTERESIS = 2
@@ -229,7 +233,17 @@ elif DISPATCH and state == "sell" and soc is not None:
         "soc_min": int(soc),
     }
 elif DISPATCH and state == "pause":
-    if grid_limit is not None:
+    if grid_limit is not None and get_state(SUN) == "above_horizon":
+        # grid_import takes the house from the grid first and curtails the PV (1.8 ->
+        # 0.1 kW, Oct 2026); battery_charge without import keeps the battery and stores
+        # the PV surplus. The load above the target is then not shaved
+        dispatch = {
+            "mode": "battery_charge",
+            "power_watts": MAX_CHARGE_POWER,
+            "import_limit_watts": 0,
+            "soc_max": int(get_float(MAX_SOC, 100.0)),
+        }
+    elif grid_limit is not None:
         # Import up to the target, the battery covers the load above it
         dispatch = {
             "mode": "grid_import",
