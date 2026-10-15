@@ -114,10 +114,50 @@ move together).
 - The Ebeco floor sensor in the hall (`sensor.hallen_floor_temperature`) rose
   18.9 -> 20.1 °C over the day.
 
+### District heating energy (Tekniska verken, per day)
+
+`sensor.fjarrvarme` has been stuck since 2025, so the energy comes from Mitt Tekniska
+verken's daily values (read from the chart, ±1 kWh; Oct 10 from the tooltip), with
+the daily means from HA:
+
+| Day | District heating (kWh) | Outdoor (°C) | Hall (°C) | Load (kW) | Heat pump (h) | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Oct 1-8 | 6-11 (mean 7.4, Oct 4: 21) | 10.0-15.1 | 21.5-22.7 | 0.8-1.6 | Oct 8: 24 | normal |
+| Fri Oct 9 | 8 | 6.2 | 20.8 | 0.92 | 10 | normal until 10:00, then A |
+| Sat Oct 10 | **56** | 5.8 | 18.7 | 0.66 | 0 | A until 08:00, then B |
+| Sun Oct 11 | 22 | 7.9 | 20.4 | 1.05 | 20 | B until 04:00, then C |
+| Mon Oct 12 | 14 | 6.6 | 20.5 | 1.32 | 23 | normal, heat pump on |
+
+- Phase B took about 54 kWh in 16 h on Saturday (less a little hot water
+  circulation, nobody home): **about 3.4 kW** with every valve open and the supply at
+  the curve's floor (32 °C). That is all the radiators give at this supply with the
+  rooms at 17-19 °C, and it is why the house warmed so slowly.
+- A normal October day takes only 6-11 kWh (0.3-0.45 kW incl. hot water): at 10-15 °C
+  outdoor the house's electricity (0.8-1.3 kW, all ends up as heat), people and the
+  sun cover most of the loss.
+- Whole house as one zone, P = UA × (indoor − outdoor) + C × dT/dt, with the five
+  sensors outside the valve heads (hall and the four floor zones) as the house mean
+  and the electric load as heat: A (no district heating, 0.7 kW, −0.11 °C/h at
+  14.1 K) and B (3.4 + 0.66 kW, +0.094 °C/h at 12.3 K) give **UA ≈ 0.19 kW/K** and
+  **C ≈ 18 kWh/K** (time constant about 93 h, within the rooms' 48-100 h).
+- Last winter's bills agree: Jan 2026 2.53 MWh (3.4 kW) at −3.1 °C and Feb 2.42 MWh
+  (3.6 kW) at −4.4 °C, with about 0.3 kW of hot water, the house's 1.15-1.17 kW of
+  electricity and 0.2 kW from people, give UA 0.197 and 0.195 kW/K at a house mean of
+  19.5 °C.
+- So the house needs about 0.19 kW per °C between in- and outdoor, less 1.2-1.5 kW
+  of free heat: nothing from district heating above about 13 °C outdoor, 2.5 kW at
+  0 °C, 4.3 kW at −10 °C. A 1 °C lower indoor temperature saves about 4.6 kWh of
+  district heating per day (4.6 kr/day at the winter price).
+- The heat pump's 1.5 kW of heat covers about 8 °C of that difference: on Monday
+  (23 h of heating, 6.6 °C outdoor) the model gives about 8 kWh of district heating
+  with it and about 44 without, the meter said 14. So about 30 kWh less district
+  heating per day (23 kr at 76.7 öre in October) for about 10 kWh of electricity.
+
 ## Not measured
 
-- The district heating energy: `sensor.fjarrvarme` has been stuck since 2025, so the
-  radiators' heat is not known in kW, only from the rooms' rates.
+- The district heating energy per hour (only per day, see above), so the split of
+  Sunday between B and C and how fast the radiators' output fell as the rooms warmed
+  are estimates.
 - People and cooking: nobody was home, so A-C have no internal gains. Normal days have
   them.
 - One weekend at 2-10 °C outdoor; the supply curve is steeper below 0 °C (40 °C at 0,

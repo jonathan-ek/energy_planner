@@ -534,6 +534,9 @@ pump drew about 0.4 kW and held the hall at about 20.5 °C with a 22 °C setpoin
 
 The RVA36 (manual SE1G2455): curve slope row 17, parallel shift row 64, min/max supply
 rows 68/69, its own time program rows 5-11 with reduced setpoint row 14, summer/winter
+Tekniska verken's daily district heating values: about 3.4 kW in B (all the
+radiators give at the curve's floor), and the house as one zone loses about
+0.19 kW/K with about 18 kWh/K stored (last winter's bills agree).
 limit row 16. Room influence and optimum start/stop (rows 65, 73, 74) need a QAA50
 room unit on the PPS bus. Input H1 (a potential-free contact, row 96) switches the
 operating mode, or with row 96 = 2 forces a minimum supply setpoint (row 97): a relay
