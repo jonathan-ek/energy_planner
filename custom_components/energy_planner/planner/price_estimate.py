@@ -8,17 +8,24 @@ tomorrow pays. The estimate is replaced as soon as the real prices arrive.
 Per hour: the mean of today's price and the mean of the last 7 days of the same type
 as tomorrow (workday, or weekend and holiday), plus a correction per hour and type
 change (e.g. Friday -> Saturday) learned from the price history, shrunk toward zero
-while it has few samples. Backtested on SE3, May 2025 - Oct 2026 (see AGENTS.md):
-the mean hourly error was 23 öre/kWh against 25 without the day types; following the
-plan made with it until the real prices came cost 0.10 kr/day more than knowing
-them, against 0.31 kr/day for a plan that ends at midnight. Weather (wind,
-temperature, sun in the Nordics and Germany) predicted the prices better but did not
-improve the battery's decisions.
+while it has few samples. Then the gap between today's last price and the estimate
+for the first hour is added, fading with `GAP_TIME_CONSTANT`: the prices just after
+midnight follow the evening's, not the profile's level. Backtested on SE3, May 2025
+- Oct 2026 (see AGENTS.md): the mean hourly error was 23 öre/kWh against 25 without
+the day types; following the plan made with it until the real prices came cost
+0.10 kr/day more than knowing them, against 0.31 kr/day for a plan that ends at
+midnight. Weather (wind, temperature, sun in the Nordics and Germany) predicted the
+prices better but did not improve the battery's decisions. The gap (SE3, 426 days
+May 2025 - Oct 2026, the sensor's last quarter per hour): the best factor per hour
+was about 0.85 until 07:00, falling to 0 at 21:00; the fading gap gave a mean hourly
+error of 25.4 öre/kWh against 30.1 without, 18 against 29 for 00-07, in both halves
+of the period.
 """
 
 from collections.abc import Mapping
 import datetime as dt
 import functools
+import math
 from statistics import mean, median
 
 SAME_TYPE_DAYS = 7
@@ -26,6 +33,8 @@ SAME_TYPE_LOOKBACK_DAYS = 21
 MIN_HOURS = 20  # a day with fewer known hours is not used
 # Samples at which a correction counts half
 CORRECTION_SHRINK = 20
+# Hours over which the gap to today's last price fades by e
+GAP_TIME_CONSTANT = 12
 
 Prices = Mapping[dt.date, Mapping[int, float]]
 
@@ -105,11 +114,15 @@ def _kind(day: dt.date) -> tuple[bool, bool]:
     return is_offday(day - dt.timedelta(days=1)), is_offday(day)
 
 
-def estimate(prices: Prices, day: dt.date) -> dict[int, float] | None:
+def estimate(
+    prices: Prices, day: dt.date, last: float | None = None
+) -> dict[int, float] | None:
     """Return the estimated price per local hour of `day`, None without history.
 
     `prices` are known prices per local date and hour, in any unit; the estimate is
-    in the same unit. The day before `day` must be known.
+    in the same unit. The day before `day` must be known. `last` is the price just
+    before `day` (the last quarter): the gap from it to the first hour's estimate is
+    added to hour h with the weight exp(-(h + 0.5) / GAP_TIME_CONSTANT).
     """
     base = _base(prices, day)
     if base is None:
@@ -134,4 +147,8 @@ def estimate(prices: Prices, day: dt.date) -> dict[int, float] | None:
             else 0.0
         )
         result[hour] = price + correction
+    if last is not None and result:
+        gap = last - result[min(result)]
+        for hour in result:
+            result[hour] += gap * math.exp(-(hour + 0.5) / GAP_TIME_CONSTANT)
     return result

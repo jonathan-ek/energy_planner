@@ -182,6 +182,8 @@ async def _estimated_prices(
             **known,
         },
         tomorrow,
+        # The prices after midnight start near tonight's
+        prices[max(prices)],
     )
     if hourly is None:
         return {}

@@ -1,6 +1,7 @@
 """Tests for the estimate of tomorrow's prices."""
 
 import datetime as dt
+import math
 
 import pytest
 
@@ -81,3 +82,16 @@ def test_no_estimate_without_today():
     """Test that the day before must be known."""
     assert price_estimate.estimate(history(), dt.date(2026, 4, 1)) is None
     assert price_estimate.estimate({}, dt.date(2026, 4, 1)) is None
+
+
+def test_gap_to_tonight_fades():
+    """Test that the estimate starts near tonight's last price and fades to its own."""
+    wednesday = dt.date(2026, 3, 25)
+    estimate = price_estimate.estimate(history(), wednesday, last=20.0)
+    assert estimate is not None
+    tau = price_estimate.GAP_TIME_CONSTANT
+    for hour in (0, 6, 23):
+        expected = 100 - 80 * math.exp(-(hour + 0.5) / tau)
+        assert estimate[hour] == pytest.approx(expected)
+    assert estimate[0] < 30
+    assert estimate[0] < estimate[6] < estimate[23] < 100

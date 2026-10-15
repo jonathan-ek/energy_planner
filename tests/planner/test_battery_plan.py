@@ -2,6 +2,7 @@
 
 import datetime as dt
 import importlib
+import math
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -9,6 +10,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from custom_components.energy_planner.const import DOMAIN, PLAN_SENSORS
+from custom_components.energy_planner.planner import price_estimate
 
 battery_plan = importlib.import_module(
     "custom_components.energy_planner.planner.battery_plan"
@@ -231,9 +233,11 @@ async def test_tomorrow_is_estimated(mock_hass):
     assert starts[-1] == STARTS[-1]
     tomorrow = [s.date() > NOW.date() for s in starts]
     assert plan["estimated"] == tomorrow
-    # Scaled back to the spot price: 200 SEK/MWh at night is 25 öre incl. VAT
+    # Scaled back to the spot price, 200 SEK/MWh at night, plus most of the gap to
+    # tonight's 1500: in öre incl. VAT
     night = plan["prices"][tomorrow.index(True)]
-    assert night == pytest.approx(25.0)
+    gap = math.exp(-0.5 / price_estimate.GAP_TIME_CONSTANT)
+    assert night == pytest.approx((200 + 1300 * gap) * 0.125, abs=0.01)
     estimate = mock_hass.data[DOMAIN]["price_estimate"]
     assert estimate["day"] == NOW.date() + dt.timedelta(days=1)
 

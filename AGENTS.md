@@ -241,8 +241,11 @@ planners the plan is a preview and ignores them.
   today's price and the last 7 days of tomorrow's type (workday, or weekend and
   Swedish holiday incl. Midsummer, Christmas and New Year's Eve, within 21 days), plus
   the median error of that estimate for the same hour and type change in the history,
-  shrunk by n / (n + 20). History: the Nord Pool sensor's hourly statistics (its last
-  state per hour) for 400 days, scaled to SEK/MWh excl. VAT by the known prices of
+  shrunk by n / (n + 20). Then the gap from today's last quarter price to the first
+  hour's estimate is added, fading as exp(-(h + 0.5) / 12) (`GAP_TIME_CONSTANT`), so
+  the night does not jump at midnight (hourly error 30 -> 25 öre/kWh, 00-07 29 -> 18,
+  SE3 May 2025 - Oct 2026; plan cost not backtested). History: the Nord Pool sensor's
+  hourly statistics (its last state per hour) for 400 days, scaled to SEK/MWh excl. VAT by the known prices of
   yesterday and today; calculated once per day (`price_estimate` in `hass.data`). The
   plan publishes `prices` (spot incl. VAT, öre/kWh) and `estimated` per quarter; the
   real prices replace the estimate when `tomorrow_valid` triggers a new plan.
