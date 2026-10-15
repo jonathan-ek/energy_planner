@@ -333,6 +333,11 @@ planners the plan is a preview and ignores them.
 
 ## Heat pump
 
+  Without dispatch, `PEAK_SHAVING_CHARGE = False` charges in the time-of-use window at
+  the action's current (the plan's energy over the run) instead of peak shaving, so
+  the import is the house plus that current (Kiddes: S6-EH3P without dispatch; the house
+  and the car share a 16 A fuse, the battery has its own, the connection is 35 A, so
+  `main_fuse` is 35).
 The air-to-air heat pump (`climate.hallen`, Mitsubishi MSZ-AP42VG) should only heat
 when that is cheaper than district heating. `heat_pump.evaluate` compares a kWh of
 heat: district heating at the season's energy price against electricity / COP.

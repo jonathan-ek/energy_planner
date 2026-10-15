@@ -71,6 +71,12 @@ PEAK_BASELINE_SOC = "number.solis_s6_eh1p_peak_baseline_soc"  # %
 # The most the inverter accepts as max usable grid power (W); it keeps the old
 # value when sent more (the S6-EH3P 10K: 10000). None: the entity's max
 PEAK_GRID_POWER_MAX = None
+# Without DISPATCH the plan's `charge` uses peak shaving up to the import target.
+# The S6-EH3P does not keep to the max usable grid power while charging (see the
+# top), so with False it uses the charge window at the action's current instead (the
+# energy the plan charges, spread over the run): the import is then the house plus
+# that current, not capped by the target (e.g. a small main fuse without dispatch)
+PEAK_SHAVING_CHARGE = True
 # In `hold` the baseline is kept this far below the SOC: the S6-EH3P also charges
 # from the grid at the baseline (29 -> 31 % at 8.9 kW with it at 29, Oct 2026)
 HOLD_SOC_MARGIN = 3
@@ -255,7 +261,7 @@ elif DISPATCH and state == "discard-excess":
 if dispatch is not None or DISPATCH:
     pass  # all the inverter's own modes off below
 elif state == "charge" and soc is not None:
-    if grid_limit is not None:
+    if grid_limit is not None and PEAK_SHAVING_CHARGE:
         # Charge from PV and the grid up to the import target
         peak = (grid_limit, soc)
     else:
