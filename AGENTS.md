@@ -333,14 +333,14 @@ planners the plan is a preview and ignores them.
   `feed_in_priority` for `sell-excess`, `self_consumption` with export limit 0 for a
   full battery in `discard-excess`; self-use without dispatch; repeated every minute
   with a 3 min failsafe; needs register 34502 = 0xAA55). Tests and register map: `docs/solis_remote_dispatch_2026_10.md`.
-
-## Heat pump
-
   Without dispatch, `PEAK_SHAVING_CHARGE = False` charges in the time-of-use window at
   the action's current (the plan's energy over the run) instead of peak shaving, so
   the import is the house plus that current (Kiddes: S6-EH3P without dispatch; the house
   and the car share a 16 A fuse, the battery has its own, the connection is 35 A, so
   `main_fuse` is 35).
+
+## Heat pump
+
 The air-to-air heat pump (`climate.hallen`, Mitsubishi MSZ-AP42VG) should only heat
 when that is cheaper than district heating. `heat_pump.evaluate` compares a kWh of
 heat: district heating at the season's energy price against electricity / COP.
@@ -534,12 +534,12 @@ ground lose 0.010-0.021 /h (48-100 h), the basement 0.004; the supply stays at t
 curve's floor (about 32 °C) whatever the valves do, so 17.6 -> 20.1 °C took 20 h and no
 room reached 22; the Tado sensors read 1.5-3 °C high while their valve heats; the heat
 pump drew about 0.4 kW and held the hall at about 20.5 °C with a 22 °C setpoint.
-
-The RVA36 (manual SE1G2455): curve slope row 17, parallel shift row 64, min/max supply
-rows 68/69, its own time program rows 5-11 with reduced setpoint row 14, summer/winter
 Tekniska verken's daily district heating values: about 3.4 kW in B (all the
 radiators give at the curve's floor), and the house as one zone loses about
 0.19 kW/K with about 18 kWh/K stored (last winter's bills agree).
+
+The RVA36 (manual SE1G2455): curve slope row 17, parallel shift row 64, min/max supply
+rows 68/69, its own time program rows 5-11 with reduced setpoint row 14, summer/winter
 limit row 16. Room influence and optimum start/stop (rows 65, 73, 74) need a QAA50
 room unit on the PPS bus. Input H1 (a potential-free contact, row 96) switches the
 operating mode, or with row 96 = 2 forces a minimum supply setpoint (row 97): a relay
