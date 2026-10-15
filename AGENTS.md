@@ -320,6 +320,15 @@ planners the plan is a preview and ignores them.
 - Battery: capacity, shutdown/max SOC, charge/discharge current × the live voltage
   (`battery_voltage_sensor`), SOC (`battery_soc_sensor`), round-trip efficiency
   `price_peak_efficiency_factor`. About 1 s per day of quarters, run in the executor.
+  The efficiency was measured from the recorder's hourly statistics (Oct 2026): night
+  runs of 3 h or more without PV, the battery only charging or only discharging above
+  0.8 kW, SOC 15-95%; the Solis AC port energy against the SOC change, charge leg times
+  discharge leg (the capacity cancels). The inverter's own draw (50-70 W, paid whether
+  the battery cycles or not) is left out. Owner 0.91 (0.86 with it), parents 0.94,
+  Oscar 0.87, Kidde 0.85; set to 91, 94, 87 and 85. The Solis battery power is the AC
+  port power plus a constant on the owner's inverter, so it cannot split inverter
+  and battery losses; early months with few charge runs or a changed SOC scale were
+  left out (parents before 2025-04, Oscar before 2025-10, Kidde before 2025-08).
 - The inverter follows the import target while charging and in `hold` with Solis peak
   shaving (`examples/battery/follow_battery_action.py`; works while no time-of-use window is
   active): `number.solis_s6_eh1p_peak_max_usable_grid_power` = the import target, and
