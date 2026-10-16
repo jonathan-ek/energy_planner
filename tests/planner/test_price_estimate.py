@@ -151,3 +151,26 @@ def test_no_wind_correction_with_little_history():
     assert price_estimate.estimate(prices, wednesday, 100.0, speeds) == (
         price_estimate.estimate(prices, wednesday, 100.0)
     )
+
+
+def test_scale_to():
+    """Test the unit factor from the hours both sources have."""
+    known = {dt.date(2026, 3, 2): {0: 800.0, 1: 400.0}}
+    sensor = {dt.date(2026, 3, 2): {0: 100.0, 1: 50.0, 2: 70.0}}
+    assert price_estimate.scale_to(sensor, known, 2) == 8.0
+    assert price_estimate.scale_to(sensor, known, 3) is None
+
+
+def test_merge_takes_the_first_complete_day():
+    """Test that a gap in one source is filled from the next."""
+    day, gap = dt.date(2026, 3, 2), dt.date(2026, 3, 3)
+    first = {day: dict.fromkeys(range(24), 1.0), gap: dict.fromkeys(range(14), 1.0)}
+    second = {day: dict.fromkeys(range(24), 2.0), gap: dict.fromkeys(range(24), 2.0)}
+    merged = price_estimate.merge(first, second)
+    assert merged[day][12] == 1.0
+    assert merged[gap][20] == 2.0
+    # No complete copy: the fullest
+    assert price_estimate.merge({gap: {0: 1.0}}, {gap: {0: 2.0, 1: 2.0}})[gap] == {
+        0: 2.0,
+        1: 2.0,
+    }

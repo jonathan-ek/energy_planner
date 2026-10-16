@@ -325,3 +325,28 @@ def wind_correction(prices: Prices, wind: Wind, day: dt.date) -> dict[int, float
         )
         result[hour] = float(np.array(x) @ coefficients)
     return result
+
+
+def scale_to(history: Prices, known: Prices, min_hours: int) -> float | None:
+    """Return the factor that turns `history` into the unit of `known`, or None.
+
+    The median ratio over the hours both have (unit, VAT, currency and rounding
+    differ between sources); None with fewer than `min_hours` such hours.
+    """
+    ratios = [
+        price / history[day][hour]
+        for day, hours in known.items()
+        for hour, price in hours.items()
+        if history.get(day, {}).get(hour)
+    ]
+    return median(ratios) if len(ratios) >= min_hours else None
+
+
+def merge(*histories: Prices) -> dict[dt.date, dict[int, float]]:
+    """Return per day the first history that has it complete, else the fullest."""
+    result: dict[dt.date, dict[int, float]] = {}
+    for day in {day for history in histories for day in history}:
+        candidates = [dict(history[day]) for history in histories if day in history]
+        complete = [hours for hours in candidates if len(hours) >= MIN_HOURS]
+        result[day] = complete[0] if complete else max(candidates, key=len)
+    return result

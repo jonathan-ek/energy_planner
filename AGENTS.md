@@ -253,9 +253,19 @@ planners the plan is a preview and ignores them.
   `wind` in the cache says which). Hourly error 25.4 -> 23.3 öre/kWh (426 days,
   both halves better, mostly the morning and evening peaks); Stockholm temperature,
   German sun, fitted blend weights, a season term and gradient boosting gave
-  nothing more (Oct 2026). History: the Nord Pool sensor's
-  hourly statistics (its last state per hour) for 400 days, scaled to SEK/MWh excl. VAT by the known prices of
-  yesterday and today; calculated once per day (`price_estimate` in `hass.data`). The
+  nothing more (Oct 2026). History (400 days, `price_estimate.merge`, per day the
+  first complete source): the plan's own copy of each day's hourly mean prices
+  (`_record_prices`, `.storage/energy_planner.price_history`, from the plan's first
+  run), the Nord Pool sensor's hourly statistics (its last state per hour) and
+  Energy-Charts' day-ahead prices for the zone (`_energy_charts_history`, EUR/MWh, one
+  request); the last two scaled to SEK/MWh excl. VAT by the known prices of
+  yesterday and today (`scale_to`). The sensor's statistics lose 14-24 every day once
+  its attributes pass HA's 16 KB limit (tomorrow's prices in SEK/kWh; the SE4 houses
+  Oct 2025 - Oct 2026, only about two days after a restart were complete), so without
+  the other sources there were no same-type days. Backtest on Energy-Charts prices
+  (520 days): SE4 33.1 -> 29.4 öre/kWh with wind, SE3 26.3 -> 23.8; each step helps in
+  both zones. Calculated once per day (`price_estimate` in `hass.data`, with
+  `sources`: days per source; logged). The
   plan publishes `prices` (spot incl. VAT, öre/kWh) and `estimated` per quarter; the
   real prices replace the estimate when `tomorrow_valid` triggers a new plan.
   Backtest (SE3, 778 mornings May 2025 - Oct 2026, the plan made at 07:00 followed until

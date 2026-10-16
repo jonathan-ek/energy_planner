@@ -10,10 +10,9 @@ import asyncio
 import datetime as dt
 import functools
 import logging
+from statistics import mean
 
 import aiohttp
-from statistics import mean, median
-
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
 from homeassistant.core import HomeAssistant
@@ -27,6 +26,7 @@ from ..const import (
     DOMAIN,
     PLAN_SENSORS,
 )
+from ..store import async_load_from_store, async_save_to_store
 from .battery_action import QUARTER, SLOT_MODES, BatteryState, Slot, resolve
 from . import ev
 from .battery_optimizer import (
@@ -41,7 +41,16 @@ from .forecast import quarter_starts
 from .heat_pump import schedule
 from .heating import plan_inputs
 from .nordpool_utils import fetch_nordpool_data
-from .price_estimate import WIND_FIT_DAYS, WIND_SITES, Wind, estimate
+from .price_estimate import (
+    MIN_HOURS,
+    WIND_FIT_DAYS,
+    WIND_SITES,
+    Prices,
+    Wind,
+    estimate,
+    merge,
+    scale_to,
+)
 from .tariff import fuse_power
 from .utils import get_tariff
 
@@ -53,6 +62,12 @@ MIN_SCALE_HOURS = 4
 # Day-before wind forecasts for the estimate's wind correction (price_estimate.py)
 WIND_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 WIND_TIMEOUT = aiohttp.ClientTimeout(total=60)
+# The plan's own copy of each day's prices (`_record_prices`): the recorder's history
+# of the Nord Pool sensor loses the afternoon when its attributes pass 16 KB (from
+# about 13:00, when tomorrow's prices arrive; SEK/kWh sensors, Oct 2026)
+PRICE_STORE = "price_history"
+# Complete day-ahead prices per bidding zone (EUR/MWh) to fill the gaps
+ENERGY_CHARTS_URL = "https://api.energy-charts.info/price"
 
 
 def _state_float(hass: HomeAssistant, entity_id: str) -> float | None:
@@ -172,6 +187,72 @@ async def _wind_forecast(hass: HomeAssistant, tomorrow: dt.date) -> Wind | None:
     return wind
 
 
+async def _stored_prices(hass: HomeAssistant) -> dict[dt.date, dict[int, float]]:
+    """Return the recorded hourly prices (SEK/MWh excl. VAT), loaded once."""
+    stored = hass.data[DOMAIN].get(PRICE_STORE)
+    if stored is None:
+        raw = await async_load_from_store(hass, PRICE_STORE)
+        stored = {
+            dt.date.fromisoformat(day): {int(h): float(p) for h, p in hours.items()}
+            for day, hours in raw.items()
+        }
+        hass.data[DOMAIN][PRICE_STORE] = stored
+    return stored
+
+
+async def _record_prices(hass: HomeAssistant, prices: dict[dt.datetime, float]):
+    """Store each complete day's hourly mean prices, for PRICE_HISTORY_DAYS."""
+    stored = await _stored_prices(hass)
+    changed = False
+    for day, hours in _hourly(prices).items():
+        if len(hours) >= MIN_HOURS and stored.get(day) != hours:
+            stored[day] = hours
+            changed = True
+    oldest = dt_utils.now().date() - dt.timedelta(days=PRICE_HISTORY_DAYS)
+    for day in [day for day in stored if day < oldest]:
+        del stored[day]
+        changed = True
+    if changed:
+        await async_save_to_store(
+            hass,
+            PRICE_STORE,
+            {
+                day.isoformat(): {str(hour): price for hour, price in hours.items()}
+                for day, hours in sorted(stored.items())
+            },
+        )
+
+
+async def _energy_charts_history(
+    hass: HomeAssistant, area: str, start: dt.date, end: dt.date
+) -> Prices | None:
+    """Return Energy-Charts' day-ahead prices (EUR/MWh) per local date and hour.
+
+    The mean of the hour's quarters; None on failure (e.g. an unknown zone).
+    """
+    params = {"bzn": area, "start": start.isoformat(), "end": end.isoformat()}
+    try:
+        async with async_get_clientsession(hass).get(
+            ENERGY_CHARTS_URL, params=params, timeout=WIND_TIMEOUT
+        ) as response:
+            response.raise_for_status()
+            data = await response.json()
+        values: dict[dt.date, dict[int, list[float]]] = {}
+        for seconds, price in zip(data["unix_seconds"], data["price"], strict=True):
+            if price is not None:
+                local = dt_utils.as_local(dt.datetime.fromtimestamp(seconds, dt.UTC))
+                values.setdefault(local.date(), {}).setdefault(local.hour, []).append(
+                    float(price)
+                )
+    except (aiohttp.ClientError, TimeoutError, KeyError, TypeError, ValueError) as err:
+        _LOGGER.warning("No Energy-Charts prices for the price estimate: %s", err)
+        return None
+    return {
+        day: {hour: mean(v) for hour, v in hours.items()}
+        for day, hours in values.items()
+    }
+
+
 def _hourly(prices: dict[dt.datetime, float]) -> dict[dt.date, dict[int, float]]:
     """Return the mean price per local date and hour."""
     values: dict[dt.date, dict[int, list[float]]] = {}
@@ -188,8 +269,9 @@ async def _estimated_prices(
 ) -> dict[dt.datetime, float]:
     """Return estimated spot prices per quarter of tomorrow while it is unpublished.
 
-    From the Nord Pool sensor's history (price_estimate.py), scaled to SEK/MWh excl.
-    VAT by the known prices of the last two days, with the wind forecast
+    From the recorded prices (`_record_prices`), the Nord Pool sensor's history and
+    Energy-Charts (price_estimate.py), the last two scaled to SEK/MWh excl. VAT by
+    the known prices of the last two days, with the wind forecast
     (`_wind_forecast`) if Open-Meteo answers. Calculated once per day.
     """
     tomorrow = now.date() + dt.timedelta(days=1)
@@ -201,34 +283,32 @@ async def _estimated_prices(
     entity_id = hass.data[DOMAIN]["config"].get("nordpool_entity_id")
     if entity_id is None:
         return {}
-    history = await _price_history(
-        hass,
-        entity_id,
-        dt_utils.start_of_local_day() - dt.timedelta(days=PRICE_HISTORY_DAYS),
-        now,
-    )
+    start = dt_utils.start_of_local_day() - dt.timedelta(days=PRICE_HISTORY_DAYS)
     known = _hourly(prices)
-    # The sensor's unit, VAT and rounding differ from the spot prices
-    ratios = [
-        price / history[day][hour]
-        for day, hours in known.items()
-        for hour, price in hours.items()
-        if history.get(day, {}).get(hour)
-    ]
-    if len(ratios) < MIN_SCALE_HOURS:
+    # Per day the plan's own copy, else the sensor's history, else Energy-Charts;
+    # the sensor's unit, VAT and rounding and Energy-Charts' EUR are scaled to the
+    # spot prices by the days both have
+    sources = {"stored": await _stored_prices(hass)}
+    others = {
+        "recorder": await _price_history(hass, entity_id, start, now),
+        "energy_charts": await _energy_charts_history(
+            hass, entity_id.split("_")[2].upper(), start.date(), now.date()
+        ),
+    }
+    for name, history in others.items():
+        scale = scale_to(history, known, MIN_SCALE_HOURS) if history else None
+        if history and scale is not None:
+            sources[name] = {
+                day: {hour: price * scale for hour, price in hours.items()}
+                for day, hours in history.items()
+            }
+    if not any(set(history) - set(known) for history in sources.values()):
         return {}
-    scale = median(ratios)
     wind = await _wind_forecast(hass, tomorrow)
     hourly = await hass.async_add_executor_job(
         functools.partial(
             estimate,
-            {
-                **{
-                    day: {hour: price * scale for hour, price in hours.items()}
-                    for day, hours in history.items()
-                },
-                **known,
-            },
+            merge(known, *sources.values()),
             tomorrow,
             # The prices after midnight start near tonight's
             prices[max(prices)],
@@ -247,7 +327,15 @@ async def _estimated_prices(
         "day": tomorrow,
         "prices": estimated,
         "wind": wind is not None,
+        # Days each source has (the merge takes them in this order)
+        "sources": {name: len(history) for name, history in sources.items()},
     }
+    _LOGGER.info(
+        "Price estimate for %s: days per source %s, wind %s",
+        tomorrow,
+        hass.data[DOMAIN]["price_estimate"]["sources"],
+        wind is not None,
+    )
     return estimated
 
 
@@ -448,6 +536,7 @@ def _peak_label(tariff, key: str) -> dict:
 async def async_update_plan(hass: HomeAssistant) -> None:
     """Optimize the battery from the current quarter to the last known price."""
     prices = await _prices(hass)
+    await _record_prices(hass, prices)
     # Also read by the heat pump sensors (heating.py)
     hass.data[DOMAIN]["prices"] = prices
     forecast = hass.data[DOMAIN].get("forecast")

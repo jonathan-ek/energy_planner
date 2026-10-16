@@ -16,6 +16,9 @@ from custom_components.energy_planner.planner import price_estimate
 battery_plan = importlib.import_module(
     "custom_components.energy_planner.planner.battery_plan"
 )
+# The network calls, before the autouse fixture replaces them
+WIND_FORECAST = battery_plan._wind_forecast
+ENERGY_CHARTS = battery_plan._energy_charts_history
 
 TZ = ZoneInfo("Europe/Stockholm")
 NOW = dt.datetime(2026, 1, 13, 22, 50, tzinfo=TZ)  # Tuesday evening, winter
@@ -25,6 +28,19 @@ STATES = {
     "sensor.solis_s6_solis_battery_soc": "20",
     "sensor.solis_s6_solis_battery_voltage": "536",
 }
+
+
+@pytest.fixture(autouse=True)
+def no_network():
+    """Keep the price history sources off the network and the disk."""
+    with (
+        patch.object(battery_plan, "_wind_forecast", AsyncMock(return_value=None)),
+        patch.object(
+            battery_plan, "_energy_charts_history", AsyncMock(return_value=None)
+        ),
+        patch.object(battery_plan, "async_save_to_store", AsyncMock()) as save,
+    ):
+        yield save
 
 
 @pytest.fixture
@@ -60,6 +76,7 @@ def mock_hass():
                 "pv": [0.0] * 192,
             },
             PLAN_SENSORS: [MagicMock()],
+            battery_plan.PRICE_STORE: {},
         }
     }
     yield hass
@@ -227,7 +244,6 @@ async def test_tomorrow_is_estimated(mock_hass):
         patch.object(battery_plan, "_prices", AsyncMock(return_value=today)),
         patch.object(battery_plan, "_price_history", AsyncMock(return_value=sensor)),
         patch.object(battery_plan, "_hourly_import", AsyncMock(return_value={})),
-        patch.object(battery_plan, "_wind_forecast", AsyncMock(return_value=None)),
     ):
         await battery_plan.async_update_plan(mock_hass)
     plan = mock_hass.data[DOMAIN]["plan"]
@@ -260,7 +276,7 @@ async def test_wind_forecast(mock_hass):
     session = MagicMock()
     session.get.return_value = context
     with patch.object(battery_plan, "async_get_clientsession", return_value=session):
-        wind = await battery_plan._wind_forecast(mock_hass, dt.date(2026, 1, 15))
+        wind = await WIND_FORECAST(mock_hass, dt.date(2026, 1, 15))
     assert wind is not None
     assert set(wind) == set(price_estimate.WIND_SITES)
     assert wind["se3"] == {dt.date(2026, 1, 14): {0: 36.0}}
@@ -274,9 +290,7 @@ async def test_no_wind_forecast_on_error(mock_hass):
     session = MagicMock()
     session.get.side_effect = aiohttp.ClientError("down")
     with patch.object(battery_plan, "async_get_clientsession", return_value=session):
-        assert (
-            await battery_plan._wind_forecast(mock_hass, dt.date(2026, 1, 15)) is None
-        )
+        assert await WIND_FORECAST(mock_hass, dt.date(2026, 1, 15)) is None
 
 
 async def test_no_estimate_without_history(mock_hass):
@@ -288,7 +302,6 @@ async def test_no_estimate_without_history(mock_hass):
         patch.object(battery_plan, "_prices", AsyncMock(return_value=today)),
         patch.object(battery_plan, "_price_history", AsyncMock(return_value={})),
         patch.object(battery_plan, "_hourly_import", AsyncMock(return_value={})),
-        patch.object(battery_plan, "_wind_forecast", AsyncMock(return_value=None)),
     ):
         await battery_plan.async_update_plan(mock_hass)
     plan = mock_hass.data[DOMAIN]["plan"]
@@ -400,3 +413,102 @@ async def test_main_fuse_caps_the_import(mock_hass):
     assert all(t is not None and t <= fuse + 1e-9 for t in plan["targets"])
     assert max(plan["grid_import"]) <= fuse + 0.01
     assert plan["fuse_excess_kwh"] == 0.0
+
+
+async def test_record_prices(mock_hass, no_network):
+    """Test that complete days are kept, older ones dropped, and saved by date."""
+    old = (NOW - dt.timedelta(days=battery_plan.PRICE_HISTORY_DAYS + 1)).date()
+    mock_hass.data[DOMAIN][battery_plan.PRICE_STORE] = {old: {0: 1.0}}
+    quarters = {s: p for s, p in prices().items() if s.date() == NOW.date()}
+    quarters[START + dt.timedelta(days=1)] = 50.0  # one quarter of tomorrow
+    with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
+        await battery_plan._record_prices(mock_hass, quarters)
+    stored = mock_hass.data[DOMAIN][battery_plan.PRICE_STORE]
+    assert set(stored) == {NOW.date()}
+    assert stored[NOW.date()][3] == 200.0
+    saved = no_network.call_args.args[2]
+    assert list(saved) == [NOW.date().isoformat()]
+    assert saved[NOW.date().isoformat()]["3"] == 200.0
+    # Nothing new: not saved again
+    no_network.reset_mock()
+    with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
+        await battery_plan._record_prices(mock_hass, quarters)
+    no_network.assert_not_called()
+
+
+async def test_stored_prices_are_loaded_once(mock_hass):
+    """Test that the stored prices are read from disk with dates and hours."""
+    del mock_hass.data[DOMAIN][battery_plan.PRICE_STORE]
+    load = AsyncMock(return_value={"2026-01-12": {"0": 210.0}})
+    with patch.object(battery_plan, "async_load_from_store", load):
+        assert await battery_plan._stored_prices(mock_hass) == {
+            dt.date(2026, 1, 12): {0: 210.0}
+        }
+        await battery_plan._stored_prices(mock_hass)
+    load.assert_awaited_once()
+
+
+async def test_gaps_are_filled_from_energy_charts(mock_hass):
+    """Test that a sensor history without afternoons is filled from Energy-Charts."""
+    mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = "sensor.nordpool_kwh_se4"
+    today = {s: p for s, p in prices().items() if s.date() == NOW.date()}
+    days = [(START - dt.timedelta(days=i)).date() for i in range(30)]
+    profile = {h: 200.0 if h < 6 else 1500.0 if h >= 17 else 800.0 for h in range(24)}
+    # SEK/kWh incl. VAT, only until 13:00 (the attributes passed 16 KB)
+    sensor = {
+        day: {h: p * 1.25 / 1000 for h, p in profile.items() if h < 14} for day in days
+    }
+    # EUR/MWh, complete
+    euro = {day: {h: p / 11 for h, p in profile.items()} for day in days}
+    with (
+        patch.object(battery_plan.dt_utils, "now", return_value=NOW),
+        patch.object(battery_plan, "_price_history", AsyncMock(return_value=sensor)),
+        patch.object(
+            battery_plan, "_energy_charts_history", AsyncMock(return_value=euro)
+        ) as charts,
+    ):
+        estimated = await battery_plan._estimated_prices(mock_hass, today, NOW)
+    assert charts.call_args.args[1] == "SE4"
+    estimate = mock_hass.data[DOMAIN]["price_estimate"]
+    assert estimate["sources"]["energy_charts"] == len(days)
+    # The same as with a complete sensor history
+    complete = {day: {h: p * 1.25 / 1000 for h, p in profile.items()} for day in days}
+    del mock_hass.data[DOMAIN]["price_estimate"]
+    with (
+        patch.object(battery_plan.dt_utils, "now", return_value=NOW),
+        patch.object(battery_plan, "_price_history", AsyncMock(return_value=complete)),
+    ):
+        expected = await battery_plan._estimated_prices(mock_hass, today, NOW)
+    assert estimated == pytest.approx(expected)
+    evening = dt.datetime(2026, 1, 14, 19, tzinfo=TZ)
+    assert estimated[evening] > 1500.0  # the evening profile, not the sensor's gap
+
+
+async def test_energy_charts_history(mock_hass):
+    """Test that Energy-Charts' quarters become the hour's mean per local date."""
+    first = int(dt.datetime(2026, 1, 13, 0, tzinfo=TZ).timestamp())
+    answer = {
+        "unix_seconds": [first + 900 * i for i in range(5)],
+        "price": [10.0, 20.0, 30.0, None, 50.0],
+    }
+    response = MagicMock()
+    response.json = AsyncMock(return_value=answer)
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=response)
+    context.__aexit__ = AsyncMock(return_value=None)
+    session = MagicMock()
+    session.get.return_value = context
+    with patch.object(battery_plan, "async_get_clientsession", return_value=session):
+        history = await ENERGY_CHARTS(
+            mock_hass, "SE4", dt.date(2026, 1, 13), dt.date(2026, 1, 14)
+        )
+    assert history == {dt.date(2026, 1, 13): {0: 20.0, 1: 50.0}}
+    assert session.get.call_args.kwargs["params"]["bzn"] == "SE4"
+    session.get.side_effect = aiohttp.ClientError("down")
+    with patch.object(battery_plan, "async_get_clientsession", return_value=session):
+        assert (
+            await ENERGY_CHARTS(
+                mock_hass, "SE4", dt.date(2026, 1, 13), dt.date(2026, 1, 14)
+            )
+            is None
+        )
