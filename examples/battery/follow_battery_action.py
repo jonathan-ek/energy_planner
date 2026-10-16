@@ -29,7 +29,8 @@
 #   charge          battery_charge, import limit = the import target
 #   sell            battery_discharge down to the target
 #   pause (hold)    grid_import at the import target without grid charging (the
-#                   battery covers the load above it), battery_hold without a target;
+#                   battery covers the load above it), battery_hold without a target
+#                   or with one above HOLD_IMPORT_MAX;
 #                   in daylight battery_charge with import limit 0 (grid_import
 #                   curtails the PV), storing the PV surplus
 #   sell-excess     feed_in_priority while the PV covers the house, else self-use
@@ -100,6 +101,10 @@ DISPATCH_FAILSAFE = 3  # minutes
 DISPATCH_REFRESH = 50  # s between repeats of an unchanged command
 MAX_CHARGE_POWER = 10000  # W, the inverter and the BMS limit it further
 MAX_DISCHARGE_POWER = 10000  # W, the most a `sell` asks for
+# A hold's grid_import target above this discharged the battery instead, up to 9.5 kW
+# to the grid with a 12.7 kW target on the S6-EH3P (Oct 2026; 0.5-7.3 kW worked), so a
+# higher target (no power charge, only the fuse) uses battery_hold
+HOLD_IMPORT_MAX = 10000  # W
 BATTERY_VOLTAGE = "sensor.solis_s6_solis_battery_voltage"  # V
 # The lowest SOC `hold` lets the battery cover peaks down to (the plan's reserve may
 # be used then, see AGENTS.md "Battery plan")
@@ -243,7 +248,7 @@ elif DISPATCH and state == "pause":
             "import_limit_watts": 0,
             "soc_max": int(get_float(MAX_SOC, 100.0)),
         }
-    elif grid_limit is not None:
+    elif grid_limit is not None and grid_limit <= HOLD_IMPORT_MAX:
         # Import up to the target, the battery covers the load above it
         dispatch = {
             "mode": "grid_import",

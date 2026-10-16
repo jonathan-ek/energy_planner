@@ -178,7 +178,20 @@ and peak shaving off:
 | `self_use` | none: stopped, the inverter's own self-use (tested) |
 | `sell-excess` | `feed_in_priority` while the PV covers the house, else none (both tested) |
 | `discard-excess` | none until the battery is full, then `self_consumption` with `export_limit_watts` 0 (tested). With room in the battery the surplus is not curtailed: the plan empties the battery before negative prices, so it fills first, and curtailing while it has room is not supported |
-| `hold` | in the dark `grid_import` at the import target, `allow_grid_charge` false, `soc_min` = the shutdown SOC (tested); in daylight `battery_charge` with `import_limit_watts` 0 up to the max SOC (test 6); `battery_hold` for a manual pause slot without a target |
+| `hold` | in the dark `grid_import` at the import target, `allow_grid_charge` false, `soc_min` = the shutdown SOC (tested up to 7.3 kW); in daylight `battery_charge` with `import_limit_watts` 0 up to the max SOC (test 6); `battery_hold` for a manual pause slot without a target and for a target above 10 kW (`HOLD_IMPORT_MAX`, see below) |
+
+## A hold target above the inverter's power (Oscar's S6-EH3P, Oct 2026)
+
+Without a power charge the plan's import target is the main fuse, 11.9-12.8 kW. From
+2026-10-14, when dispatch was turned on, every `hold` in the dark ran as `grid_import`
+at that target, and the battery did not stay idle: it covered the house (about 1-2 kW)
+or discharged at 5.6-9.5 kW, most of it to the grid (2026-10-16 02:45-03:15: 9.5 kW
+out, the house 0.6 kW, SOC 57 -> 49 %; four such runs, about 13 kWh sold at night and
+bought back in the next charge). Before, with peak shaving, the same holds kept the
+battery at 0. The service wrote the command as asked (mode 3, power -1268 in 10 W). So
+the script now sends `battery_hold` for a target above `HOLD_IMPORT_MAX` (10 kW, the
+inverter's power; between 7.3 and 10 kW not tested): it keeps the battery but does not
+shave the load above the target, which only matters at the fuse.
 
 ## Not tested yet
 
