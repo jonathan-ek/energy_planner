@@ -244,7 +244,16 @@ planners the plan is a preview and ignores them.
   shrunk by n / (n + 20). Then the gap from today's last quarter price to the first
   hour's estimate is added, fading as exp(-(h + 0.5) / 12) (`GAP_TIME_CONSTANT`), so
   the night does not jump at midnight (hourly error 30 -> 25 öre/kWh, 00-07 29 -> 18,
-  SE3 May 2025 - Oct 2026; plan cost not backtested). History: the Nord Pool sensor's
+  SE3 May 2025 - Oct 2026; plan cost not backtested). Then a wind correction
+  (`wind_correction`): per hour, coefficients (least absolute error, no intercept,
+  fitted each day on the last 365 days' estimate errors) times tomorrow's change in
+  wind power against today for the Swedish sites, the Danish/German ones and that
+  hour over all `WIND_SITES` (8 sites, Open-Meteo's day-before 100 m wind,
+  `_wind_forecast`, one request; without it the estimate goes on without wind,
+  `wind` in the cache says which). Hourly error 25.4 -> 23.3 öre/kWh (426 days,
+  both halves better, mostly the morning and evening peaks); Stockholm temperature,
+  German sun, fitted blend weights, a season term and gradient boosting gave
+  nothing more (Oct 2026). History: the Nord Pool sensor's
   hourly statistics (its last state per hour) for 400 days, scaled to SEK/MWh excl. VAT by the known prices of
   yesterday and today; calculated once per day (`price_estimate` in `hass.data`). The
   plan publishes `prices` (spot incl. VAT, öre/kWh) and `estimated` per quarter; the

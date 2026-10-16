@@ -10,11 +10,14 @@ import asyncio
 import datetime as dt
 import functools
 import logging
+
+import aiohttp
 from statistics import mean, median
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_utils
 
 from ..const import (
@@ -38,7 +41,7 @@ from .forecast import quarter_starts
 from .heat_pump import schedule
 from .heating import plan_inputs
 from .nordpool_utils import fetch_nordpool_data
-from .price_estimate import estimate
+from .price_estimate import WIND_FIT_DAYS, WIND_SITES, Wind, estimate
 from .tariff import fuse_power
 from .utils import get_tariff
 
@@ -47,6 +50,9 @@ _LOGGER = logging.getLogger(__name__)
 # Price history for the estimate of tomorrow's prices
 PRICE_HISTORY_DAYS = 400
 MIN_SCALE_HOURS = 4
+# Day-before wind forecasts for the estimate's wind correction (price_estimate.py)
+WIND_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
+WIND_TIMEOUT = aiohttp.ClientTimeout(total=60)
 
 
 def _state_float(hass: HomeAssistant, entity_id: str) -> float | None:
@@ -128,6 +134,44 @@ async def _price_history(
     return result
 
 
+async def _wind_forecast(hass: HomeAssistant, tomorrow: dt.date) -> Wind | None:
+    """Return Open-Meteo's day-before wind forecast for WIND_SITES, None on failure.
+
+    Wind speed at 100 m (km/h) per site, local date and hour, from WIND_FIT_DAYS + 1
+    days before tomorrow to tomorrow; one request for all sites.
+    """
+    sites = list(WIND_SITES)
+    params = {
+        "latitude": ",".join(str(WIND_SITES[site][0]) for site in sites),
+        "longitude": ",".join(str(WIND_SITES[site][1]) for site in sites),
+        "hourly": "wind_speed_100m_previous_day1",
+        "start_date": (tomorrow - dt.timedelta(days=WIND_FIT_DAYS + 1)).isoformat(),
+        "end_date": tomorrow.isoformat(),
+        "timezone": str(dt_utils.get_default_time_zone()),
+    }
+    try:
+        async with async_get_clientsession(hass).get(
+            WIND_URL, params=params, timeout=WIND_TIMEOUT
+        ) as response:
+            response.raise_for_status()
+            data = await response.json()
+        wind: dict[str, dict[dt.date, dict[int, float]]] = {}
+        for site, location in zip(sites, data, strict=True):
+            hourly = location["hourly"]
+            for time, speed in zip(
+                hourly["time"], hourly["wind_speed_100m_previous_day1"], strict=True
+            ):
+                if speed is not None:
+                    local = dt.datetime.fromisoformat(time)
+                    wind.setdefault(site, {}).setdefault(local.date(), {})[
+                        local.hour
+                    ] = float(speed)
+    except (aiohttp.ClientError, TimeoutError, KeyError, TypeError, ValueError) as err:
+        _LOGGER.warning("No wind forecast for the price estimate: %s", err)
+        return None
+    return wind
+
+
 def _hourly(prices: dict[dt.datetime, float]) -> dict[dt.date, dict[int, float]]:
     """Return the mean price per local date and hour."""
     values: dict[dt.date, dict[int, list[float]]] = {}
@@ -145,7 +189,8 @@ async def _estimated_prices(
     """Return estimated spot prices per quarter of tomorrow while it is unpublished.
 
     From the Nord Pool sensor's history (price_estimate.py), scaled to SEK/MWh excl.
-    VAT by the known prices of the last two days. Calculated once per day.
+    VAT by the known prices of the last two days, with the wind forecast
+    (`_wind_forecast`) if Open-Meteo answers. Calculated once per day.
     """
     tomorrow = now.date() + dt.timedelta(days=1)
     if any(start.date() == tomorrow for start in prices):
@@ -173,17 +218,22 @@ async def _estimated_prices(
     if len(ratios) < MIN_SCALE_HOURS:
         return {}
     scale = median(ratios)
-    hourly = estimate(
-        {
-            **{
-                day: {hour: price * scale for hour, price in hours.items()}
-                for day, hours in history.items()
+    wind = await _wind_forecast(hass, tomorrow)
+    hourly = await hass.async_add_executor_job(
+        functools.partial(
+            estimate,
+            {
+                **{
+                    day: {hour: price * scale for hour, price in hours.items()}
+                    for day, hours in history.items()
+                },
+                **known,
             },
-            **known,
-        },
-        tomorrow,
-        # The prices after midnight start near tonight's
-        prices[max(prices)],
+            tomorrow,
+            # The prices after midnight start near tonight's
+            prices[max(prices)],
+            wind,
+        )
     )
     if hourly is None:
         return {}
@@ -193,7 +243,11 @@ async def _estimated_prices(
         quarter: hourly.get(quarter.hour, fallback)
         for quarter in quarter_starts(start, start + dt.timedelta(days=1))
     }
-    hass.data[DOMAIN]["price_estimate"] = {"day": tomorrow, "prices": estimated}
+    hass.data[DOMAIN]["price_estimate"] = {
+        "day": tomorrow,
+        "prices": estimated,
+        "wind": wind is not None,
+    }
     return estimated
 
 

@@ -95,3 +95,59 @@ def test_gap_to_tonight_fades():
         assert estimate[hour] == pytest.approx(expected)
     assert estimate[0] < 30
     assert estimate[0] < estimate[6] < estimate[23] < 100
+
+
+def windy(days, speed):
+    """Return wind for all sites: `speed(day)` km/h in every hour."""
+    return {
+        site: {day: dict.fromkeys(range(24), speed(day)) for day in days}
+        for site in price_estimate.WIND_SITES
+    }
+
+
+def test_wind_power():
+    """Test the turbine curve: nothing below 3 m/s, full from 12 m/s."""
+    assert price_estimate.wind_power(3 * 3.6) == 0.0
+    assert price_estimate.wind_power(7.5 * 3.6) == pytest.approx(0.125)
+    assert price_estimate.wind_power(20 * 3.6) == 1.0
+
+
+def test_wind_features():
+    """Test the change in wind power per group and in the hour."""
+    days = [dt.date(2026, 3, 1), dt.date(2026, 3, 2)]
+    wind = windy(days, lambda day: 12 * 3.6 if day == days[1] else 0.0)
+    features = price_estimate.wind_features(wind, days[1])
+    assert features is not None
+    assert features[5] == pytest.approx((1.0, 1.0, 1.0))
+    assert price_estimate.wind_features(wind, days[0]) is None  # no day before
+
+
+def test_wind_lowers_the_estimate():
+    """Test that a learned wind effect is applied to a windy tomorrow."""
+    days = [dt.date(2025, 6, 1) + dt.timedelta(days=i) for i in range(160)]
+    # Every third day is windy, and windy days are 40 cheaper than the profile
+    is_windy = {day: i % 3 == 0 for i, day in enumerate(days)}
+    prices = {day: dict.fromkeys(range(24), 100.0 - 40 * is_windy[day]) for day in days}
+    speeds = windy(days, lambda day: 12 * 3.6 if is_windy[day] else 0.0)
+    tomorrow = days[-1]
+    assert is_windy[tomorrow]
+    del prices[tomorrow]
+    last = prices[tomorrow - dt.timedelta(days=1)][23]
+    plain = price_estimate.estimate(prices, tomorrow, last)
+    with_wind = price_estimate.estimate(prices, tomorrow, last, speeds)
+    assert plain is not None
+    assert with_wind is not None
+    # Most of the 40 (the base and the shrunk corrections blur it a little)
+    assert with_wind[12] == pytest.approx(60.0, abs=6.0)
+    assert with_wind[12] < plain[12] - 10
+
+
+def test_no_wind_correction_with_little_history():
+    """Test that without enough wind history the estimate is unchanged."""
+    days = DAYS
+    prices = history(days)
+    wednesday = dt.date(2026, 3, 25)
+    speeds = windy(days[-10:], lambda day: 30.0)
+    assert price_estimate.estimate(prices, wednesday, 100.0, speeds) == (
+        price_estimate.estimate(prices, wednesday, 100.0)
+    )

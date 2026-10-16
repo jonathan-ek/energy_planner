@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import aiohttp
 import pytest
 
 from custom_components.energy_planner.const import DOMAIN, PLAN_SENSORS
@@ -226,6 +227,7 @@ async def test_tomorrow_is_estimated(mock_hass):
         patch.object(battery_plan, "_prices", AsyncMock(return_value=today)),
         patch.object(battery_plan, "_price_history", AsyncMock(return_value=sensor)),
         patch.object(battery_plan, "_hourly_import", AsyncMock(return_value={})),
+        patch.object(battery_plan, "_wind_forecast", AsyncMock(return_value=None)),
     ):
         await battery_plan.async_update_plan(mock_hass)
     plan = mock_hass.data[DOMAIN]["plan"]
@@ -240,6 +242,41 @@ async def test_tomorrow_is_estimated(mock_hass):
     assert night == pytest.approx((200 + 1300 * gap) * 0.125, abs=0.01)
     estimate = mock_hass.data[DOMAIN]["price_estimate"]
     assert estimate["day"] == NOW.date() + dt.timedelta(days=1)
+    assert estimate["wind"] is False
+
+
+async def test_wind_forecast(mock_hass):
+    """Test that Open-Meteo's answer for all sites becomes speed per date and hour."""
+    times = ["2026-01-14T00:00", "2026-01-14T01:00"]
+    answer = [
+        {"hourly": {"time": times, "wind_speed_100m_previous_day1": [36.0, None]}}
+        for _ in price_estimate.WIND_SITES
+    ]
+    response = MagicMock()
+    response.json = AsyncMock(return_value=answer)
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=response)
+    context.__aexit__ = AsyncMock(return_value=None)
+    session = MagicMock()
+    session.get.return_value = context
+    with patch.object(battery_plan, "async_get_clientsession", return_value=session):
+        wind = await battery_plan._wind_forecast(mock_hass, dt.date(2026, 1, 15))
+    assert wind is not None
+    assert set(wind) == set(price_estimate.WIND_SITES)
+    assert wind["se3"] == {dt.date(2026, 1, 14): {0: 36.0}}
+    params = session.get.call_args.kwargs["params"]
+    assert params["end_date"] == "2026-01-15"
+    assert len(params["latitude"].split(",")) == len(price_estimate.WIND_SITES)
+
+
+async def test_no_wind_forecast_on_error(mock_hass):
+    """Test that an Open-Meteo failure gives no wind, so the estimate goes without."""
+    session = MagicMock()
+    session.get.side_effect = aiohttp.ClientError("down")
+    with patch.object(battery_plan, "async_get_clientsession", return_value=session):
+        assert (
+            await battery_plan._wind_forecast(mock_hass, dt.date(2026, 1, 15)) is None
+        )
 
 
 async def test_no_estimate_without_history(mock_hass):
@@ -251,6 +288,7 @@ async def test_no_estimate_without_history(mock_hass):
         patch.object(battery_plan, "_prices", AsyncMock(return_value=today)),
         patch.object(battery_plan, "_price_history", AsyncMock(return_value={})),
         patch.object(battery_plan, "_hourly_import", AsyncMock(return_value={})),
+        patch.object(battery_plan, "_wind_forecast", AsyncMock(return_value=None)),
     ):
         await battery_plan.async_update_plan(mock_hass)
     plan = mock_hass.data[DOMAIN]["plan"]
