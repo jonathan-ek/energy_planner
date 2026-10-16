@@ -27,6 +27,21 @@ def test_is_plugged(state, plugged):
     assert ev.is_plugged(state) == plugged
 
 
+@pytest.mark.parametrize(
+    ("state", "finished"),
+    [
+        ("connected_finished", True),
+        ("Connected_Finished", True),
+        ("connected_charging", False),
+        ("connected_requesting", False),
+        (None, False),
+    ],
+)
+def test_is_finished(state, finished):
+    """Test the charger states that mean the car has stopped by itself."""
+    assert ev.is_finished(state) == finished
+
+
 def test_charging_nights_run_noon_to_noon():
     """Test that evening and early morning charging count as one night."""
     day = dt.date(2026, 10, 5)

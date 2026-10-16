@@ -452,17 +452,21 @@ but `disconnected`/`unavailable`/`unknown`/`off` means plugged in, so Zaptec's
 
 - Need: (limit − SOC) × capacity / 0.9 when the car reports both; otherwise the
   largest ended charging night (noon to noon) in the 35 days of `forecast_ev_sensor`
-  history (`ev_need_kwh` in the forecast) minus the session's energy; for a trip (the
-  departure is the deadline) a full battery (`ev_battery_capacity` / 0.9, source
-  `trip`) minus the session's energy, as the car stops at its own charge limit. Overestimating
-  is cheap: a full car stops by itself, and the rest of the planned quarters pass
-  without charging. Underestimating is not (the plan would pause a car that is not
+  history (`ev_need_kwh` in the forecast) minus the session's energy, also for a trip
+  (the departure is the deadline, source `trip`; without that history a full battery,
+  `ev_battery_capacity` / 0.9). A full battery from empty was planned at first: at the
+  parents' (Oct 2026) 81 kWh at 11 kW the whole night, in the expensive hours too, for
+  a car that took 3 kWh and stopped. Overestimating the energy is otherwise cheap: a
+  full car stops by itself, and the rest of the planned quarters pass without
+  charging. While the charger state ends in `finished` the car has stopped by itself
+  and is not planned. Underestimating is not (the plan would pause a car that is not
   full; the 90th percentile was 19 kWh where nights reach 33), so once the session
   has taken more than that, or without either, the car is not planned and the
   action falls back to charging. The plan publishes `ev` (None while unplugged): `power` per quarter (kW),
   `need_kwh`, `need_source` (`soc`/`history`/`trip`), `ready` (the deadline, also past the
 horizon), `planned_kwh`, `missing_kwh`.
-  Plugging in or out and the car settings (incl. the departure) trigger a new plan.
+  Plugging in or out, the charger entering or leaving `finished` and the car settings
+  (incl. the departure) trigger a new plan.
 - `sensor.energy_planner_ev_action`: `charge`/`wait` from the plan (source `plan`,
   `until`, `power_kw`); without a fresh plan `charge` (source `fallback`, the car
   charges as without the planner); unplugged no state.

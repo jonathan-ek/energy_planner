@@ -12,7 +12,10 @@ charger's power history, minus what this session has delivered: overestimating i
 cheap, as the car stops by itself when it is full and the rest of the planned
 quarters pass without charging. Underestimating is not (the plan would pause a car
 that is not full), so once a session has taken more than that the car is not
-planned and charges as without the planner.
+planned and charges as without the planner. A trip uses the same need without the
+SOC: a full battery from empty (83 kWh for 75) planned the whole night, also in
+expensive hours, for a car that took 3 kWh. A car that has finished (the charger
+state ends in `finished`) has stopped by itself and is not planned.
 
 The car is needed by the ready time on working days only: plugged in before a
 weekend it is charged in the cheapest hours before Monday morning, unless a
@@ -45,6 +48,11 @@ QUARTER = dt.timedelta(minutes=15)
 def is_plugged(state: str | None) -> bool:
     """Return whether the charger state means a car is plugged in."""
     return state is not None and state.lower() not in UNPLUGGED_STATES
+
+
+def is_finished(state: str | None) -> bool:
+    """Return whether the charger state means the car has stopped by itself."""
+    return state is not None and state.lower().endswith("finished")
 
 
 def charging_nights(

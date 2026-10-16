@@ -339,7 +339,7 @@ async def test_plugged_car_charges_at_night(mock_hass):
 async def test_car_from_soc(mock_hass):
     """Test that the car's SOC and charge limit give the need when known."""
     STATES.update(
-        {"sensor.charger_status": "connected_finished", "sensor.car_soc": "60"}
+        {"sensor.charger_status": "connected_requesting", "sensor.car_soc": "60"}
     )
     STATES["sensor.car_limit"] = "80"
     try:
@@ -378,10 +378,10 @@ async def test_car_past_its_history_need_is_not_planned(mock_hass):
     assert plan["ev"] is None
 
 
-async def test_car_trip_charges_full(mock_hass):
-    """Test that a departure before the working morning plans a full battery."""
+async def test_car_trip_uses_the_history_need(mock_hass):
+    """Test that a departure before the working morning becomes the deadline."""
     STATES["sensor.charger_status"] = "connected_charging"
-    STATES["sensor.charger_session"] = "25.0"
+    STATES["sensor.charger_session"] = "4.0"
     departure = dt.datetime(2026, 1, 14, 4, 0, tzinfo=TZ)
     try:
         config = mock_hass.data[DOMAIN]["config"]
@@ -395,14 +395,53 @@ async def test_car_trip_charges_full(mock_hass):
         del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
         del config["ev_departure"]
     car = plan["ev"]
-    # Past the history's 20 kWh, but a trip fills the battery: 45 / 0.9 - 25
+    # The history's 20 kWh, not a full battery, minus the session's 4
     assert car["need_source"] == "trip"
-    assert car["need_kwh"] == pytest.approx(25.0)
+    assert car["need_kwh"] == pytest.approx(16.0)
     assert car["ready"] == departure.isoformat()
     starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
     charging = [s for s, kw in zip(starts, car["power"], strict=True) if kw > 0]
     assert charging
     assert max(charging) < departure
+
+
+async def test_car_trip_without_history_charges_full(mock_hass):
+    """Test that a trip without charging history plans a full battery."""
+    STATES["sensor.charger_status"] = "connected_charging"
+    STATES["sensor.charger_session"] = "25.0"
+    departure = dt.datetime(2026, 1, 14, 4, 0, tzinfo=TZ)
+    try:
+        config = mock_hass.data[DOMAIN]["config"]
+        config["ev_charger_status_sensor"] = "sensor.charger_status"
+        config["ev_session_energy_sensor"] = "sensor.charger_session"
+        config["ev_battery_capacity"] = 45
+        config["ev_departure"] = departure
+        mock_hass.data[DOMAIN]["forecast"].pop("ev_need_kwh", None)
+        plan = await run(mock_hass)
+    finally:
+        del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
+        del config["ev_departure"]
+    # 45 / 0.9 - 25
+    assert plan["ev"]["need_source"] == "trip"
+    assert plan["ev"]["need_kwh"] == pytest.approx(25.0)
+
+
+async def test_finished_car_is_not_planned(mock_hass):
+    """Test that a car that has stopped by itself is not planned."""
+    STATES["sensor.charger_status"] = "connected_finished"
+    STATES["sensor.charger_session"] = "2.7"
+    departure = dt.datetime(2026, 1, 14, 4, 0, tzinfo=TZ)
+    try:
+        config = mock_hass.data[DOMAIN]["config"]
+        config["ev_charger_status_sensor"] = "sensor.charger_status"
+        config["ev_session_energy_sensor"] = "sensor.charger_session"
+        config["ev_departure"] = departure
+        mock_hass.data[DOMAIN]["forecast"]["ev_need_kwh"] = 20.0
+        plan = await run(mock_hass)
+    finally:
+        del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
+        del config["ev_departure"]
+    assert plan["ev"] is None
 
 
 async def test_main_fuse_caps_the_import(mock_hass):
