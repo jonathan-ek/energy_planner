@@ -373,21 +373,17 @@ def ev_plugged(hass: HomeAssistant) -> bool:
 def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
     """Return the car to plan with the battery, and what the plan publishes on it.
 
-    Only while it is plugged in and has not finished (stopped by itself). The need is
-    from the car's SOC and charge limit when both are known. Otherwise it is the
-    largest recent charging night minus what this session has delivered (see
-    planner/ev.py), also for a trip (the departure comes before the next working
-    morning, source `trip`); a trip without that history plans a full battery, as the
-    car stops at its own charge limit. Without either, or once the session has taken
-    more than the history's need, the car is not planned and the action falls back
-    to charging, so a car that is not full is never paused.
+    Only while it is plugged in. The need is from the car's SOC and charge limit when
+    both are known. Otherwise it is the largest recent charging night minus what this
+    session has delivered (see planner/ev.py), or for a trip (the departure comes
+    before the next working morning) a full battery, as the car stops at its own
+    charge limit. Without either, or once the session has taken more than the
+    history's need, the car is not planned and the action falls back to charging, so
+    a car that is not full is never paused.
     """
     if not starts or not ev_plugged(hass):
         return None, None
     config = hass.data[DOMAIN]["config"]
-    status = hass.states.get(config.get("ev_charger_status_sensor") or "")
-    if ev.is_finished(status.state if status is not None else None):
-        return None, None
     capacity = float(config.get("ev_battery_capacity", 75))
     ready = config.get("ev_ready_time") or dt.time(6, 30)
     departure = config.get("ev_departure")
@@ -399,14 +395,14 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
         source = "soc"
     else:
         delivered = _state_float(hass, config.get("ev_session_energy_sensor") or "")
-        need = (hass.data[DOMAIN].get("forecast") or {}).get("ev_need_kwh")
-        source = "history"
         if target == departure:
-            if need is None:
-                need = ev.need_from_soc(0, 100, capacity)
+            need = ev.need_from_soc(0, 100, capacity)
             source = "trip"
-        elif need is None:
-            return None, None
+        else:
+            need = (hass.data[DOMAIN].get("forecast") or {}).get("ev_need_kwh")
+            if need is None:
+                return None, None
+            source = "history"
         need -= delivered or 0.0
         if need <= 0:
             return None, None

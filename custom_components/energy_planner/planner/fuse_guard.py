@@ -25,7 +25,7 @@ from homeassistant.util import dt as dt_utils
 from ..const import DOMAIN
 from . import fuse
 from .battery_plan import ev_plugged
-from .ev import ev_action, is_finished
+from .ev import ev_action
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ def update_guard(hass: HomeAssistant) -> None:
     # A car that has finished draws nothing: no room is kept for it
     status_id = config.get("ev_charger_status_sensor")
     status = hass.states.get(status_id) if status_id else None
-    finished = is_finished(status.state if status is not None else None)
+    finished = status is not None and status.state.lower().endswith("finished")
     guard = fuse.limits(
         reading,
         fuse_a,

@@ -32,7 +32,6 @@ from .const import (
     TIME_ENTITIES,
     SLOT_COUNT,
 )
-from .planner.ev import is_finished as ev_is_finished
 from .planner.ev import is_plugged as ev_is_plugged
 from .planner.fuse_guard import config_entities, update_guard
 from .planner import (
@@ -398,12 +397,6 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
         now = ev_is_plugged(new.state if new is not None else None)
         if was != now:
             await async_request_plan(hass, "car plugged in" if now else "car unplugged")
-        elif ev_is_finished(old.state if old is not None else None) != (
-            finished := ev_is_finished(new.state if new is not None else None)
-        ):
-            await async_request_plan(
-                hass, "car finished" if finished else "car charging again"
-            )
 
     status = config.get("ev_charger_status_sensor")
     if status:
