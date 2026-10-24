@@ -190,7 +190,8 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   from about 15:00 in spring and autumn, 425 days): hourly error 1.07 -> 0.71 kWh,
   daily 14% -> 15%. Published as `pv_hourly_calibration` (hour -> factor). If Open-Meteo fails,
   Forecast.Solar `watts` with its `power_production_now` history is used instead;
-  `pv_source` says which.
+  `pv_source` says which. Its PV is None on days it does not reach (so the plan ends
+  there instead of planning them without sun).
 - **Planned loads** come from timed events in the local calendar
   `calendar.energiplan` (recurring events work; all-day events are ignored). Energy:
   `<n> kWh` in the title or description, otherwise the sum of defaults for activities
@@ -205,7 +206,8 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   `away`: no weekend reserve there. The battery keeps `battery_reserve_soc`, and the
   load profile is not lowered.
 - Output: `hass.data[DOMAIN]["forecast"]` with parallel lists `starts`, `load`
-  (profile), `planned`, `reserve`, `pv` (kWh per quarter, all of today and tomorrow),
+  (profile), `planned`, `reserve`, `pv` (kWh per quarter, all of today and the next two days, `FORECAST_DAYS`; the
+  plan uses the third day once tomorrow's prices are published),
   `temperature` (Open-Meteo air temperature mid-quarter, None without Open-Meteo),
   `heat_pump_loss` / `heat_pump_loss_hours` (measured heat loss, kW/K),
   `planned_events`, `away` (bool per quarter), and totals. `load_tomorrow` / `load_today_remaining` = profile +
@@ -235,9 +237,12 @@ planners the plan is a preview and ignores them.
 
 - Horizon: the current quarter until the last quarter with both a price and a load
   forecast. Load = forecast profile + planned + reserve; PV = forecast.
-- Until tomorrow's prices are published (about 13:00) tomorrow uses an estimate
-  (`price_estimate.estimate`, `_estimated_prices`), so the plan does not end at
-  midnight and value the energy left at today's cheapest price. Per hour: the mean of
+- The day after the published prices uses an estimate (`price_estimate.estimate`,
+  `_estimated_prices`): tomorrow until its prices are published (about 13:00), then
+  the day after tomorrow (`ESTIMATE_MAX_LEAD`), so the plan always sees a day past the
+  coming night and does not value the energy left at that night's cheapest price.
+  Below "today" and "tomorrow" are the last published day and the estimated one. Per
+  hour: the mean of
   today's price and the last 7 days of tomorrow's type (workday, or weekend and
   Swedish holiday incl. Midsummer, Christmas and New Year's Eve, within 21 days), plus
   the median error of that estimate for the same hour and type change in the history,
@@ -248,9 +253,10 @@ planners the plan is a preview and ignores them.
   (`wind_correction`): per hour, coefficients (least absolute error, no intercept,
   fitted each day on the last 365 days' estimate errors) times tomorrow's change in
   wind power against today for the Swedish sites, the Danish/German ones and that
-  hour over all `WIND_SITES` (8 sites, Open-Meteo's day-before 100 m wind,
-  `_wind_forecast`, one request; without it the estimate goes on without wind,
-  `wind` in the cache says which). Hourly error 25.4 -> 23.3 öre/kWh (426 days,
+  hour over all `WIND_SITES` (8 sites, Open-Meteo's 100 m wind made as many days
+  before as the estimated day is ahead, `previous_day1` or `previous_day2`, fitted on
+  the same lead; `_wind_forecast`, one request; without it the estimate goes on
+  without wind, `wind` in the cache says which). Hourly error 25.4 -> 23.3 öre/kWh (426 days,
   both halves better, mostly the morning and evening peaks); Stockholm temperature,
   German sun, fitted blend weights, a season term and gradient boosting gave
   nothing more (Oct 2026). History (400 days, `price_estimate.merge`, per day the
@@ -264,10 +270,21 @@ planners the plan is a preview and ignores them.
   Oct 2025 - Oct 2026, only about two days after a restart were complete), so without
   the other sources there were no same-type days. Backtest on Energy-Charts prices
   (520 days): SE4 33.1 -> 29.4 öre/kWh with wind, SE3 26.3 -> 23.8; each step helps in
-  both zones. Calculated once per day (`price_estimate` in `hass.data`, with
-  `sources`: days per source; logged). The
+  both zones. Calculated once per day and lead (`price_estimate` in `hass.data`, with
+  `day`, `lead` and `sources`: days per source; logged), so the evening's estimate of
+  the day after tomorrow is made again at midnight with a fresher wind forecast. The
   plan publishes `prices` (spot incl. VAT, öre/kWh) and `estimated` per quarter; the
   real prices replace the estimate when `tomorrow_valid` triggers a new plan.
+  Estimating the day after tomorrow from 13:00 (Oct 2026; receding horizon replanned
+  every 2 h, real load, perfect PV, estimates without wind): the owner's house
+  (487 days from 2025-06, power charges) 54 kr less over the period, Oscar's (593
+  days, E.ON, no power charge) 20; always planning to the end of the day after
+  tomorrow (two estimated days in the morning) 38 / 20, the real prices for that day
+  31 / 52. So the gain is small and hardly depends on the estimate: with the fees,
+  efficiency and wear, storing for the day after pays only on a cheap night before a
+  much dearer day. It is there so the evening's plan already shows the night's
+  charging instead of changing at midnight. The plan takes up to about 60 % longer
+  in the evening (owner about 2 -> 3 s per run).
   Backtest (SE3, 778 mornings May 2025 - Oct 2026, the plan made at 07:00 followed until
   13:00, real load and PV): a plan ending at midnight cost 0.31 kr/day more than knowing
   tomorrow's prices, the simple mean of today and the last 7 days 0.15, this 0.10 (no

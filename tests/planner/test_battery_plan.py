@@ -90,12 +90,16 @@ def prices():
     }
 
 
-async def run(hass, history=None):
+async def run(hass, history=None, price_history=None):
     """Run async_update_plan at NOW."""
     with (
         patch.object(battery_plan.dt_utils, "now", return_value=NOW),
         patch.object(battery_plan, "_prices", AsyncMock(return_value=prices())),
-        patch.object(battery_plan, "_price_history", AsyncMock(return_value={})),
+        patch.object(
+            battery_plan,
+            "_price_history",
+            AsyncMock(return_value=price_history or {}),
+        ),
         patch.object(
             battery_plan, "_hourly_import", AsyncMock(return_value=history or {})
         ),
@@ -261,6 +265,74 @@ async def test_tomorrow_is_estimated(mock_hass):
     assert estimate["wind"] is False
 
 
+def three_days(hass):
+    """Extend the mock forecast to today and the next two days."""
+    starts = [START + dt.timedelta(minutes=15 * i) for i in range(288)]
+    hass.data[DOMAIN]["forecast"] = {
+        "starts": [s.isoformat() for s in starts],
+        "load": [0.25 if s.hour < 17 else 0.5 for s in starts],
+        "planned": [0.0] * 288,
+        "reserve": [0.0] * 288,
+        "pv": [0.0] * 288,
+    }
+    return starts
+
+
+def sensor_history():
+    """Return the Nord Pool sensor's history (öre/kWh incl. VAT): the daily profile."""
+    return {
+        (START - dt.timedelta(days=i)).date(): {
+            hour: (200.0 if hour < 6 else 1500.0 if hour >= 17 else 800.0) * 0.125
+            for hour in range(24)
+        }
+        for i in range(30)
+    }
+
+
+async def test_day_after_tomorrow_is_estimated(mock_hass):
+    """Test that with tomorrow's prices published the plan goes on a day estimated."""
+    mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = "sensor.nordpool_kwh_se3"
+    starts = three_days(mock_hass)
+    wind = AsyncMock(return_value=None)
+    with patch.object(battery_plan, "_wind_forecast", wind):
+        plan = await run(mock_hass, price_history=sensor_history())
+    day = NOW.date() + dt.timedelta(days=2)
+    assert plan["starts"][-1] == starts[-1].isoformat()
+    planned = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
+    assert plan["estimated"] == [s.date() == day for s in planned]
+    estimate = mock_hass.data[DOMAIN]["price_estimate"]
+    assert (estimate["day"], estimate["lead"]) == (day, 2)
+    # The wind correction from the forecast made two days before
+    assert wind.call_args.args[1:] == (day, 2)
+    # At midnight the same day is tomorrow: estimated again with lead 1
+    with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
+        cached = await battery_plan._estimated_prices(mock_hass, prices(), NOW)
+    assert cached == estimate["prices"]
+    midnight = dt.datetime.combine(NOW.date() + dt.timedelta(days=1), dt.time(), TZ)
+    tomorrow_only = {s: p for s, p in prices().items() if s.date() > NOW.date()}
+    with (
+        patch.object(battery_plan, "_wind_forecast", wind),
+        patch.object(
+            battery_plan, "_price_history", AsyncMock(return_value=sensor_history())
+        ),
+        patch.object(battery_plan.dt_utils, "now", return_value=midnight),
+    ):
+        await battery_plan._estimated_prices(mock_hass, tomorrow_only, midnight)
+    assert mock_hass.data[DOMAIN]["price_estimate"]["lead"] == 1
+    assert wind.call_args.args[1:] == (day, 1)
+
+
+async def test_plan_ends_where_the_pv_forecast_does(mock_hass):
+    """Test that quarters without a PV forecast (Forecast.Solar) end the plan."""
+    starts = three_days(mock_hass)
+    pv = mock_hass.data[DOMAIN]["forecast"]["pv"]
+    pv[192:] = [None] * 96
+    mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = "sensor.nordpool_kwh_se3"
+    plan = await run(mock_hass, price_history=sensor_history())
+    assert plan["starts"][-1] == starts[191].isoformat()
+    assert not any(plan["estimated"])
+
+
 async def test_wind_forecast(mock_hass):
     """Test that Open-Meteo's answer for all sites becomes speed per date and hour."""
     times = ["2026-01-14T00:00", "2026-01-14T01:00"]
@@ -282,7 +354,20 @@ async def test_wind_forecast(mock_hass):
     assert wind["se3"] == {dt.date(2026, 1, 14): {0: 36.0}}
     params = session.get.call_args.kwargs["params"]
     assert params["end_date"] == "2026-01-15"
+    assert params["hourly"] == "wind_speed_100m_previous_day1"
     assert len(params["latitude"].split(",")) == len(price_estimate.WIND_SITES)
+    # Two days ahead: the forecast made two days before
+    for location in answer:
+        hourly = location["hourly"]
+        hourly["wind_speed_100m_previous_day2"] = hourly.pop(
+            "wind_speed_100m_previous_day1"
+        )
+    with patch.object(battery_plan, "async_get_clientsession", return_value=session):
+        wind = await WIND_FORECAST(mock_hass, dt.date(2026, 1, 15), 2)
+    assert wind is not None
+    assert wind["se3"] == {dt.date(2026, 1, 14): {0: 36.0}}
+    params = session.get.call_args.kwargs["params"]
+    assert params["hourly"] == "wind_speed_100m_previous_day2"
 
 
 async def test_no_wind_forecast_on_error(mock_hass):

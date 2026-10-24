@@ -56,9 +56,12 @@ from .utils import get_tariff
 
 _LOGGER = logging.getLogger(__name__)
 
-# Price history for the estimate of tomorrow's prices
+# Price history for the estimate of the first day without published prices
 PRICE_HISTORY_DAYS = 400
 MIN_SCALE_HOURS = 4
+# The estimate covers the day after the published prices, at most the day after
+# tomorrow (lead 2). One more day ahead saved 12-40 kr/year (backtest Oct 2026)
+ESTIMATE_MAX_LEAD = 2
 # Day-before wind forecasts for the estimate's wind correction (price_estimate.py)
 WIND_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 WIND_TIMEOUT = aiohttp.ClientTimeout(total=60)
@@ -149,19 +152,24 @@ async def _price_history(
     return result
 
 
-async def _wind_forecast(hass: HomeAssistant, tomorrow: dt.date) -> Wind | None:
-    """Return Open-Meteo's day-before wind forecast for WIND_SITES, None on failure.
+async def _wind_forecast(
+    hass: HomeAssistant, day: dt.date, lead: int = 1
+) -> Wind | None:
+    """Return Open-Meteo's wind forecast made `lead` days before, None on failure.
 
-    Wind speed at 100 m (km/h) per site, local date and hour, from WIND_FIT_DAYS + 1
-    days before tomorrow to tomorrow; one request for all sites.
+    Wind speed at 100 m (km/h) per site in WIND_SITES, local date and hour, from
+    WIND_FIT_DAYS + 1 days before `day` to `day`; one request for all sites. The
+    estimate's wind correction is fitted on the past days of the same lead, so the
+    day after tomorrow (lead 2) is corrected as a two days old forecast predicts.
     """
     sites = list(WIND_SITES)
+    variable = f"wind_speed_100m_previous_day{lead}"
     params = {
         "latitude": ",".join(str(WIND_SITES[site][0]) for site in sites),
         "longitude": ",".join(str(WIND_SITES[site][1]) for site in sites),
-        "hourly": "wind_speed_100m_previous_day1",
-        "start_date": (tomorrow - dt.timedelta(days=WIND_FIT_DAYS + 1)).isoformat(),
-        "end_date": tomorrow.isoformat(),
+        "hourly": variable,
+        "start_date": (day - dt.timedelta(days=WIND_FIT_DAYS + 1)).isoformat(),
+        "end_date": day.isoformat(),
         "timezone": str(dt_utils.get_default_time_zone()),
     }
     try:
@@ -173,9 +181,7 @@ async def _wind_forecast(hass: HomeAssistant, tomorrow: dt.date) -> Wind | None:
         wind: dict[str, dict[dt.date, dict[int, float]]] = {}
         for site, location in zip(sites, data, strict=True):
             hourly = location["hourly"]
-            for time, speed in zip(
-                hourly["time"], hourly["wind_speed_100m_previous_day1"], strict=True
-            ):
+            for time, speed in zip(hourly["time"], hourly[variable], strict=True):
                 if speed is not None:
                     local = dt.datetime.fromisoformat(time)
                     wind.setdefault(site, {}).setdefault(local.date(), {})[
@@ -267,18 +273,25 @@ def _hourly(prices: dict[dt.datetime, float]) -> dict[dt.date, dict[int, float]]
 async def _estimated_prices(
     hass: HomeAssistant, prices: dict[dt.datetime, float], now: dt.datetime
 ) -> dict[dt.datetime, float]:
-    """Return estimated spot prices per quarter of tomorrow while it is unpublished.
+    """Return estimated spot prices per quarter of the day after the published ones.
 
-    From the recorded prices (`_record_prices`), the Nord Pool sensor's history and
-    Energy-Charts (price_estimate.py), the last two scaled to SEK/MWh excl. VAT by
-    the known prices of the last two days, with the wind forecast
-    (`_wind_forecast`) if Open-Meteo answers. Calculated once per day.
+    That is tomorrow until its prices are published (about 13:00), then the day after
+    tomorrow, so the plan always sees a day past the night ahead. From the recorded
+    prices (`_record_prices`), the Nord Pool sensor's history and Energy-Charts
+    (price_estimate.py), the last two scaled to SEK/MWh excl. VAT by the known prices
+    of the last two days, with the wind forecast made as many days before
+    (`_wind_forecast`) if Open-Meteo answers. Calculated once per day and lead, so
+    the evening's estimate of the day after tomorrow is made again at midnight with
+    a fresher wind forecast.
     """
-    tomorrow = now.date() + dt.timedelta(days=1)
-    if any(start.date() == tomorrow for start in prices):
+    if not prices:
+        return {}
+    day = max(max(prices).date(), now.date()) + dt.timedelta(days=1)
+    lead = (day - now.date()).days
+    if lead > ESTIMATE_MAX_LEAD:
         return {}
     cached = hass.data[DOMAIN].get("price_estimate")
-    if cached and cached["day"] == tomorrow:
+    if cached and cached["day"] == day and cached.get("lead") == lead:
         return cached["prices"]
     entity_id = hass.data[DOMAIN]["config"].get("nordpool_entity_id")
     if entity_id is None:
@@ -304,12 +317,12 @@ async def _estimated_prices(
             }
     if not any(set(history) - set(known) for history in sources.values()):
         return {}
-    wind = await _wind_forecast(hass, tomorrow)
+    wind = await _wind_forecast(hass, day, lead)
     hourly = await hass.async_add_executor_job(
         functools.partial(
             estimate,
             merge(known, *sources.values()),
-            tomorrow,
+            day,
             # The prices after midnight start near tonight's
             prices[max(prices)],
             wind,
@@ -318,13 +331,14 @@ async def _estimated_prices(
     if hourly is None:
         return {}
     fallback = mean(hourly.values())
-    start = dt_utils.start_of_local_day(tomorrow)
+    start = dt_utils.start_of_local_day(day)
     estimated = {
         quarter: hourly.get(quarter.hour, fallback)
         for quarter in quarter_starts(start, start + dt.timedelta(days=1))
     }
     hass.data[DOMAIN]["price_estimate"] = {
-        "day": tomorrow,
+        "day": day,
+        "lead": lead,
         "prices": estimated,
         "wind": wind is not None,
         # Days each source has (the merge takes them in this order)
@@ -332,7 +346,7 @@ async def _estimated_prices(
     }
     _LOGGER.info(
         "Price estimate for %s: days per source %s, wind %s",
-        tomorrow,
+        day,
         hass.data[DOMAIN]["price_estimate"]["sources"],
         wind is not None,
     )
@@ -546,8 +560,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         return
     now = dt_utils.now()
     current = now.replace(minute=now.minute - now.minute % 15, second=0, microsecond=0)
-    # Until tomorrow's prices are published the plan uses an estimate, so it can see
-    # whether energy is worth keeping past midnight
+    # The day after the published prices is estimated, so the plan can see whether
+    # energy is worth keeping past the coming night
     estimated = await _estimated_prices(hass, prices, now)
 
     starts, price_list, load, pv, temperatures = [], [], [], [], []
@@ -558,13 +572,14 @@ async def async_update_plan(hass: HomeAssistant) -> None:
             continue
         base = forecast["load"][index]
         price = prices.get(start, estimated.get(start))
-        if price is None or base is None:
+        solar = forecast["pv"][index] if forecast["pv"] else 0.0
+        if price is None or base is None or solar is None:
             break
         starts.append(start)
         price_list.append(price)
         is_estimate.append(start not in prices)
         load.append(base + forecast["planned"][index] + forecast["reserve"][index])
-        pv.append(forecast["pv"][index] if forecast["pv"] else 0.0)
+        pv.append(solar)
         temperatures.append(
             forecast["temperature"][index] if forecast.get("temperature") else None
         )

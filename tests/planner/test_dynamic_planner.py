@@ -98,9 +98,12 @@ async def test_update_forecast(mock_hass):
         await dynamic_planner.async_update_forecast(mock_hass)
 
     result = mock_hass.data[DOMAIN]["forecast"]
-    # All of today and tomorrow
+    # All of today and the next two days
     assert result["starts"][0] == NOW.replace(hour=0, minute=0).isoformat()
-    assert len(result["starts"]) == 2 * 24 * 4
+    assert len(result["starts"]) == 3 * 24 * 4
+    # Forecast.Solar only reaches tomorrow: no PV the day after (the plan ends there)
+    assert result["pv"][2 * 24 * 4 - 1] == 0.0
+    assert set(result["pv"][2 * 24 * 4 :]) == {None}
     # Today counts from the current quarter (14:00)
     assert result["load_today_remaining"] == pytest.approx(10.0)
     # Flat 1 kWh per hour, EV session excluded
@@ -518,7 +521,13 @@ async def test_away_removes_the_weekend_reserve(mock_hass):
     ):
         await dynamic_planner.async_update_forecast(mock_hass)
     result = mock_hass.data[DOMAIN]["forecast"]
-    assert sum(result["reserve"]) == 0
+    reserve = {}
+    for start, kwh in zip(result["starts"], result["reserve"], strict=True):
+        day = dt.datetime.fromisoformat(start).date()
+        reserve[day] = reserve.get(day, 0.0) + kwh
+    # Away on Saturday only: Sunday (the forecast's third day) keeps its reserve
+    assert reserve[saturday.date()] == 0
+    assert reserve[saturday.date() + dt.timedelta(days=1)] > 0
     assert result["planned_events"] == []
     marked = dict(zip(result["starts"], result["away"], strict=True))
     assert marked[saturday.isoformat()]

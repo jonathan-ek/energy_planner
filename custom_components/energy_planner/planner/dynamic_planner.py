@@ -39,6 +39,9 @@ _LOGGER = logging.getLogger(__name__)
 
 HISTORY_DAYS = 35
 CALIBRATION_DAYS = 14
+# Today, tomorrow and the day after: the battery plan uses the third day once
+# tomorrow's prices are published (it then estimates that day's prices)
+FORECAST_DAYS = 3
 # Hourly PV means above this are Modbus glitches
 PV_MAX_KW = 25
 # Returns the latest forecast and the forecast made the day before, in one request
@@ -148,7 +151,7 @@ def _solar_planes(
 
 
 async def _fetch_open_meteo(session, latitude, longitude, tilt, azimuth):
-    """Fetch tilted irradiance and temperature for one plane: past 15 days + 2 days.
+    """Fetch tilted irradiance and temperature for one plane: past 15 days + 3 days.
 
     15 days, so yesterday's forecast can be calibrated on the 14 days before it.
     """
@@ -166,7 +169,7 @@ async def _fetch_open_meteo(session, latitude, longitude, tilt, azimuth):
         "hourly": ",".join(variables),
         "models": ",".join(forecast.OPEN_METEO_MODELS),
         "past_days": CALIBRATION_DAYS + 1,
-        "forecast_days": 2,
+        "forecast_days": FORECAST_DAYS,
         "timezone": "UTC",
     }
     async with session.get(
@@ -321,7 +324,7 @@ def _daily_totals(quarters, values, since):
 
 
 async def async_update_forecast(hass: HomeAssistant):
-    """Forecast load and PV per quarter for all of today and tomorrow.
+    """Forecast load and PV per quarter for all of today and the next two days.
 
     Today's forecast only uses days before today, so it is the same all day and can
     be compared with what actually happens. Totals for today count from now.
@@ -342,7 +345,7 @@ async def async_update_forecast(hass: HomeAssistant):
     now = dt_utils.now()
     today = now.date()
     yesterday = today - dt.timedelta(days=1)
-    end = dt_utils.start_of_local_day(today + dt.timedelta(days=2))
+    end = dt_utils.start_of_local_day(today + dt.timedelta(days=FORECAST_DAYS))
     quarters = forecast.quarter_starts(dt_utils.start_of_local_day(), end)
     current = forecast.quarter_starts(now, now + forecast.QUARTER)[0]
     # Yesterday's forecast is rebuilt as it was: the load profile only uses earlier
@@ -492,6 +495,23 @@ async def async_update_forecast(hass: HomeAssistant):
     if raw is not None and calibration is not None:
         raw_totals = _daily_totals(quarters, raw, current)
         pv = forecast.calibrated_quarters(raw, quarters, calibration, hourly)
+    if pv is not None and pv_source == "forecast.solar":
+        # Forecast.Solar may not reach the last day: no PV there (not 0), so the
+        # battery plan ends where the forecast does
+        covered = min(
+            (
+                dt_utils.start_of_local_day(
+                    dt_utils.as_local(max(watts)).date() + dt.timedelta(days=1)
+                )
+                for watts, _ in sources
+                if watts
+            ),
+            default=quarters[0],
+        )
+        pv = [
+            value if start < covered else None
+            for start, value in zip(quarters, pv, strict=True)
+        ]
 
     # Houses heated with electricity: the profile corrected for the outdoor temperature,
     # measured for the history days, Open-Meteo's for the forecast days
@@ -530,7 +550,7 @@ async def async_update_forecast(hass: HomeAssistant):
         "planned": [round(v, 3) for v in planned],
         "reserve": [round(v, 3) for v in reserve],
         "away": away,
-        "pv": None if pv is None else [round(v, 3) for v in pv],
+        "pv": _rounded(pv),
         # Outdoor air temperature (°C) mid-quarter, None without Open-Meteo
         "temperature": _rounded(temperature),
         # Measured heat pump heat loss (kW per °C), None until enough hours exist
