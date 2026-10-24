@@ -32,7 +32,8 @@
 #                   battery covers the load above it), battery_hold without a target
 #                   or with one above HOLD_IMPORT_MAX;
 #                   in daylight battery_charge with import limit 0 (grid_import
-#                   curtails the PV), storing the PV surplus
+#                   curtails the PV), storing the PV surplus, and grid_import while
+#                   the house is above the PV plus the target (peak shaving)
 #   sell-excess     feed_in_priority while the PV covers the house, else self-use
 #   discard-excess  self-use until the battery is full, then self_consumption with
 #                   export limit 0 (curtailing while the battery has room is not
@@ -93,6 +94,8 @@ DISCHARGE_PERIOD = None
 BATTERY_SOC = "sensor.solis_s6_solis_battery_soc"
 PV_POWER = "sensor.solis_s6_solis_total_pv_power"  # W
 HOUSE_POWER = "sensor.solis_s6_solis_household_load_power"  # W
+BATTERY_POWER = "sensor.solis_s6_solis_battery_power"  # W, without a sign
+BATTERY_DIRECTION = "sensor.solis_s6_solis_battery_current_direction"  # 1: discharging
 
 # Remote Dispatch, see the top; False: peak shaving and the time-of-use windows only
 DISPATCH = False
@@ -105,6 +108,7 @@ MAX_DISCHARGE_POWER = 10000  # W, the most a `sell` asks for
 # to the grid with a 12.7 kW target on the S6-EH3P (Oct 2026; 0.5-7.3 kW worked), so a
 # higher target (no power charge, only the fuse) uses battery_hold
 HOLD_IMPORT_MAX = 10000  # W
+SHAVE_MIN_POWER = 100  # W, the margin for peak shaving in a daylight hold
 BATTERY_VOLTAGE = "sensor.solis_s6_solis_battery_voltage"  # V
 # The lowest SOC `hold` lets the battery cover peaks down to (the plan's reserve may
 # be used then, see AGENTS.md "Battery plan")
@@ -206,6 +210,11 @@ if (
 ):
     grid_limit = min(grid_limit, int(guard_kw * 10) * 100)
 
+last_mode = None  # the running dispatch mode, for the hysteresis below
+sent = hass.states.get(DISPATCH_STATE)
+if sent is not None and sent.state == "on":
+    last_mode = sent.attributes.get("mode")
+
 dispatch = None  # the solis_dispatch call's data, None: not used
 if DISPATCH and state == "charge" and soc is not None and grid_limit is not None:
     # Charge from PV and the grid with the import capped at the target; the inverter
@@ -239,15 +248,35 @@ elif DISPATCH and state == "sell" and soc is not None:
     }
 elif DISPATCH and state == "pause":
     if grid_limit is not None and get_state(SUN) == "above_horizon":
-        # grid_import takes the house from the grid first and curtails the PV (1.8 ->
-        # 0.1 kW, Oct 2026); battery_charge without import keeps the battery and stores
-        # the PV surplus. The load above the target is then not shaved
-        dispatch = {
-            "mode": "battery_charge",
-            "power_watts": MAX_CHARGE_POWER,
-            "import_limit_watts": 0,
-            "soc_max": int(get_float(MAX_SOC, 100.0)),
-        }
+        # grid_import takes the house from the grid up to the target, then from the
+        # PV, then from the battery, and curtails the PV it does not need (1.8 -> 0.1
+        # kW with the house below the target, Oct 2026). battery_charge without import
+        # keeps the battery and stores the PV surplus, but never discharges (4.3 kW
+        # import with a 2 kW target). So grid_import only while the house is above
+        # the PV plus the target, where it curtails nothing: from when it is, until
+        # the battery no longer covers anything (the PV is then the part used)
+        if last_mode == "grid_import":
+            shaving = (
+                get_state(BATTERY_DIRECTION) == "1"
+                and get_float(BATTERY_POWER) > SHAVE_MIN_POWER
+            )
+        else:
+            net = get_float(HOUSE_POWER) - get_float(PV_POWER)
+            shaving = net > grid_limit + SHAVE_MIN_POWER
+        if shaving and grid_limit <= HOLD_IMPORT_MAX:
+            dispatch = {
+                "mode": "grid_import",
+                "power_watts": grid_limit,
+                "allow_grid_charge": False,
+                "soc_min": int(get_float(SHUTDOWN_SOC, 10.0)),
+            }
+        else:
+            dispatch = {
+                "mode": "battery_charge",
+                "power_watts": MAX_CHARGE_POWER,
+                "import_limit_watts": 0,
+                "soc_max": int(get_float(MAX_SOC, 100.0)),
+            }
     elif grid_limit is not None and grid_limit <= HOLD_IMPORT_MAX:
         # Import up to the target, the battery covers the load above it
         dispatch = {
@@ -259,10 +288,6 @@ elif DISPATCH and state == "pause":
     else:
         dispatch = {"mode": "battery_hold"}
 
-last_mode = None  # the running dispatch mode, for the fallbacks' hysteresis
-sent = hass.states.get(DISPATCH_STATE)
-if sent is not None and sent.state == "on":
-    last_mode = sent.attributes.get("mode")
 surplus = get_float(PV_POWER) - get_float(HOUSE_POWER)
 if DISPATCH and state == "sell-excess":
     # Export the PV surplus; self-use while the PV does not cover the house (in
