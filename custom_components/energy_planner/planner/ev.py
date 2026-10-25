@@ -95,7 +95,8 @@ def ready_time(
     """
     day = first.date()
     target = dt.datetime.combine(day, ready, first.tzinfo)
-    while target <= first or is_offday(day):
+    # Timestamps: local times in the hour repeated when DST ends compare equal
+    while target.timestamp() <= first.timestamp() or is_offday(day):
         day += dt.timedelta(days=1)
         target = dt.datetime.combine(day, ready, first.tzinfo)
     # Timestamps: a departure in the hour repeated when DST ends is not taken as

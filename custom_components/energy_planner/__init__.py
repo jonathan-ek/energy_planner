@@ -376,6 +376,8 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
             async_track_state_change_event(hass, car.status_sensor, car_plugged)
         )
 
+    drift_requested: list[dt.datetime] = []
+
     async def soc_changed(event: Event[EventStateChangedData]):
         soc = settings.reading(hass, event.data["entity_id"])
         now = dt_utils.now()
@@ -383,8 +385,12 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
         expected = plan.soc_at(now) if plan is not None else None
         if soc is None or expected is None or abs(soc - expected) < SOC_DRIFT:
             return
-        if now - plan.updated < SOC_DRIFT_INTERVAL:
+        # From the plan or the last drift request: while plan runs fail the plan
+        # stays old, and every SOC change would start another run
+        last = max([plan.updated, *drift_requested])
+        if now - last < SOC_DRIFT_INTERVAL:
             return
+        drift_requested[:] = [now]
         await async_request_plan(hass, f"SOC {soc} %, planned {expected:.0f} %")
 
     entry.async_on_unload(
