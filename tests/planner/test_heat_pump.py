@@ -232,6 +232,24 @@ def test_action_follows_the_plan():
     assert action["state"] == "on"
     assert action["source"] == "plan"
     assert action["until"] == starts[2].isoformat()
+    # Following the plan, the economy is not worked out
+    with (
+        patch.object(heating.dt_utils, "now", return_value=NOW),
+        patch.object(heating, "heat_pump_economy") as economy,
+    ):
+        heating.heat_pump_action(hass)
+    economy.assert_not_called()
+
+
+def test_spot_price_in_the_repeated_hour():
+    """Test that the two 02:15 quarters when DST ends keep their own prices."""
+    first = dt.datetime(2026, 10, 25, 0, 15, tzinfo=dt.UTC)
+    second = first + dt.timedelta(hours=1)
+    hass = mock_hass({}, spot_prices={first: 100.0, second: 900.0})
+    moment = (second + dt.timedelta(minutes=5)).astimezone(TZ)
+    assert moment.fold == 1
+    assert heating._spot(hass, moment) == 900.0
+    assert heating._spot(hass, moment.replace(fold=0)) == 100.0
 
 
 def test_action_without_heat_pump():

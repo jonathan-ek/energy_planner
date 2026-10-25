@@ -108,7 +108,7 @@ def test_every_action_has_the_common_keys():
     actions = [
         battery_action.resolve(slot, plan, at(5), battery),
         ev.ev_action(plan, at(5), plugged=True),
-        heat_pump.action(plan, at(5), {}, 5.0, 15.0),
+        heat_pump.action(plan, at(5), dict, 5.0, 15.0),
     ]
     for action in actions:
         assert {"state", "source", "until", "reason", "plan_updated"} <= set(action)

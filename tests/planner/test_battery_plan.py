@@ -1,5 +1,6 @@
 """Tests for the battery plan glue."""
 
+import asyncio
 import datetime as dt
 import importlib
 import math
@@ -198,6 +199,28 @@ async def test_requests_during_a_run_are_coalesced(mock_hass):
     with patch.object(battery_plan, "async_update_plan", update):
         await battery_plan.async_request_plan(mock_hass, "first")
     assert len(calls) == 2
+
+
+async def test_a_waiting_request_returns_after_its_run(mock_hass):
+    """Test that a request with wait during a run returns after the extra run."""
+    calls = []
+    seen = []
+
+    async def update(hass):
+        calls.append(1)
+        if len(calls) == 1:
+            await asyncio.sleep(0)
+
+    async def waiter():
+        await asyncio.sleep(0)
+        await battery_plan.async_request_plan(mock_hass, "second", wait=True)
+        seen.append(len(calls))
+
+    with patch.object(battery_plan, "async_update_plan", update):
+        await asyncio.gather(
+            battery_plan.async_request_plan(mock_hass, "first"), waiter()
+        )
+    assert seen == [2]
 
 
 async def test_current_action_follows_an_auto_slot(mock_hass):
@@ -640,3 +663,23 @@ async def test_energy_charts_history(mock_hass):
             )
             is None
         )
+
+
+async def test_prices_in_the_repeated_hour(mock_hass):
+    """Test that the 02:xx quarters before and after DST ends keep their own prices."""
+    start = dt.datetime(2026, 10, 25, 0, 0, tzinfo=dt.UTC)  # 02:00 CEST
+    quarters = [
+        {"start": (start + dt.timedelta(minutes=15 * i)).isoformat(), "value": i}
+        for i in range(8)
+    ]
+    mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = (
+        "sensor.nordpool_kwh_se3_sek"
+    )
+    mock_hass.states.get = lambda _: SimpleNamespace(attributes={})
+    with patch.object(
+        battery_plan, "fetch_nordpool_data", AsyncMock(return_value=([], quarters, []))
+    ):
+        prices = await battery_plan._prices(mock_hass)
+    assert sorted(prices.values()) == [float(i) for i in range(8)]
+    # Both 02:xx hours are local hour 2: the hourly mean takes all eight
+    assert battery_plan._hourly(prices)[dt.date(2026, 10, 25)] == {2: 3.5}

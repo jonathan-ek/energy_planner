@@ -18,7 +18,7 @@ a house heated by district heating) only pays when a kWh of heat from it,
   `loss * (indoor - outdoor) / COP` (`draw`).
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 import dataclasses
 import datetime as dt
 from itertools import pairwise
@@ -217,14 +217,15 @@ def schedule(
 def action(
     plan: Plan | None,
     now: dt.datetime,
-    economy: Mapping,
+    economy: Callable[[], Mapping],
     margin: float,
     heating_limit: float,
 ) -> dict:
     """Return whether the heat pump should heat now.
 
     From the battery plan (source `plan`) while it is fresh and covers now, otherwise
-    from the economy now (`heating.heat_pump_economy`) against the margin (öre per kWh
+    from the economy now (`economy()`, `heating.heat_pump_economy`, only worked out
+    then) against the margin (öre per kWh
     of heat) and the heating limit (°C outdoor), source `fallback`. Without prices or
     an outdoor temperature no decision (state None, source `none`), so the automation
     leaves the heat pump as it is.
@@ -241,9 +242,10 @@ def action(
             marginal=marginal[run.index] if run.index < len(marginal) else None,
             cop=plan.heat_pump_cop[run.index],
         )
-    outdoor = economy.get("outdoor_temperature")
-    saving = economy.get("saving")
-    if "cop" not in economy or outdoor is None:
+    economy_now = economy()
+    outdoor = economy_now.get("outdoor_temperature")
+    saving = economy_now.get("saving")
+    if "cop" not in economy_now or outdoor is None:
         return make_action(
             None, "none", plan=plan, reason=reason, marginal=None, cop=None
         )
@@ -253,6 +255,6 @@ def action(
         "fallback",
         plan=plan,
         reason=reason,
-        marginal=economy.get("electricity_price"),
-        cop=economy.get("cop"),
+        marginal=economy_now.get("electricity_price"),
+        cop=economy_now.get("cop"),
     )

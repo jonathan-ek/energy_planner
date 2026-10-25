@@ -21,9 +21,17 @@ def _settings(hass: HomeAssistant) -> settings.HeatPumpSettings:
     return settings.heat_pump(hass.data[DOMAIN]["config"])
 
 
+def _curve(config: settings.HeatPumpSettings) -> tuple[tuple[float, float], ...]:
+    return heat_pump.COP_CURVES.get(config.model, ())
+
+
+def _seasons(config: settings.HeatPumpSettings):
+    return heat_pump.DISTRICT_HEATING_PRESETS.get(config.district_heating, ())
+
+
 def curve(hass: HomeAssistant) -> tuple[tuple[float, float], ...]:
     """Return the heat pump's COP curve (heat_pump_model)."""
-    return heat_pump.COP_CURVES.get(_settings(hass).model, ())
+    return _curve(_settings(hass))
 
 
 def _power_kw(
@@ -45,16 +53,16 @@ def _power_kw(
     return heat_pump.draw(loss, indoor, outdoor, cop_curve)
 
 
-def outdoor_temperature(hass: HomeAssistant) -> float | None:
-    """Return the live outdoor temperature (°C)."""
-    return settings.reading(hass, _settings(hass).outdoor_sensor)
-
-
 def _spot(hass: HomeAssistant, now: dt.datetime) -> float | None:
-    """Return the published spot price now (SEK/MWh excl. VAT), also without a plan."""
+    """Return the published spot price now (SEK/MWh excl. VAT), also without a plan.
+
+    The prices are keyed in UTC, so the hour repeated when DST ends has its own.
+    """
     prices = hass.data[DOMAIN].get("spot_prices") or {}
-    quarter = now.replace(minute=now.minute - now.minute % 15, second=0, microsecond=0)
-    return prices.get(quarter)
+    utc = now.astimezone(dt.UTC)
+    return prices.get(
+        utc.replace(minute=utc.minute - utc.minute % 15, second=0, microsecond=0)
+    )
 
 
 def heat_pump_economy(hass: HomeAssistant) -> dict:
@@ -64,9 +72,8 @@ def heat_pump_economy(hass: HomeAssistant) -> dict:
     """
     now = dt_utils.now()
     config = _settings(hass)
-    seasons = heat_pump.DISTRICT_HEATING_PRESETS.get(config.district_heating, ())
-    district = heat_pump.district_heating_price(seasons, now)
-    cop_curve = heat_pump.COP_CURVES.get(config.model, ())
+    district = heat_pump.district_heating_price(_seasons(config), now)
+    cop_curve = _curve(config)
     spot = _spot(hass, now)
     outdoor = settings.reading(hass, config.outdoor_sensor)
     if district is None or outdoor is None or spot is None or not cop_curve:
@@ -121,8 +128,8 @@ def plan_inputs(
     live = settings.reading(hass, config.outdoor_sensor)
     indoor = settings.reading(hass, config.indoor_sensor)
     temps = [live if t is None else t for t in temperatures]
-    cop_curve = heat_pump.COP_CURVES.get(config.model, ())
-    seasons = heat_pump.DISTRICT_HEATING_PRESETS.get(config.district_heating, ())
+    cop_curve = _curve(config)
+    seasons = _seasons(config)
     limit = config.heating_limit_c
     hours = QUARTER.total_seconds() / 3600
     draws = [
@@ -149,7 +156,7 @@ def heat_pump_action(hass: HomeAssistant) -> dict:
     return heat_pump.action(
         hass.data[DOMAIN].get("plan"),
         dt_utils.now(),
-        heat_pump_economy(hass),
+        lambda: heat_pump_economy(hass),
         config.margin_ore_per_kwh,
         config.heating_limit_c,
     )

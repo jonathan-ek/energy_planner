@@ -123,9 +123,10 @@ def ev_action(plan: Plan | None, now: dt.datetime, plugged: bool) -> dict:
 
     `charge` or `wait` from the plan's car power (source `plan`) while the plan is
     fresh and covers now; `charge` without one (source `fallback`, the car charges as
-    without the planner); no state while unplugged (source `unplugged`).
+    without the planner); no state while unplugged (source `unplugged`). The plan's
+    need and planned energy only from a plan that is not stale.
     """
-    car = plan.ev if plan is not None else None
+    car = plan.ev if plan is not None and not plan.is_stale(now) else None
     summary: dict[str, Any] = {
         "need_kwh": car.need_kwh if car else None,
         "need_source": car.need_source if car else None,

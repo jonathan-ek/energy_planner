@@ -7,6 +7,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfElectricCurrent, UnitOfEnergy
+from homeassistant.util import dt as dt_utils
 
 from .const import DOMAIN, FORECAST_SENSORS, FUSE_GUARD_SENSOR, PLAN_SENSORS
 from .planner.battery_plan import car_action, current_action
@@ -193,9 +194,10 @@ class EnergyPlannerPlanSensor(SensorEntity):
 
     @property
     def native_value(self):
-        """Return the planned mode for the current quarter."""
+        """Return the planned mode for the current quarter, None if not covered."""
         plan = self._hass.data[DOMAIN].get("plan")
-        return plan.modes[0] if plan is not None else None
+        index = plan.index_at(dt_utils.now()) if plan is not None else None
+        return plan.modes[index] if plan is not None and index is not None else None
 
     @property
     def extra_state_attributes(self):

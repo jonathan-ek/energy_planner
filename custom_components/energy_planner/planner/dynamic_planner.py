@@ -607,10 +607,14 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
     laid over it as with the other planners.
     """
     await async_update_forecast(hass)
-    await async_request_plan(hass, "dynamic planner")
+    requested = dt_utils.now()
+    # Wait for a calculation already running, and the one after it
+    await async_request_plan(hass, "dynamic planner", wait=True)
     plan = hass.data[DOMAIN].get("plan")
-    if plan is None:
-        _LOGGER.warning("No battery plan, the dynamic planner writes no schedule")
+    if plan is None or plan.finished < requested:
+        _LOGGER.warning(
+            "No new battery plan, the dynamic planner keeps the schedule it has"
+        )
         return
     start, end = plan.start, plan.end
     await store_disable_state(hass)

@@ -141,3 +141,6 @@ def test_action_has_the_plans_need():
         assert (action["need_kwh"], action["need_source"]) == (20.0, "history")
         assert action["planned_kwh"] == pytest.approx(2.75)
     assert ev.ev_action(None, now, plugged=True)["need_kwh"] is None
+    # An old plan's need is not published as if it were current
+    old = plan(now - dt.timedelta(hours=1), [0.0, 11.0])
+    assert ev.ev_action(old, now, plugged=True)["need_kwh"] is None

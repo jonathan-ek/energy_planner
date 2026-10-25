@@ -91,7 +91,11 @@ async def _hourly_import(hass: HomeAssistant, statistic_id: str, start, end):
 
 
 async def _prices(hass: HomeAssistant) -> dict[dt.datetime, float]:
-    """Spot prices (SEK/MWh excl. VAT) per quarter start, yesterday to tomorrow."""
+    """Spot prices (SEK/MWh excl. VAT) per quarter start in UTC, yesterday to tomorrow.
+
+    UTC keys: local times in the hour repeated when DST ends are equal (and hash
+    alike) in one zone, so the two 02:xx hours would share their prices.
+    """
     entity_id = hass.data[DOMAIN]["config"].get("nordpool_entity_id")
     state = hass.states.get(entity_id) if entity_id else None
     if entity_id is None or state is None:
@@ -107,7 +111,7 @@ async def _prices(hass: HomeAssistant) -> dict[dt.datetime, float]:
         start = value["start"]
         if isinstance(start, str):
             start = dt.datetime.fromisoformat(start)
-        prices[dt_utils.as_local(start)] = float(value["value"])
+        prices[start.astimezone(dt.UTC)] = float(value["value"])
     return prices
 
 
@@ -249,7 +253,8 @@ def _hourly(prices: dict[dt.datetime, float]) -> dict[dt.date, dict[int, float]]
     """Return the mean price per local date and hour."""
     values: dict[dt.date, dict[int, list[float]]] = {}
     for start, price in prices.items():
-        values.setdefault(start.date(), {}).setdefault(start.hour, []).append(price)
+        local = dt_utils.as_local(start)
+        values.setdefault(local.date(), {}).setdefault(local.hour, []).append(price)
     return {
         day: {hour: mean(v) for hour, v in hours.items()}
         for day, hours in values.items()
@@ -259,7 +264,7 @@ def _hourly(prices: dict[dt.datetime, float]) -> dict[dt.date, dict[int, float]]
 async def _estimated_prices(
     hass: HomeAssistant, prices: dict[dt.datetime, float], now: dt.datetime
 ) -> dict[dt.datetime, float]:
-    """Return estimated spot prices per quarter of the day after the published ones.
+    """Return estimated spot prices per quarter (UTC) after the published ones.
 
     That is tomorrow until its prices are published (about 13:00), then the day after
     tomorrow, so the plan always sees a day past the night ahead. From the recorded
@@ -272,7 +277,7 @@ async def _estimated_prices(
     """
     if not prices:
         return {}
-    day = max(max(prices).date(), now.date()) + dt.timedelta(days=1)
+    day = max(dt_utils.as_local(max(prices)).date(), now.date()) + dt.timedelta(days=1)
     lead = (day - now.date()).days
     if lead > ESTIMATE_MAX_LEAD:
         return {}
@@ -319,7 +324,7 @@ async def _estimated_prices(
     fallback = mean(hourly.values())
     start = dt_utils.start_of_local_day(day)
     estimated = {
-        quarter: hourly.get(quarter.hour, fallback)
+        quarter.astimezone(dt.UTC): hourly.get(quarter.hour, fallback)
         for quarter in quarter_starts(start, start + dt.timedelta(days=1))
     }
     hass.data[DOMAIN]["price_estimate"] = {
@@ -486,12 +491,22 @@ def write_plan_sensors(hass: HomeAssistant) -> None:
         sensor.async_write_ha_state()
 
 
-async def async_request_plan(hass: HomeAssistant, reason: str) -> None:
-    """Recalculate the plan now, or once more after a running calculation."""
+async def async_request_plan(
+    hass: HomeAssistant, reason: str, *, wait: bool = False
+) -> None:
+    """Recalculate the plan now, or once more after a running calculation.
+
+    With `wait`, a request during a running calculation returns once the extra one
+    is done too.
+    """
     data = hass.data[DOMAIN]
     lock = data.setdefault("plan_lock", asyncio.Lock())
     if lock.locked():
         data["plan_pending"] = reason
+        if wait:
+            # The holder runs the pending calculation before it lets go
+            async with lock:
+                pass
         return
     async with lock:
         while reason:
@@ -526,7 +541,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         _LOGGER.info("No forecast or battery state, skipping the battery plan")
         return
     now = dt_utils.now()
-    current = now.replace(minute=now.minute - now.minute % 15, second=0, microsecond=0)
+    utc = now.astimezone(dt.UTC)
+    current = utc.replace(minute=utc.minute - utc.minute % 15, second=0, microsecond=0)
     # The day after the published prices is estimated, so the plan can see whether
     # energy is worth keeping past the coming night
     estimated = await _estimated_prices(hass, prices, now)
@@ -535,16 +551,18 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     is_estimate = []
     for index, start_text in enumerate(forecast["starts"]):
         start = dt_utils.as_local(dt.datetime.fromisoformat(start_text))
-        if start < current:
+        # In UTC, so the hour repeated when DST ends is not taken as the same
+        key = start.astimezone(dt.UTC)
+        if key < current:
             continue
         base = forecast["load"][index]
-        price = prices.get(start, estimated.get(start))
+        price = prices.get(key, estimated.get(key))
         solar = forecast["pv"][index] if forecast["pv"] else 0.0
         if price is None or base is None or solar is None:
             break
         starts.append(start)
         price_list.append(price)
-        is_estimate.append(start not in prices)
+        is_estimate.append(key not in prices)
         load.append(base + forecast["planned"][index] + forecast["reserve"][index])
         pv.append(solar)
         temperatures.append(

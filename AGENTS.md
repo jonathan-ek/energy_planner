@@ -33,7 +33,7 @@ in `GLOSSARY.md`.
 | `basic_planner.py` | N cheapest quarters between earliest charge and earliest discharge time → charge; N most expensive after → discharge; rest pause |
 | `cheapest_hours_planner.py` | N cheapest quarters per calendar day → charge; everything else discharge |
 | `price_peak_planner.py` | `find_charge_periods` / `find_discharge_periods` pick the cheapest / most expensive windows (best first), `remove_overlaps` drops conflicts, `match_charge_discharge_periods` pairs them where `is_profitable` says the spread pays off, `build_schedule` turns pairs into slots. All pure and tested; `plan_day` is the HA glue |
-| `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` updates the forecast and the plan and writes one `auto` slot to the plan's end, with manual slots laid over it |
+| `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` updates the forecast and the plan (waiting for a calculation already running) and writes one `auto` slot to the plan's end, with manual slots laid over it; without a new plan it keeps the schedule it has |
 | `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `discard_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
 | `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores a `plan.Plan` in `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `car_action` |
 | `plan.py` | Pure: `Plan`, the battery plan as one object (per-quarter series parallel to `starts`, canonical units: spot SEK/MWh excl. VAT, SOC %, kW), `index_at`, `run_at` (a `Run` of equal values from now, with `until`), `is_stale` (`STALE_AFTER` 30 min from `finished`, when the plan became available; `updated` is the moment it was planned for), `soc_at`, `start` / `end` (times compared and added in UTC, so the hour repeated when DST ends works), `to_attributes` (what the plan sensor publishes). `follow` (the run now, or why not: no plan, plan is old, plan does not cover now) and `action` (the keys every action has: `state`, `source`, `until`, `reason`, `plan_updated`) for the resolvers |
@@ -66,7 +66,8 @@ Everything lives in `hass.data["energy_planner"]`:
 - `options` — a copy of the config entry options (`tariff_preset`, `tariff`), kept
   current by an update listener. Read the tariff with `get_tariff(hass)` (`utils.py`),
   which falls back to a flat tariff from `network_cost` / `network_compensation`.
-- `spot_prices` — the published spot prices per quarter (SEK/MWh excl. VAT), written
+- `spot_prices` — the published spot prices per quarter (SEK/MWh excl. VAT, keyed by
+  the quarter's start in UTC, so the hour repeated when DST ends has its own), written
   by every plan run before it can fail on a missing forecast or battery state; read by
   the heat pump sensors.
 - `tmp` — scratch space during a planner run.
@@ -500,7 +501,7 @@ horizon), `planned_kwh`, `missing_kwh`.
 - `sensor.energy_planner_ev_action`: `charge`/`wait` from the plan (source `plan`,
   `until`, `power_kw`); without a fresh plan `charge` (source `fallback`, the car
   charges as without the planner); unplugged no state. Its attributes also carry the
-  plan's `need_kwh`, `need_source`, `ready`, `planned_kwh` and `missing_kwh`.
+  (fresh) plan's `need_kwh`, `need_source`, `ready`, `planned_kwh` and `missing_kwh`.
   `examples/ev/follow_ev_action_automation.yml` starts/stops a Zaptec with its charging
   switch.
 - The owner's parents (Oct 2026): Tesla on a Zaptec (`sensor.garaget_laddstatus`,

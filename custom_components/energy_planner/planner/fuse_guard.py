@@ -86,7 +86,7 @@ def _reading(
         hass, guard.inverter_ac_power_sensor, unit="kW", max_age=MAX_AGE, now=now
     )
     currents = [
-        settings.reading(hass, entity_id, unit="A", max_age=MAX_AGE, now=now) or 0.0
+        settings.reading(hass, entity_id, max_age=MAX_AGE, now=now) or 0.0
         for entity_id in guard.ev_phase_current_sensors
     ]
     return fuse.Reading(
