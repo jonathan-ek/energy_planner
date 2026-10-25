@@ -1,0 +1,113 @@
+"""Tests for the plan: what it says at a moment, staleness and its attributes."""
+
+import dataclasses
+import datetime as dt
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from custom_components.energy_planner.planner import battery_action, ev, heat_pump
+from custom_components.energy_planner.planner.plan import QUARTER, follow
+
+from .plans import make_plan
+
+TZ = ZoneInfo("Europe/Stockholm")
+START = dt.datetime(2026, 10, 7, 22, 0, tzinfo=TZ)
+PLAN = make_plan(
+    START,
+    ["charge", "charge", "self_use", "charge"],
+    soc=[40.0, 60.0, 50.0, 70.0],
+)
+
+
+def at(minutes):
+    """Return START plus minutes."""
+    return START + dt.timedelta(minutes=minutes)
+
+
+def test_index_at():
+    """Test the quarter containing a moment, None before and after the plan."""
+    assert PLAN.index_at(at(0)) == 0
+    assert PLAN.index_at(at(14)) == 0
+    assert PLAN.index_at(at(15)) == 1
+    assert PLAN.index_at(at(59)) == 3
+    assert PLAN.index_at(at(60)) is None
+    assert PLAN.index_at(at(-1)) is None
+    assert (PLAN.start, PLAN.end) == (START, at(60))
+
+
+def test_run_at():
+    """Test that a run extends over equal values from now, not back."""
+    run = PLAN.run_at(at(5), PLAN.modes)
+    assert run is not None
+    assert (run.value, run.index, run.last, run.until) == ("charge", 0, 1, at(30))
+    later = PLAN.run_at(at(20), PLAN.modes)
+    assert later is not None
+    assert (later.index, later.last) == (1, 1)
+    # A derived series, and one shorter than the plan
+    assert PLAN.run_at(at(50), [True, True]) is None
+    assert PLAN.run_at(at(70), PLAN.modes) is None
+
+
+def test_soc_at():
+    """Test the SOC between the previous quarter's end and this one's."""
+    assert PLAN.soc_at(at(0)) == 40.0
+    assert PLAN.soc_at(at(15)) == 40.0
+    assert PLAN.soc_at(at(22.5)) == pytest.approx(50.0)
+    assert PLAN.soc_at(at(60)) is None
+
+
+def test_staleness_from_when_the_plan_was_finished():
+    """Test that a slow calculation does not count against the plan's age."""
+    slow = dataclasses.replace(PLAN, finished=START + dt.timedelta(minutes=2))
+    assert not slow.is_stale(START + dt.timedelta(minutes=31))
+    assert PLAN.is_stale(START + dt.timedelta(minutes=31))
+
+
+def test_follow_says_why_not():
+    """Test the reasons a plan can not be followed."""
+    assert follow(None, at(5), lambda p: p.modes) == (None, "no plan")
+    assert follow(PLAN, at(25), lambda p: p.modes)[0] is not None
+    old = PLAN.updated + dt.timedelta(hours=1)
+    assert follow(PLAN, old, lambda p: p.modes) == (None, "plan is old")
+    reason = follow(PLAN, at(5), lambda p: None)[1]
+    assert reason == "plan does not cover now"
+
+
+def test_attributes():
+    """Test the published plan: ISO times, öre/kWh incl. VAT, the car's summary."""
+    plan = make_plan(START, spot=[800.0, 200.0], ev_power_kw=[11.0, 0.0])
+    attributes = plan.to_attributes()
+    assert attributes["starts"] == [START.isoformat(), at(15).isoformat()]
+    assert attributes["updated"] == attributes["finished"] == START.isoformat()
+    assert attributes["prices"] == [100.0, 25.0]
+    assert attributes["ev"]["power"] == [11.0, 0.0]
+    assert attributes["ev"]["ready"] == (START + dt.timedelta(hours=8)).isoformat()
+    assert attributes["target_kw"] is None
+
+
+def test_every_action_has_the_common_keys():
+    """Test that the battery, car and heat pump actions share their core keys."""
+    plan = make_plan(START, ev_power_kw=[0.0] * 4, heat_pump=[True] * 4)
+    battery = battery_action.BatteryState(50.0, 500.0, 20.0, 15.0, 90.0, 20.0, 18.0)
+    slot = battery_action.Slot("auto", True, START, None, 50)
+    actions = [
+        battery_action.resolve(slot, plan, at(5), battery),
+        ev.ev_action(plan, at(5), plugged=True),
+        heat_pump.action(plan, at(5), {}, 5.0, 15.0),
+    ]
+    for action in actions:
+        assert {"state", "source", "until", "reason", "plan_updated"} <= set(action)
+        assert action["source"] == "plan"
+        assert action["until"] == (START + 4 * QUARTER).isoformat()
+        assert action["plan_updated"] == START.isoformat()
+    # Old: each falls back and says why
+    later = at(45) + dt.timedelta(hours=1)
+    stale = dataclasses.replace(
+        plan, starts=tuple(s + dt.timedelta(hours=1) for s in plan.starts)
+    )
+    for action in (
+        battery_action.resolve(slot, stale, later, battery),
+        ev.ev_action(stale, later, plugged=True),
+    ):
+        assert (action["source"], action["reason"]) == ("fallback", "plan is old")

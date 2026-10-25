@@ -23,6 +23,8 @@ import dataclasses
 import datetime as dt
 from itertools import pairwise
 
+from .plan import Plan, action as make_action, follow
+
 # (outdoor dry-bulb °C, COP) at the compressor's rated frequency, defrost included.
 # Mitsubishi MSZ-AP42VG / MUZ-AP42VG, read from the service manual OBH789 (9-1,
 # indoor 20 °C) and the rated point (5.4 kW heat for 1.49 kW at +7 °C, COP 3.62).
@@ -210,3 +212,47 @@ def schedule(
             if end - start < min_quarters and start > 0 and end < len(on):
                 on[start:end] = [not value] * (end - start)
     return on
+
+
+def action(
+    plan: Plan | None,
+    now: dt.datetime,
+    economy: Mapping,
+    margin: float,
+    heating_limit: float,
+) -> dict:
+    """Return whether the heat pump should heat now.
+
+    From the battery plan (source `plan`) while it is fresh and covers now, otherwise
+    from the economy now (`heating.heat_pump_economy`) against the margin (öre per kWh
+    of heat) and the heating limit (°C outdoor), source `fallback`. Without prices or
+    an outdoor temperature no decision (state None, source `none`), so the automation
+    leaves the heat pump as it is.
+    """
+    run, reason = follow(plan, now, lambda p: p.heat_pump)
+    if run is not None and plan is not None:
+        # Without a heat pump (heat_pump_power 0) the plan prices no extra load
+        marginal = plan.marginal
+        return make_action(
+            "on" if run.value else "off",
+            "plan",
+            plan=plan,
+            until=run.until,
+            marginal=marginal[run.index] if run.index < len(marginal) else None,
+            cop=plan.heat_pump_cop[run.index],
+        )
+    outdoor = economy.get("outdoor_temperature")
+    saving = economy.get("saving")
+    if "cop" not in economy or outdoor is None:
+        return make_action(
+            None, "none", plan=plan, reason=reason, marginal=None, cop=None
+        )
+    heat = saving is not None and saving >= margin and outdoor < heating_limit
+    return make_action(
+        "on" if heat else "off",
+        "fallback",
+        plan=plan,
+        reason=reason,
+        marginal=economy.get("electricity_price"),
+        cop=economy.get("cop"),
+    )

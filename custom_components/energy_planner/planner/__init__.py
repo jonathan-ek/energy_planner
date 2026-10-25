@@ -2,7 +2,6 @@ from .basic_planner import planner as basic_planner
 from .battery_plan import (
     async_request_plan,
     async_update_plan,
-    expected_soc,
     write_plan_sensors,
 )
 from .dynamic_planner import async_update_forecast, planner as dynamic_planner
@@ -20,7 +19,6 @@ __all__ = [
     "cheapest_hours_planner",
     "clear_passed_slots",
     "dynamic_planner",
-    "expected_soc",
     "price_peak_planner",
     "update_entities",
     "write_plan_sensors",

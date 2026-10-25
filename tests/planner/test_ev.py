@@ -7,6 +7,8 @@ import pytest
 
 from custom_components.energy_planner.planner import ev
 
+from .plans import make_plan
+
 TZ = ZoneInfo("Europe/Stockholm")
 TODAY = dt.date(2026, 10, 10)
 
@@ -103,14 +105,7 @@ def test_departure_comes_first():
 def plan(updated, power):
     """Build a plan with a car power per quarter from 22:00."""
     start = dt.datetime(2026, 10, 10, 22, 0, tzinfo=TZ)
-    return {
-        "updated": updated.isoformat(),
-        "starts": [
-            (start + dt.timedelta(minutes=15 * i)).isoformat()
-            for i in range(len(power))
-        ],
-        "ev": {"power": power},
-    }
+    return make_plan(start, ev_power_kw=power, updated=updated)
 
 
 def test_action_follows_the_plan():
@@ -135,3 +130,14 @@ def test_action_falls_back_to_charging():
     assert ev.ev_action(old, now, plugged=True)["source"] == "fallback"
     assert ev.ev_action(None, now, plugged=True)["state"] == "charge"
     assert ev.ev_action(old, now, plugged=False)["state"] is None
+
+
+def test_action_has_the_plans_need():
+    """Test that the action carries the plan's need, also while unplugged."""
+    now = dt.datetime(2026, 10, 10, 22, 20, tzinfo=TZ)
+    planned = plan(now, [0.0, 11.0])
+    for plugged in (True, False):
+        action = ev.ev_action(planned, now, plugged=plugged)
+        assert (action["need_kwh"], action["need_source"]) == (20.0, "history")
+        assert action["planned_kwh"] == pytest.approx(2.75)
+    assert ev.ev_action(None, now, plugged=True)["need_kwh"] is None

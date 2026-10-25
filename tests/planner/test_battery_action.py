@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from .plans import make_plan
+
 action = importlib.import_module(
     "custom_components.energy_planner.planner.battery_action"
 )
@@ -26,15 +28,16 @@ BATTERY = action.BatteryState(
 )
 
 
-def plan(modes, soc, targets=None, updated=START):
-    """Return a plan dict as battery_plan stores it."""
-    return {
-        "updated": updated.isoformat(),
-        "starts": [s.isoformat() for s in STARTS[: len(modes)]],
-        "modes": modes,
-        "soc": soc,
-        "targets": targets or [None] * len(modes),
-    }
+def plan(modes, soc, targets=None, updated=START, peak_levels=None):
+    """Return a plan from START."""
+    return make_plan(
+        START,
+        modes,
+        soc=soc,
+        targets=targets,
+        peak_levels=peak_levels,
+        updated=updated,
+    )
 
 
 def auto(start=START, end=None):
@@ -89,7 +92,7 @@ RESERVE = dataclasses.replace(BATTERY, soc=20.0, reserve_soc=20.0)
 @pytest.mark.parametrize("mode", ["self_use", "sell_excess", "hold"])
 def test_reserve_only_shaves_peaks(mode):
     """Test that at the reserve the battery holds and shaves to the power charge."""
-    planned = {**plan([mode], [20.0], [1.0]), "peak_levels": [3.5]}
+    planned = plan([mode], [20.0], [1.0], peak_levels=[3.5])
     result = action.resolve(auto(), planned, NOW, RESERVE)
     assert (result["state"], result["mode"], result["soc"]) == ("pause", "hold", 20)
     assert result["import_target_kw"] == 3.5
@@ -98,7 +101,7 @@ def test_reserve_only_shaves_peaks(mode):
 
 def test_reserve_without_power_charge_keeps_the_battery():
     """Test that without a power charge the reserve is just kept."""
-    planned = {**plan(["self_use"], [20.0]), "peak_levels": [None]}
+    planned = plan(["self_use"], [20.0], peak_levels=[None])
     result = action.resolve(auto(), planned, NOW, RESERVE)
     assert (result["state"], result["import_target_kw"]) == ("pause", None)
 
@@ -106,7 +109,7 @@ def test_reserve_without_power_charge_keeps_the_battery():
 def test_above_the_reserve_the_plan_is_followed():
     """Test that self-use runs while the battery is above the reserve."""
     above = dataclasses.replace(RESERVE, soc=21.0)
-    planned = {**plan(["self_use"], [20.0]), "peak_levels": [3.5]}
+    planned = plan(["self_use"], [20.0], peak_levels=[3.5])
     result = action.resolve(auto(), planned, NOW, above)
     assert result["state"] == "discharge"
     sell_excess = action.resolve(auto(), plan(["sell_excess"], [50.0]), NOW, above)

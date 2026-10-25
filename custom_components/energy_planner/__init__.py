@@ -37,7 +37,6 @@ from .planner.fuse_guard import config_entities, update_guard
 from .planner import (
     async_request_plan,
     async_update_forecast,
-    expected_soc,
     write_plan_sensors,
     basic_planner,
     dynamic_planner,
@@ -380,12 +379,11 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
     async def soc_changed(event: Event[EventStateChangedData]):
         soc = settings.reading(hass, event.data["entity_id"])
         now = dt_utils.now()
-        expected = expected_soc(hass, now)
+        plan = hass.data[DOMAIN].get("plan")
+        expected = plan.soc_at(now) if plan is not None else None
         if soc is None or expected is None or abs(soc - expected) < SOC_DRIFT:
             return
-        plan = hass.data[DOMAIN].get("plan") or {}
-        updated = plan.get("updated")
-        if updated and now - dt.datetime.fromisoformat(updated) < SOC_DRIFT_INTERVAL:
+        if now - plan.updated < SOC_DRIFT_INTERVAL:
             return
         await async_request_plan(hass, f"SOC {soc} %, planned {expected:.0f} %")
 

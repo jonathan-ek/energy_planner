@@ -1,0 +1,206 @@
+"""The battery plan as one object: what the plan says per quarter, and now.
+
+Pure, no Home Assistant imports. battery_plan.py builds a `Plan` from the
+optimizer's result and stores it in `hass.data[DOMAIN]["plan"]`; the resolvers
+(battery_action.py, ev.py, heat_pump.py) ask it what to do at a moment, and
+`to_attributes` gives the plan sensor its attributes.
+
+Per-quarter series are tuples parallel to `starts`, each quarter 15 minutes from its
+start. A run is the stretch of equal values in a series from now on: the battery's
+mode, the heat pump on/off, the car charging or not. A plan is stale once it became
+available (`finished`) more than `STALE_AFTER` ago; the devices then fall back.
+"""
+
+from bisect import bisect_right
+from collections.abc import Callable, Sequence
+import dataclasses
+import datetime as dt
+from typing import Any
+
+QUARTER = dt.timedelta(minutes=15)
+# Older plans are not followed
+STALE_AFTER = dt.timedelta(minutes=30)
+VAT = 1.25
+
+
+@dataclasses.dataclass(frozen=True)
+class Run:
+    """Equal values in a series from the quarter now (`index`) to `last`."""
+
+    value: Any
+    index: int
+    last: int
+    until: dt.datetime  # the end of the last quarter
+
+
+@dataclasses.dataclass(frozen=True)
+class EvPlan:
+    """The car while it is plugged in."""
+
+    need_kwh: float
+    need_source: str  # soc, history or trip
+    ready: dt.datetime  # the deadline, also past the horizon
+    power_kw: tuple[float, ...]  # per quarter
+    planned_kwh: float
+    missing_kwh: float  # what the plan can not deliver by the deadline
+
+
+@dataclasses.dataclass(frozen=True)
+class Plan:
+    """The battery plan from the current quarter on."""
+
+    updated: dt.datetime  # the moment it was planned for
+    finished: dt.datetime  # when it became available
+    starts: tuple[dt.datetime, ...]
+    modes: tuple[str, ...]
+    soc: tuple[float, ...]  # % at the end of each quarter
+    grid_import_kw: tuple[float, ...]
+    grid_export_kw: tuple[float, ...]
+    targets: tuple[float | None, ...]  # import target, kW
+    # The power charge level (kW), the import target below the reserve SOC
+    peak_levels: tuple[float | None, ...]
+    spot: tuple[float, ...]  # SEK/MWh excl. VAT
+    estimated: tuple[bool, ...]  # the spot price is an estimate
+    heat_pump: tuple[bool, ...]  # on
+    marginal: tuple[float, ...]  # öre/kWh more load costs, empty without heat pump
+    temperature: tuple[float | None, ...]  # outdoor, °C
+    heat_pump_cop: tuple[float | None, ...]
+    heat_pump_kw: tuple[float, ...]  # its draw while heating
+    ev: EvPlan | None
+    energy_cost: float  # SEK
+    wear_cost: float
+    power_cost: float
+    end_value: float
+    limit_excess_kwh: float
+    fuse_excess_kwh: float
+    peaks: tuple[dict[str, Any], ...]
+
+    @property
+    def start(self) -> dt.datetime:
+        """Return the start of the first quarter."""
+        return self.starts[0]
+
+    @property
+    def end(self) -> dt.datetime:
+        """Return the end of the last quarter."""
+        return self.starts[-1] + QUARTER
+
+    def index_at(self, moment: dt.datetime) -> int | None:
+        """Return the quarter containing `moment`, None outside the plan."""
+        index = bisect_right(self.starts, moment) - 1
+        if index < 0 or moment >= self.starts[index] + QUARTER:
+            return None
+        return index
+
+    def run_at(self, moment: dt.datetime, values: Sequence[Any]) -> Run | None:
+        """Return the run of equal `values` from the quarter of `moment` on.
+
+        `values` is a series of this plan (or one derived from it); None outside it.
+        """
+        index = self.index_at(moment)
+        if index is None or index >= len(values):
+            return None
+        last = index
+        while last + 1 < len(values) and values[last + 1] == values[index]:
+            last += 1
+        return Run(values[index], index, last, self.starts[last] + QUARTER)
+
+    def is_stale(self, now: dt.datetime) -> bool:
+        """Return whether the plan is too old to follow."""
+        return now - self.finished > STALE_AFTER
+
+    def soc_at(self, moment: dt.datetime) -> float | None:
+        """Return the SOC % the plan expects at `moment`, None outside the plan.
+
+        Between the previous quarter's end SOC and this one's; the first quarter
+        has no start SOC and gives its end SOC.
+        """
+        index = self.index_at(moment)
+        if index is None:
+            return None
+        if index == 0:
+            return self.soc[0]
+        share = (moment - self.starts[index]) / QUARTER
+        return self.soc[index - 1] + (self.soc[index] - self.soc[index - 1]) * share
+
+    def to_attributes(self) -> dict[str, Any]:
+        """Return the plan as the plan sensor publishes it."""
+        ev = self.ev
+        return {
+            "updated": self.updated.isoformat(),
+            "finished": self.finished.isoformat(),
+            "starts": [s.isoformat() for s in self.starts],
+            "modes": list(self.modes),
+            "soc": list(self.soc),
+            "grid_import": list(self.grid_import_kw),
+            "grid_export": list(self.grid_export_kw),
+            "targets": list(self.targets),
+            "peak_levels": list(self.peak_levels),
+            # Spot price incl. VAT (öre/kWh), and whether it is an estimate
+            "prices": [round(p * VAT / 10, 2) for p in self.spot],
+            "estimated": list(self.estimated),
+            # Heat pump: on per quarter, what more load costs (öre/kWh), its COP and
+            # draw (kW while heating)
+            "heat_pump": list(self.heat_pump),
+            "marginal": list(self.marginal),
+            "temperature": list(self.temperature),
+            "heat_pump_cop": list(self.heat_pump_cop),
+            "heat_pump_power": list(self.heat_pump_kw),
+            # The car while plugged in: charging power per quarter (kW), the need and
+            # what the plan can not deliver by the ready time (None: not planned)
+            "ev": None
+            if ev is None
+            else {
+                "need_kwh": ev.need_kwh,
+                "need_source": ev.need_source,
+                "ready": ev.ready.isoformat(),
+                "power": list(ev.power_kw),
+                "planned_kwh": ev.planned_kwh,
+                "missing_kwh": ev.missing_kwh,
+            },
+            "target_kw": self.targets[0],
+            "energy_cost": self.energy_cost,
+            "wear_cost": self.wear_cost,
+            "power_cost": self.power_cost,
+            "end_value": self.end_value,
+            "limit_excess_kwh": self.limit_excess_kwh,
+            "fuse_excess_kwh": self.fuse_excess_kwh,
+            "peaks": list(self.peaks),
+        }
+
+
+def follow(
+    plan: Plan | None,
+    now: dt.datetime,
+    series: Callable[[Plan], Sequence[Any] | None],
+) -> tuple[Run, None] | tuple[None, str]:
+    """Return the plan's run now in `series(plan)`, or why it can not be followed."""
+    if plan is None:
+        return None, "no plan"
+    if plan.is_stale(now):
+        return None, "plan is old"
+    values = series(plan)
+    run = plan.run_at(now, values) if values else None
+    if run is None:
+        return None, "plan does not cover now"
+    return run, None
+
+
+def action(
+    state: str | None,
+    source: str,
+    *,
+    plan: Plan | None = None,
+    until: dt.datetime | None = None,
+    reason: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Return an action: the keys every device's action has, and its own."""
+    return {
+        "state": state,
+        "source": source,
+        "until": until.isoformat() if until else None,
+        "reason": reason,
+        "plan_updated": plan.updated.isoformat() if plan else None,
+        **extra,
+    }

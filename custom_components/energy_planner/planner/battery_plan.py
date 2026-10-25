@@ -1,6 +1,6 @@
 """Battery plan: runs the optimizer on the forecast, prices and tariff.
 
-The plan is published in `hass.data[DOMAIN]["plan"]` (shown by
+The plan (a `plan.Plan`) is published in `hass.data[DOMAIN]["plan"]` (shown by
 `sensor.energy_planner_battery_plan`). It controls nothing by itself: an `auto` slot
 makes `sensor.energy_planner_battery_action` follow it (see battery_action.py), and
 an inverter script follows that sensor.
@@ -21,7 +21,7 @@ from homeassistant.util import dt as dt_utils
 
 from ..const import DOMAIN, PLAN_SENSORS
 from ..store import async_load_from_store, async_save_to_store
-from .battery_action import QUARTER, SLOT_MODES, BatteryState, Slot, resolve
+from .battery_action import SLOT_MODES, BatteryState, Slot, resolve
 from . import ev, settings
 from .battery_optimizer import (
     QUARTER_HOURS,
@@ -35,6 +35,7 @@ from .forecast import quarter_starts
 from .heat_pump import schedule
 from .heating import plan_inputs
 from .nordpool_utils import fetch_nordpool_data
+from .plan import EvPlan, Plan
 from .price_estimate import (
     MIN_HOURS,
     WIND_FIT_DAYS,
@@ -411,7 +412,7 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
     info = {
         "need_kwh": round(need, 2),
         "need_source": source,
-        "ready": target.isoformat(),
+        "ready": target,
     }
     return vehicle, info
 
@@ -436,27 +437,9 @@ def _forced(hass: HomeAssistant, starts) -> list[str | None]:
 
 def _planned_mode(hass: HomeAssistant, moment: dt.datetime) -> str | None:
     """Return the mode the current plan has for the quarter containing `moment`."""
-    plan = hass.data[DOMAIN].get("plan") or {}
-    for start, mode in zip(plan.get("starts", []), plan.get("modes", []), strict=True):
-        begin = dt.datetime.fromisoformat(start)
-        if begin <= moment < begin + QUARTER:
-            return mode
-    return None
-
-
-def expected_soc(hass: HomeAssistant, moment: dt.datetime) -> float | None:
-    """Return the SOC % the plan expects at `moment`, None if it does not cover it."""
-    plan = hass.data[DOMAIN].get("plan") or {}
-    previous = None
-    for start, soc in zip(plan.get("starts", []), plan.get("soc", []), strict=True):
-        begin = dt.datetime.fromisoformat(start)
-        if begin <= moment < begin + QUARTER:
-            if previous is None:
-                return soc
-            share = (moment - begin) / QUARTER
-            return previous + (soc - previous) * share
-        previous = soc
-    return None
+    plan: Plan | None = hass.data[DOMAIN].get("plan")
+    index = plan.index_at(moment) if plan is not None else None
+    return None if plan is None or index is None else plan.modes[index]
 
 
 def current_action(hass: HomeAssistant) -> dict:
@@ -483,6 +466,11 @@ def current_action(hass: HomeAssistant) -> dict:
         reserve_soc=config.reserve_soc,
     )
     return resolve(slot, hass.data[DOMAIN].get("plan"), dt_utils.now(), battery)
+
+
+def car_action(hass: HomeAssistant) -> dict:
+    """Return whether the car should charge now (see ev.ev_action)."""
+    return ev.ev_action(hass.data[DOMAIN].get("plan"), dt_utils.now(), ev_plugged(hass))
 
 
 def write_plan_sensors(hass: HomeAssistant) -> None:
@@ -525,8 +513,6 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     """Optimize the battery from the current quarter to the last known price."""
     prices = await _prices(hass)
     await _record_prices(hass, prices)
-    # Also read by the heat pump sensors (heating.py)
-    hass.data[DOMAIN]["prices"] = prices
     forecast = hass.data[DOMAIN].get("forecast")
     battery = _battery(hass)
     if not forecast or battery is None or battery.max_kwh <= battery.min_kwh:
@@ -616,53 +602,50 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         )
 
     capacity = settings.battery(config).capacity_kwh
-    hass.data[DOMAIN]["plan"] = {
-        "updated": now.isoformat(),
-        "starts": [s.isoformat() for s in plan.starts],
-        "modes": plan.modes,
-        "soc": [round(kwh / capacity * 100, 1) for kwh in plan.soc],
-        "grid_import": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_import],
-        "grid_export": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_export],
-        "targets": [None if t is None else round(t, 2) for t in plan.targets],
-        # Power charge level (kW): the import target below the reserve SOC
-        "peak_levels": [None if t is None else round(t, 2) for t in plan.peak_levels],
-        # Spot price incl. VAT (öre/kWh), and whether it is an estimate
-        "prices": [round(p * 1.25 / 10, 2) for p in price_list],
-        "estimated": is_estimate,
-        # Heat pump: on per quarter, what more load costs (öre/kWh), its COP and draw
-        # (kW while heating)
-        "heat_pump": heat_pump,
-        "marginal": marginal,
-        "temperature": [None if t is None else round(t, 1) for t in heat.temperatures],
-        "heat_pump_cop": [None if c is None else round(c, 2) for c in heat.cops],
-        "heat_pump_power": [round(kwh / QUARTER_HOURS, 3) for kwh in heat.draws],
-        # The car while plugged in: charging power per quarter (kW), the need and
-        # what the plan can not deliver by the ready time (None: not planned)
-        "ev": None
+    hass.data[DOMAIN]["plan"] = Plan(
+        updated=now,
+        finished=dt_utils.now(),
+        starts=tuple(plan.starts),
+        modes=tuple(plan.modes),
+        soc=tuple(round(kwh / capacity * 100, 1) for kwh in plan.soc),
+        grid_import_kw=tuple(round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_import),
+        grid_export_kw=tuple(round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_export),
+        targets=tuple(None if t is None else round(t, 2) for t in plan.targets),
+        peak_levels=tuple(None if t is None else round(t, 2) for t in plan.peak_levels),
+        spot=tuple(price_list),
+        estimated=tuple(is_estimate),
+        heat_pump=tuple(heat_pump),
+        marginal=tuple(marginal),
+        temperature=tuple(
+            None if t is None else round(t, 1) for t in heat.temperatures
+        ),
+        heat_pump_cop=tuple(None if c is None else round(c, 2) for c in heat.cops),
+        heat_pump_kw=tuple(round(kwh / QUARTER_HOURS, 3) for kwh in heat.draws),
+        ev=None
         if car is None
-        else {
-            **car,
-            "power": [round(kwh / QUARTER_HOURS, 2) for kwh in plan.ev_kwh],
-            "planned_kwh": round(sum(plan.ev_kwh), 2),
-            "missing_kwh": round(plan.ev_missing_kwh, 2),
-        },
-        "mode": plan.modes[0],
-        "target_kw": None if plan.targets[0] is None else round(plan.targets[0], 2),
-        "energy_cost": round(plan.energy_cost, 2),
-        "wear_cost": round(plan.wear_cost, 2),
-        "power_cost": round(plan.power_cost, 2),
-        "end_value": round(plan.end_value, 2),
-        "limit_excess_kwh": round(plan.limit_excess_kwh, 2),
-        "fuse_excess_kwh": round(plan.fuse_excess_kwh, 2),
-        "peaks": [
+        else EvPlan(
+            need_kwh=car["need_kwh"],
+            need_source=car["need_source"],
+            ready=car["ready"],
+            power_kw=tuple(round(kwh / QUARTER_HOURS, 2) for kwh in plan.ev_kwh),
+            planned_kwh=round(sum(plan.ev_kwh), 2),
+            missing_kwh=round(plan.ev_missing_kwh, 2),
+        ),
+        energy_cost=round(plan.energy_cost, 2),
+        wear_cost=round(plan.wear_cost, 2),
+        power_cost=round(plan.power_cost, 2),
+        end_value=round(plan.end_value, 2),
+        limit_excess_kwh=round(plan.limit_excess_kwh, 2),
+        fuse_excess_kwh=round(plan.fuse_excess_kwh, 2),
+        peaks=tuple(
             {
                 **_peak_label(tariff, key),
                 "reached_kw": round(before, 2),
                 "planned_kw": round(after, 2),
             }
             for key, (before, after) in plan.peaks.items()
-        ],
-    }
+        ),
+    )
     _LOGGER.info(
         "Battery plan until %s: %s now, energy %.2f SEK, wear %.2f SEK, "
         "power charge +%.2f SEK, heat pump on %d of %d quarters, %d estimated prices",

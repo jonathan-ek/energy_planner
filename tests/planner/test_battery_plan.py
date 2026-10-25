@@ -107,7 +107,9 @@ async def run(hass, history=None, price_history=None):
         ),
     ):
         await battery_plan.async_update_plan(hass)
-    return hass.data[DOMAIN].get("plan")
+    plan = hass.data[DOMAIN].get("plan")
+    # As the plan sensor publishes it
+    return plan.to_attributes() if plan is not None else None
 
 
 async def test_plan_from_the_current_quarter(mock_hass):
@@ -175,7 +177,7 @@ async def test_manual_slot_is_planned_around(mock_hass):
 async def test_running_mode_is_passed_on(mock_hass):
     """Test that the next calculation knows the mode running now."""
     await run(mock_hass)
-    first = mock_hass.data[DOMAIN]["plan"]["modes"][0]
+    first = mock_hass.data[DOMAIN]["plan"].modes[0]
     with patch.object(
         battery_plan, "optimize", wraps=battery_plan.optimize
     ) as optimize:
@@ -211,7 +213,7 @@ async def test_current_action_follows_an_auto_slot(mock_hass):
     with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
         result = battery_plan.current_action(mock_hass)
     assert result["source"] == "plan"
-    assert result["mode"] == mock_hass.data[DOMAIN]["plan"]["modes"][0]
+    assert result["mode"] == mock_hass.data[DOMAIN]["plan"].modes[0]
 
 
 @pytest.mark.parametrize(("temperature", "heats"), [(0.0, True), (20.0, False)])
@@ -252,7 +254,7 @@ async def test_tomorrow_is_estimated(mock_hass):
         patch.object(battery_plan, "_hourly_import", AsyncMock(return_value={})),
     ):
         await battery_plan.async_update_plan(mock_hass)
-    plan = mock_hass.data[DOMAIN]["plan"]
+    plan = mock_hass.data[DOMAIN]["plan"].to_attributes()
     starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
     assert starts[-1] == STARTS[-1]
     tomorrow = [s.date() > NOW.date() for s in starts]
@@ -391,7 +393,7 @@ async def test_no_estimate_without_history(mock_hass):
         patch.object(battery_plan, "_hourly_import", AsyncMock(return_value={})),
     ):
         await battery_plan.async_update_plan(mock_hass)
-    plan = mock_hass.data[DOMAIN]["plan"]
+    plan = mock_hass.data[DOMAIN]["plan"].to_attributes()
     assert not any(plan["estimated"])
     assert plan["starts"][-1] == STARTS[95].isoformat()
 

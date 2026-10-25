@@ -609,11 +609,10 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
     await async_update_forecast(hass)
     await async_request_plan(hass, "dynamic planner")
     plan = hass.data[DOMAIN].get("plan")
-    if not plan or not plan.get("starts"):
+    if plan is None:
         _LOGGER.warning("No battery plan, the dynamic planner writes no schedule")
         return
-    start = dt.datetime.fromisoformat(plan["starts"][0])
-    end = dt.datetime.fromisoformat(plan["starts"][-1]) + dt.timedelta(minutes=15)
+    start, end = plan.start, plan.end
     await store_disable_state(hass)
     await reset(hass)
     write_schedule(hass, [{"start": start, "end": end, "state": "auto", "soc": 50}])

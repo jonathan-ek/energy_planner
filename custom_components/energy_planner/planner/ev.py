@@ -21,7 +21,9 @@ departure (`datetime.energy_planner_ev_departure`, for a trip) comes first.
 
 import datetime as dt
 from collections.abc import Mapping, Sequence
+from typing import Any
 
+from .plan import Plan, action, follow
 from .price_estimate import is_offday
 
 # Charger states that mean no car (others, e.g. Zaptec's connected_requesting,
@@ -37,9 +39,6 @@ NEED_PERCENTILE = 1.0
 NEED_MIN_NIGHTS = 5
 # Energy at the plug per kWh into the car's battery
 CHARGE_EFFICIENCY = 0.9
-# Without a fresh plan the car charges as it would without the planner
-STALE_AFTER = dt.timedelta(minutes=30)
-QUARTER = dt.timedelta(minutes=15)
 
 
 def is_plugged(state: str | None) -> bool:
@@ -119,30 +118,35 @@ def deadline_index(
     return next((i for i, start in enumerate(starts) if start >= target), len(starts))
 
 
-def ev_action(plan: Mapping | None, now: dt.datetime, plugged: bool) -> dict:
-    """Return whether the car should charge now.
+def ev_action(plan: Plan | None, now: dt.datetime, plugged: bool) -> dict:
+    """Return whether the car should charge now, and what the plan has for it.
 
     `charge` or `wait` from the plan's car power (source `plan`) while the plan is
     fresh and covers now; `charge` without one (source `fallback`, the car charges as
     without the planner); no state while unplugged (source `unplugged`).
     """
+    car = plan.ev if plan is not None else None
+    summary: dict[str, Any] = {
+        "need_kwh": car.need_kwh if car else None,
+        "need_source": car.need_source if car else None,
+        "ready": car.ready.isoformat() if car else None,
+        "planned_kwh": car.planned_kwh if car else None,
+        "missing_kwh": car.missing_kwh if car else None,
+    }
     if not plugged:
-        return {"state": None, "source": "unplugged", "until": None, "power_kw": None}
-    plan = plan or {}
-    car = plan.get("ev")
-    if car and now - dt.datetime.fromisoformat(plan["updated"]) <= STALE_AFTER:
-        starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
-        power = car["power"]
-        index = next((i for i, s in enumerate(starts) if s <= now < s + QUARTER), None)
-        if index is not None and index < len(power):
-            charging = power[index] > 0
-            last = index
-            while last + 1 < len(power) and (power[last + 1] > 0) == charging:
-                last += 1
-            return {
-                "state": "charge" if charging else "wait",
-                "source": "plan",
-                "until": (starts[last] + QUARTER).isoformat(),
-                "power_kw": power[index],
-            }
-    return {"state": "charge", "source": "fallback", "until": None, "power_kw": None}
+        return action(None, "unplugged", plan=plan, power_kw=None, **summary)
+    run, reason = follow(
+        plan, now, lambda p: [kw > 0 for kw in p.ev.power_kw] if p.ev else None
+    )
+    if run is None or car is None:
+        return action(
+            "charge", "fallback", plan=plan, reason=reason, power_kw=None, **summary
+        )
+    return action(
+        "charge" if run.value else "wait",
+        "plan",
+        plan=plan,
+        until=run.until,
+        power_kw=car.power_kw[run.index],
+        **summary,
+    )

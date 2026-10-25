@@ -7,7 +7,7 @@ Pure functions, no Home Assistant imports. `resolve` combines the current slot (
 - An active slot with a real state (a manual slot, or a slot from the basic or price
   peak planner) wins: source `slot`.
 - An active `auto` slot follows the battery plan: source `plan`. If the plan is
-  missing, older than `STALE_AFTER` or does not cover now, the battery falls back to
+  missing, stale (plan.py) or does not cover now, the battery falls back to
   self-use: source `fallback`.
 - Otherwise (no slot, `off`, disabled) self-use: source `none`.
 
@@ -24,6 +24,8 @@ import dataclasses
 import datetime as dt
 import math
 from typing import Any
+
+from .plan import Plan, action, follow
 
 # Battery plan mode -> slot state
 SLOT_STATES = {
@@ -43,8 +45,6 @@ SLOT_MODES = {
     "pause": "hold",
     "discard-excess": "discard_excess",
 }
-STALE_AFTER = dt.timedelta(minutes=30)
-QUARTER = dt.timedelta(minutes=15)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -73,16 +73,17 @@ class BatteryState:
 
 
 def _action(state: str, source: str, **extra: Any) -> dict[str, Any]:
-    return {
-        "state": state,
-        "source": source,
-        "mode": None,
-        "soc": None,
-        "current_a": None,
-        "import_target_kw": None,
-        "until": None,
-        **extra,
-    }
+    return action(
+        state,
+        source,
+        **{
+            "mode": None,
+            "soc": None,
+            "current_a": None,
+            "import_target_kw": None,
+            **extra,
+        },
+    )
 
 
 def _current(kwh: float, until: dt.datetime, now: dt.datetime, battery, limit):
@@ -94,31 +95,19 @@ def _current(kwh: float, until: dt.datetime, now: dt.datetime, battery, limit):
 
 
 def plan_action(
-    plan: dict[str, Any] | None, now: dt.datetime, battery: BatteryState
+    plan: Plan | None, now: dt.datetime, battery: BatteryState
 ) -> dict[str, Any]:
     """Return the battery plan's action now, or a self-use fallback."""
-    if not plan or not plan.get("starts"):
-        return _action("discharge", "fallback", reason="no plan")
-    updated = dt.datetime.fromisoformat(plan["updated"])
-    if now - updated > STALE_AFTER:
-        return _action("discharge", "fallback", reason="plan is old")
-    starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
-    index = next(
-        (i for i, s in enumerate(starts) if s <= now < s + QUARTER),
-        None,
-    )
-    if index is None:
-        return _action("discharge", "fallback", reason="plan does not cover now")
-    modes = plan["modes"]
-    mode = modes[index]
-    last = index
-    while last + 1 < len(modes) and modes[last + 1] == mode:
-        last += 1
-    until = starts[last] + QUARTER
-    target_soc = plan["soc"][last]
+    run, reason = follow(plan, now, lambda p: p.modes)
+    if run is None or plan is None:
+        return _action("discharge", "fallback", plan=plan, reason=reason)
+    index = run.index
+    mode = run.value
+    until = run.until
+    target_soc = plan.soc[run.last]
     capacity = battery.capacity_kwh / 100  # kWh per %
     extra: dict[str, Any] = {"soc": None, "current_a": 0}
-    target_kw = plan["targets"][index]
+    target_kw = plan.targets[index]
     reserve = max(battery.min_soc, battery.reserve_soc)
     if (
         mode in ("self_use", "sell_excess", "hold")
@@ -128,7 +117,7 @@ def plan_action(
         # Keep the reserve for peaks; no power charge: just keep it
         mode = "hold"
         target_soc = reserve
-        target_kw = plan.get("peak_levels", plan["targets"])[index]
+        target_kw = plan.peak_levels[index]
         extra["reserve"] = True
     if mode == "charge":
         extra["soc"] = round(target_soc)
@@ -158,15 +147,15 @@ def plan_action(
         "plan",
         mode=mode,
         import_target_kw=target_kw,
-        until=until.isoformat(),
-        plan_updated=plan["updated"],
+        until=until,
+        plan=plan,
         **extra,
     )
 
 
 def resolve(
     slot: Slot | None,
-    plan: dict[str, Any] | None,
+    plan: Plan | None,
     now: dt.datetime,
     battery: BatteryState,
 ) -> dict[str, Any]:
@@ -189,5 +178,5 @@ def resolve(
         mode=SLOT_MODES.get(slot.state),
         soc=round(slot.soc),
         current_a=int(current.get(slot.state, 0)),
-        until=slot.end.isoformat() if slot.end else None,
+        until=slot.end,
     )
