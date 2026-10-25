@@ -196,8 +196,7 @@ class EnergyPlannerPlanSensor(SensorEntity):
     def native_value(self):
         """Return the planned mode for the current quarter, None if not covered."""
         plan = self._hass.data[DOMAIN].get("plan")
-        index = plan.index_at(dt_utils.now()) if plan is not None else None
-        return plan.modes[index] if plan is not None and index is not None else None
+        return plan.value_at(dt_utils.now(), plan.modes) if plan is not None else None
 
     @property
     def extra_state_attributes(self):

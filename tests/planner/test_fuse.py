@@ -149,7 +149,7 @@ def test_update_guard_reads_the_sensors():
     charge = {"state": "charge"}
     with (
         patch.object(fuse_guard.dt_utils, "now", return_value=NOW),
-        patch.object(fuse_guard, "ev_action", return_value=charge),
+        patch.object(fuse_guard, "car_action", return_value=charge),
     ):
         fuse_guard.update_guard(hass)
         guard = hass.data[DOMAIN]["fuse_guard"]

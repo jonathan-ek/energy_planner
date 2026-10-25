@@ -148,11 +148,11 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
     earliest_discharge = settings.get(
         hass.data[DOMAIN]["config"], "earliest_discharge_time"
     )
-    nr_of_charge_hours = float(
-        settings.get(hass.data[DOMAIN]["config"], "basic_nr_of_charge_hours")
+    nr_of_charge_hours = settings.number(
+        hass.data[DOMAIN]["config"], "basic_nr_of_charge_hours"
     )
-    nr_of_discharge_hours = float(
-        settings.get(hass.data[DOMAIN]["config"], "basic_nr_of_discharge_hours")
+    nr_of_discharge_hours = settings.number(
+        hass.data[DOMAIN]["config"], "basic_nr_of_discharge_hours"
     )
     _LOGGER.info("Setting up basic planner")
     await store_disable_state(hass)

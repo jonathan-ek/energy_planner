@@ -188,10 +188,3 @@ async def clear_passed_slots(hass: HomeAssistant):
 def get_nordpool_price_per_kwh_in_cent(raw_price, tax=0.25):
     """Convert raw nordpool price to price per kWh in cents."""
     return raw_price * 0.1 * (1 + tax)
-
-
-def price_under_discard_point(hass: HomeAssistant, price):
-    """Check if price is under discard point."""
-    return price < -1 * int(
-        settings.number(hass.data[DOMAIN]["config"], "network_compensation")
-    )

@@ -447,13 +447,6 @@ def _forced(hass: HomeAssistant, starts) -> list[str | None]:
     return forced
 
 
-def _planned_mode(hass: HomeAssistant, moment: dt.datetime) -> str | None:
-    """Return the mode the current plan has for the quarter containing `moment`."""
-    plan: Plan | None = hass.data[DOMAIN].get("plan")
-    index = plan.index_at(moment) if plan is not None else None
-    return None if plan is None or index is None else plan.modes[index]
-
-
 def current_action(hass: HomeAssistant) -> dict:
     """Return the action now, from slot 1 and the battery plan."""
     config = settings.battery(hass.data[DOMAIN]["config"])
@@ -583,6 +576,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         fuse_power(settings.number(config, "main_fuse")),
     )
     vehicle, car = _vehicle(hass, starts)
+    # The mode the last plan has now, so the optimizer only switches when it pays
+    last_plan: Plan | None = hass.data[DOMAIN].get("plan")
     month_start = dt_utils.start_of_local_day(now.date().replace(day=1))
     history = await _hourly_import(
         hass,
@@ -599,7 +594,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         limit=limit,
         history=history,
         forced=_forced(hass, starts),
-        current_mode=_planned_mode(hass, now),
+        current_mode=last_plan.value_at(now, last_plan.modes) if last_plan else None,
         vehicle=vehicle,
     )
     # The heat pump runs where its heat is cheaper than district heating at what more

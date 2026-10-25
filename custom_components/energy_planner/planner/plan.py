@@ -115,6 +115,11 @@ class Plan:
             return None
         return index
 
+    def value_at(self, moment: dt.datetime, values: Sequence[Any]) -> Any:
+        """Return the value of a series of this plan at `moment`, None outside it."""
+        index = self.index_at(moment)
+        return None if index is None or index >= len(values) else values[index]
+
     def run_at(self, moment: dt.datetime, values: Sequence[Any]) -> Run | None:
         """Return the run of equal `values` from the quarter of `moment` on.
 

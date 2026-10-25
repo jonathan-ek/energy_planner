@@ -36,6 +36,14 @@ def test_index_at():
     assert (PLAN.start, PLAN.end) == (START, at(60))
 
 
+def test_value_at():
+    """Test a series' value now, None outside the plan or past a short series."""
+    assert PLAN.value_at(at(20), PLAN.modes) == "charge"
+    assert PLAN.value_at(at(35), PLAN.soc) == 50.0
+    assert PLAN.value_at(at(50), [True, True]) is None
+    assert PLAN.value_at(at(70), PLAN.modes) is None
+
+
 def test_run_at():
     """Test that a run extends over equal values from now, not back."""
     run = PLAN.run_at(at(5), PLAN.modes)

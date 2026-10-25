@@ -79,10 +79,7 @@ def heat_pump_economy(hass: HomeAssistant) -> dict:
     power = _power_kw(hass, config, cop_curve, indoor, outdoor)
     # The plan's export this quarter, even an old plan's
     plan: Plan | None = hass.data[DOMAIN].get("plan")
-    index = plan.index_at(now) if plan is not None else None
-    export = (
-        plan.grid_export_kw[index] if plan is not None and index is not None else 0.0
-    )
+    export = (plan.value_at(now, plan.grid_export_kw) if plan else None) or 0.0
     result = heat_pump.evaluate(
         spot,
         tariff.buy_fee(now),

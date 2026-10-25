@@ -98,8 +98,8 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
     )
     if yesterday is None or today is None:
         raise ValueError("Nordpool data not found")
-    nr_of_charge_hours = float(
-        settings.get(hass.data[DOMAIN]["config"], "cheapest_hours_nr_of_charge_hours")
+    nr_of_charge_hours = settings.number(
+        hass.data[DOMAIN]["config"], "cheapest_hours_nr_of_charge_hours"
     )
     await store_disable_state(hass)
     await reset(hass)
