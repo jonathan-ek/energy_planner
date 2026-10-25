@@ -182,3 +182,20 @@ def test_update_guard_reads_the_sensors():
     hass.data[DOMAIN]["config"]["main_fuse"] = 0
     fuse_guard.update_guard(hass)
     assert hass.data[DOMAIN]["fuse_guard"] is None
+
+
+def test_the_sensors_are_tracked_before_a_fuse_is_set():
+    """Test that main_fuse 0 still lists the sensors, so a fuse set later is live."""
+    config = {
+        "main_fuse": 0,
+        "grid_phase_import_sensors": ["sensor.l1", "sensor.l2", "sensor.l3"],
+        "inverter_ac_power_sensor": "sensor.inverter",
+        "inverter_grid_power_sensor": "",
+    }
+    assert fuse_guard.config_entities(config) == [
+        "sensor.l1",
+        "sensor.l2",
+        "sensor.l3",
+        "sensor.inverter",
+    ]
+    assert fuse_guard.config_entities({}) == []

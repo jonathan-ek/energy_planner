@@ -78,8 +78,8 @@ QUARTER = dt.datetime(2026, 10, 7, 21, 0, tzinfo=TZ)
 OLD_PLAN = make_plan(QUARTER, spot=[500.0], updated=QUARTER - dt.timedelta(hours=1))
 
 
-def mock_hass(states, plan=OLD_PLAN):
-    """Return a mock hass with a plan (the spot price now) and sensor states."""
+def mock_hass(states, plan=OLD_PLAN, spot_prices=None):
+    """Return a mock hass with the spot price now, a plan and sensor states."""
     hass = MagicMock()
     hass.states.get = lambda entity_id: (
         SimpleNamespace(state=states[entity_id]) if entity_id in states else None
@@ -89,6 +89,7 @@ def mock_hass(states, plan=OLD_PLAN):
             "options": {"tariff_preset": "tekniska_verken_alternativ"},
             "config": {},
             "plan": plan,
+            "spot_prices": {QUARTER: 500.0} if spot_prices is None else spot_prices,
         }
     }
     return hass
@@ -150,9 +151,9 @@ def test_schedule_removes_short_gaps_and_runs():
     assert on == [True] * 5 + [False] * 5 + [True]
 
 
-def plan_hass(states, plan=OLD_PLAN):
+def plan_hass(states, plan=OLD_PLAN, spot_prices=None):
     """Return a mock hass with heat pump settings, prices and a plan."""
-    hass = mock_hass(states, plan)
+    hass = mock_hass(states, plan, spot_prices)
     hass.data[DOMAIN]["config"] = {
         "heat_pump_power": 300,
         "heat_pump_margin": 5,
@@ -259,7 +260,16 @@ def test_action_falls_back_to_the_economy_now():
 
 def test_action_without_inputs_decides_nothing():
     """Test that missing prices give no decision, so the heat pump is left alone."""
-    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, plan=None)
+    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, spot_prices={})
     with patch.object(heating.dt_utils, "now", return_value=NOW):
         action = heating.heat_pump_action(hass)
     assert (action["state"], action["source"]) == (None, "none")
+
+
+def test_action_without_a_plan_uses_the_prices():
+    """Test that a failed plan (e.g. no battery SOC) still leaves the fallback."""
+    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, plan=None)
+    with patch.object(heating.dt_utils, "now", return_value=NOW):
+        action = heating.heat_pump_action(hass)
+    assert action["source"] == "fallback"
+    assert action["state"] in ("on", "off")

@@ -48,22 +48,20 @@ def _fresh(hass: HomeAssistant, entity_ids: list[str], now) -> bool:
 
 
 def config_entities(config: dict) -> list[str]:
-    """Return the entities whose changes update the guard."""
-    guard = settings.fuse(config)
-    if guard is None:
-        return []
+    """Return the entities whose changes update the guard.
+
+    Also while `main_fuse` is 0: the listeners are set up once, and a fuse set later
+    should get the live readings without a reload.
+    """
     return [
-        *guard.phase_import_sensors,
-        *guard.phase_export_sensors,
+        *(settings.get(config, "grid_phase_import_sensors") or []),
+        *(settings.get(config, "grid_phase_export_sensors") or []),
         *(
             entity_id
-            for entity_id in (
-                guard.inverter_ac_power_sensor,
-                guard.inverter_grid_power_sensor,
-            )
-            if entity_id
+            for key in ("inverter_ac_power_sensor", "inverter_grid_power_sensor")
+            if (entity_id := settings.get(config, key))
         ),
-        *guard.ev_phase_current_sensors,
+        *(settings.get(config, "ev_phase_current_sensors") or []),
     ]
 
 

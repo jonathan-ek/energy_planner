@@ -7,6 +7,7 @@ an inverter script follows that sensor.
 """
 
 import asyncio
+import dataclasses
 import datetime as dt
 import functools
 import logging
@@ -365,8 +366,10 @@ def ev_plugged(hass: HomeAssistant) -> bool:
     return ev.is_plugged(state.state if state is not None else None)
 
 
-def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
-    """Return the car to plan with the battery, and what the plan publishes on it.
+def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle, EvPlan] | tuple[None, None]:
+    """Return the car to plan with the battery, and its need as the plan publishes it.
+
+    The `EvPlan`'s charging is filled in from the optimizer's result.
 
     Only while it is plugged in. The need is from the car's SOC and charge limit when
     both are known. Otherwise it is the largest recent charging night minus what this
@@ -409,12 +412,14 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
         plugged=[True] * len(starts),
         deadline=ev.deadline_index(starts, ready, departure),
     )
-    info = {
-        "need_kwh": round(need, 2),
-        "need_source": source,
-        "ready": target,
-    }
-    return vehicle, info
+    return vehicle, EvPlan(
+        need_kwh=round(need, 2),
+        need_source=source,
+        ready=target,
+        power_kw=(),
+        planned_kwh=0.0,
+        missing_kwh=0.0,
+    )
 
 
 def _forced(hass: HomeAssistant, starts) -> list[str | None]:
@@ -513,6 +518,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     """Optimize the battery from the current quarter to the last known price."""
     prices = await _prices(hass)
     await _record_prices(hass, prices)
+    # The published prices, also without a plan: the heat pump sensors (heating.py)
+    hass.data[DOMAIN]["spot_prices"] = prices
     forecast = hass.data[DOMAIN].get("forecast")
     battery = _battery(hass)
     if not forecast or battery is None or battery.max_kwh <= battery.min_kwh:
@@ -623,10 +630,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         heat_pump_kw=tuple(round(kwh / QUARTER_HOURS, 3) for kwh in heat.draws),
         ev=None
         if car is None
-        else EvPlan(
-            need_kwh=car["need_kwh"],
-            need_source=car["need_source"],
-            ready=car["ready"],
+        else dataclasses.replace(
+            car,
             power_kw=tuple(round(kwh / QUARTER_HOURS, 2) for kwh in plan.ev_kwh),
             planned_kwh=round(sum(plan.ev_kwh), 2),
             missing_kwh=round(plan.ev_missing_kwh, 2),

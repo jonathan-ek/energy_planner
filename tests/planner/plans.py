@@ -39,7 +39,10 @@ def make_plan(
     return Plan(
         updated=updated,
         finished=finished or updated,
-        starts=tuple(start + QUARTER * i for i in range(n)),
+        starts=tuple(
+            (start.astimezone(dt.UTC) + QUARTER * i).astimezone(start.tzinfo)
+            for i in range(n)
+        ),
         modes=tuple(modes or ["self_use"] * n),
         soc=tuple(soc or [50.0] * n),
         grid_import_kw=(0.0,) * n,

@@ -36,14 +36,14 @@ in `GLOSSARY.md`.
 | `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` updates the forecast and the plan and writes one `auto` slot to the plan's end, with manual slots laid over it |
 | `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `discard_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
 | `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores a `plan.Plan` in `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `car_action` |
-| `plan.py` | Pure: `Plan`, the battery plan as one object (per-quarter series parallel to `starts`, canonical units: spot SEK/MWh excl. VAT, SOC %, kW), `index_at`, `run_at` (a `Run` of equal values from now, with `until`), `is_stale` (`STALE_AFTER` 30 min from `finished`, when the plan became available; `updated` is the moment it was planned for), `soc_at`, `start` / `end`, `to_attributes` (what the plan sensor publishes). `follow` (the run now, or why not: no plan, plan is old, plan does not cover now) and `action` (the keys every action has: `state`, `source`, `until`, `reason`, `plan_updated`) for the resolvers |
+| `plan.py` | Pure: `Plan`, the battery plan as one object (per-quarter series parallel to `starts`, canonical units: spot SEK/MWh excl. VAT, SOC %, kW), `index_at`, `run_at` (a `Run` of equal values from now, with `until`), `is_stale` (`STALE_AFTER` 30 min from `finished`, when the plan became available; `updated` is the moment it was planned for), `soc_at`, `start` / `end` (times compared and added in UTC, so the hour repeated when DST ends works), `to_attributes` (what the plan sensor publishes). `follow` (the run now, or why not: no plan, plan is old, plan does not cover now) and `action` (the keys every action has: `state`, `source`, `until`, `reason`, `plan_updated`) for the resolvers |
 | `battery_action.py` | Pure: `resolve` turns slot 1 and the plan into the action now (slot state, source, SOC, current, import target, until), mode ↔ slot state maps |
 | `heat_pump.py` | Pure heat pump economy: COP curve per outdoor temperature (`COP_CURVES`), district heating price per month (`DISTRICT_HEATING_PRESETS`), `evaluate` compares a kWh of heat from both, `action` (on/off now from a `Plan` or the economy now). See "Heat pump" |
 | `ev.py` | Pure car charging: `is_plugged` (charger state), `need_from_history` (the largest charging night, noon to noon), `need_from_soc`, `ready_time` / `deadline_index` (the next working morning's ready time, or an earlier departure), `ev_action` (charge/wait now, from a `Plan`). See "Car" |
 | `settings.py` | Every config store key with its one default (`SETTINGS`; the config entities take their defaults from it), `get` / `number`, typed groups in domain units (`battery`, `car`, `heat_pump`, `fuse`; `car` and `fuse` are None when not set up), `replans` (the plan triggers, `replan_entity_ids`) and `reading` (a sensor's float value, None if not configured, unavailable or old) |
 | `fuse.py` | Pure main fuse guard: `limits` splits the room on the busiest phase between the car charger and the battery's grid charging, `smooth` (hysteresis for the devices). See "Main fuse" |
 | `fuse_guard.py` | HA glue for `fuse.py`: live phase readings → `hass.data[DOMAIN]["fuse_guard"]` |
-| `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price and the export now (from the plan, even an old one), the tariff |
+| `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price now (`spot_prices`, also without a plan), the export now (from the plan, even an old one), the tariff |
 | `price_estimate.py` | Pure: tomorrow's prices before they are published (same-type days + a learned correction per hour, Swedish holidays). See "Battery plan" |
 | `../comfort/schedule.py`, `../comfort/thermal.py` | WIP comfort control, not wired into HA yet. See "Comfort" |
 | `tariff.py` | Pure grid tariff model: `Tariff` with `buy_fee` / `sell_fee` (öre/kWh) and `power_cost` (kr), parsed from a dict by `tariff_from_dict`, presets in `TARIFF_PRESETS`, the household's `import_limit`. Format in the module docstring |
@@ -66,6 +66,9 @@ Everything lives in `hass.data["energy_planner"]`:
 - `options` — a copy of the config entry options (`tariff_preset`, `tariff`), kept
   current by an update listener. Read the tariff with `get_tariff(hass)` (`utils.py`),
   which falls back to a flat tariff from `network_cost` / `network_compensation`.
+- `spot_prices` — the published spot prices per quarter (SEK/MWh excl. VAT), written
+  by every plan run before it can fail on a missing forecast or battery state; read by
+  the heat pump sensors.
 - `tmp` — scratch space during a planner run.
 
 ### Slots
@@ -450,9 +453,9 @@ heat: district heating at the season's energy price against electricity / COP.
   `temperature`, `heat_pump_cop` and `heat_pump_power` (kW while heating) per
   quarter.
 - `sensor.energy_planner_heat_pump_action` (`on`/`off`): the plan now (source `plan`,
-  `until` the end of the run); if the plan is stale, the saving sensor
-  against the margin and the heating limit (source `fallback`); without a plan
-  covering now (its spot price) or an outdoor temperature (just after a restart) no
+  `until` the end of the run); if the plan is stale or missing (e.g. no
+  battery SOC), the saving sensor against the margin and the heating limit (source
+  `fallback`); without a published spot price now or an outdoor temperature (just after a restart) no
   state (source `none`), so the
   automation leaves the heat pump alone.
   `examples/heat_pump/follow_heat_pump_action_automation.yml` sets `climate.hallen` to `heat` or

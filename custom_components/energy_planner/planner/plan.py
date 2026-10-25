@@ -9,18 +9,27 @@ Per-quarter series are tuples parallel to `starts`, each quarter 15 minutes from
 start. A run is the stretch of equal values in a series from now on: the battery's
 mode, the heat pump on/off, the car charging or not. A plan is stale once it became
 available (`finished`) more than `STALE_AFTER` ago; the devices then fall back.
+
+Times are compared and added in UTC: aware datetimes in one zone compare by wall
+clock, so the hour repeated when daylight saving time ends would look unsorted.
 """
 
 from bisect import bisect_right
 from collections.abc import Callable, Sequence
 import dataclasses
 import datetime as dt
+import functools
 from typing import Any
 
 QUARTER = dt.timedelta(minutes=15)
 # Older plans are not followed
 STALE_AFTER = dt.timedelta(minutes=30)
 VAT = 1.25
+
+
+def quarter_end(start: dt.datetime) -> dt.datetime:
+    """Return the end of the quarter from `start`, also over a DST change."""
+    return (start.astimezone(dt.UTC) + QUARTER).astimezone(start.tzinfo)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -83,12 +92,17 @@ class Plan:
     @property
     def end(self) -> dt.datetime:
         """Return the end of the last quarter."""
-        return self.starts[-1] + QUARTER
+        return quarter_end(self.starts[-1])
+
+    @functools.cached_property
+    def _timestamps(self) -> tuple[float, ...]:
+        return tuple(s.timestamp() for s in self.starts)
 
     def index_at(self, moment: dt.datetime) -> int | None:
         """Return the quarter containing `moment`, None outside the plan."""
-        index = bisect_right(self.starts, moment) - 1
-        if index < 0 or moment >= self.starts[index] + QUARTER:
+        time = moment.timestamp()
+        index = bisect_right(self._timestamps, time) - 1
+        if index < 0 or time >= self._timestamps[index] + QUARTER.total_seconds():
             return None
         return index
 
@@ -103,7 +117,7 @@ class Plan:
         last = index
         while last + 1 < len(values) and values[last + 1] == values[index]:
             last += 1
-        return Run(values[index], index, last, self.starts[last] + QUARTER)
+        return Run(values[index], index, last, quarter_end(self.starts[last]))
 
     def is_stale(self, now: dt.datetime) -> bool:
         """Return whether the plan is too old to follow."""
@@ -120,7 +134,7 @@ class Plan:
             return None
         if index == 0:
             return self.soc[0]
-        share = (moment - self.starts[index]) / QUARTER
+        share = (moment.timestamp() - self._timestamps[index]) / QUARTER.total_seconds()
         return self.soc[index - 1] + (self.soc[index] - self.soc[index - 1]) * share
 
     def to_attributes(self) -> dict[str, Any]:

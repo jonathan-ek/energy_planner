@@ -57,6 +57,20 @@ def test_soc_at():
     assert PLAN.soc_at(at(60)) is None
 
 
+def test_the_repeated_hour_when_dst_ends():
+    """Test that 02:00-03:00 twice on the fall-back day are different quarters."""
+    # 01:30 CEST; quarters 2-5 are 02:00-02:45 CEST, 6-7 02:00-02:15 CET
+    start = dt.datetime(2026, 10, 25, 1, 30, tzinfo=TZ)
+    plan = make_plan(start, ["charge"] * 6 + ["sell"] * 2)
+    second = dt.datetime(2026, 10, 25, 2, 20, tzinfo=TZ, fold=1)
+    first = second.replace(fold=0)
+    assert (plan.index_at(first), plan.index_at(second)) == (3, 7)
+    run = plan.run_at(first, plan.modes)
+    assert run is not None
+    assert run.until.isoformat() == "2026-10-25T02:00:00+01:00"
+    assert plan.end.isoformat() == "2026-10-25T02:30:00+01:00"
+
+
 def test_staleness_from_when_the_plan_was_finished():
     """Test that a slow calculation does not count against the plan's age."""
     slow = dataclasses.replace(PLAN, finished=START + dt.timedelta(minutes=2))

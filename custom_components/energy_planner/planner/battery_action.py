@@ -72,17 +72,25 @@ class BatteryState:
     reserve_soc: float = 0.0  # %, the plan keeps it, peak shaving may use it
 
 
-def _action(state: str, source: str, **extra: Any) -> dict[str, Any]:
+def _action(
+    state: str,
+    source: str,
+    *,
+    mode: str | None = None,
+    soc: float | None = None,
+    current_a: int | None = None,
+    import_target_kw: float | None = None,
+    **common: Any,
+) -> dict[str, Any]:
+    """Return a battery action: the common keys (plan.action) and the battery's."""
     return action(
         state,
         source,
-        **{
-            "mode": None,
-            "soc": None,
-            "current_a": None,
-            "import_target_kw": None,
-            **extra,
-        },
+        mode=mode,
+        soc=soc,
+        current_a=current_a,
+        import_target_kw=import_target_kw,
+        **common,
     )
 
 
