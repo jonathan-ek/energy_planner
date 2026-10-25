@@ -59,7 +59,11 @@ def test_run_at():
 
 def test_soc_at():
     """Test the SOC between the previous quarter's end and this one's."""
-    assert PLAN.soc_at(at(0)) == 40.0
+    # The first quarter: from the SOC when planned (5 min in) to its end SOC
+    planned = dataclasses.replace(PLAN, soc_start=30.0, updated=at(5))
+    assert planned.soc_at(at(5)) == 30.0
+    assert planned.soc_at(at(10)) == pytest.approx(35.0)
+    assert planned.soc_at(at(1)) == 30.0
     assert PLAN.soc_at(at(15)) == 40.0
     assert PLAN.soc_at(at(22.5)) == pytest.approx(50.0)
     assert PLAN.soc_at(at(60)) is None

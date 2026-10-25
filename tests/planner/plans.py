@@ -20,14 +20,15 @@ def make_plan(
     marginal: Sequence[float] | None = None,
     heat_pump_cop: Sequence[float | None] | None = None,
     ev_power_kw: Sequence[float] | None = None,
+    soc_start: float = 50.0,
     updated: dt.datetime | None = None,
     finished: dt.datetime | None = None,
 ) -> Plan:
     """Return a plan of quarters from `start`, as many as the longest series given.
 
-    Unset series are self-use, 50 % SOC, no import target, 100 SEK/MWh, no export,
-    the heat pump off at COP 3; `ev_power_kw` plans a car. `updated` defaults to
-    `start` and `finished` to `updated`.
+    Unset series are self-use, 50 % SOC (also at the start), no import target,
+    100 SEK/MWh, no export, the heat pump off at COP 3; `ev_power_kw` plans a car.
+    `updated` defaults to `start` and `finished` to `updated`.
     """
     given = [
         s
@@ -44,6 +45,7 @@ def make_plan(
             for i in range(n)
         ),
         modes=tuple(modes or ["self_use"] * n),
+        soc_start=soc_start,
         soc=tuple(soc or [50.0] * n),
         grid_import_kw=(0.0,) * n,
         grid_export_kw=tuple(grid_export_kw or [0.0] * n),

@@ -473,9 +473,11 @@ def current_action(hass: HomeAssistant) -> dict:
     return resolve(slot, hass.data[DOMAIN].get("plan"), dt_utils.now(), battery)
 
 
-def car_action(hass: HomeAssistant) -> dict:
+def car_action(hass: HomeAssistant, now: dt.datetime | None = None) -> dict:
     """Return whether the car should charge now (see ev.ev_action)."""
-    return ev.ev_action(hass.data[DOMAIN].get("plan"), dt_utils.now(), ev_plugged(hass))
+    return ev.ev_action(
+        hass.data[DOMAIN].get("plan"), now or dt_utils.now(), ev_plugged(hass)
+    )
 
 
 def write_plan_sensors(hass: HomeAssistant) -> None:
@@ -629,6 +631,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         finished=dt_utils.now(),
         starts=tuple(plan.starts),
         modes=tuple(plan.modes),
+        soc_start=round(battery.soc_kwh / capacity * 100, 1),
         soc=tuple(round(kwh / capacity * 100, 1) for kwh in plan.soc),
         grid_import_kw=tuple(round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_import),
         grid_export_kw=tuple(round(kwh / QUARTER_HOURS, 2) for kwh in plan.grid_export),

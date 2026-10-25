@@ -71,6 +71,7 @@ class Plan:
     finished: dt.datetime  # when it became available
     starts: tuple[dt.datetime, ...]
     modes: tuple[str, ...]
+    soc_start: float  # % when it was planned (`updated`)
     soc: tuple[float, ...]  # % at the end of each quarter
     grid_import_kw: tuple[float, ...]
     grid_export_kw: tuple[float, ...]
@@ -140,16 +141,21 @@ class Plan:
     def soc_at(self, moment: dt.datetime) -> float | None:
         """Return the SOC % the plan expects at `moment`, None outside the plan.
 
-        Between the previous quarter's end SOC and this one's; the first quarter
-        has no start SOC and gives its end SOC.
+        Between the previous quarter's end SOC and this one's; in the first quarter
+        from the SOC when it was planned, which is usually partway through it.
         """
         index = self.index_at(moment)
         if index is None:
             return None
+        time = moment.timestamp()
+        end = self._timestamps[index] + QUARTER.total_seconds()
         if index == 0:
-            return self.soc[0]
-        share = (moment.timestamp() - self._timestamps[index]) / QUARTER.total_seconds()
-        return self.soc[index - 1] + (self.soc[index] - self.soc[index - 1]) * share
+            begin, before = self.updated.timestamp(), self.soc_start
+        else:
+            begin, before = self._timestamps[index], self.soc[index - 1]
+        if time <= begin or end <= begin:
+            return before
+        return before + (self.soc[index] - before) * (time - begin) / (end - begin)
 
     def to_attributes(self) -> dict[str, Any]:
         """Return the plan as the plan sensor publishes it (built once per plan)."""
@@ -163,6 +169,7 @@ class Plan:
             "finished": self.finished.isoformat(),
             "starts": [s.isoformat() for s in self.starts],
             "modes": list(self.modes),
+            "soc_start": self.soc_start,
             "soc": list(self.soc),
             "grid_import": list(self.grid_import_kw),
             "grid_export": list(self.grid_export_kw),

@@ -121,7 +121,7 @@ def update_guard(hass: HomeAssistant) -> None:
         config.margin_a,
         # An 11 kW charger is 16 A
         round(config.charger_max_kw * 1000 / (len(reading.phase_kw) * fuse.VOLTAGE)),
-        ev_wanted=not finished and car_action(hass)["state"] == "charge",
+        ev_wanted=not finished and car_action(hass, now)["state"] == "charge",
     )
     meter_kw = settings.reading(
         hass, config.inverter_grid_power_sensor, unit="kW", max_age=MAX_AGE, now=now

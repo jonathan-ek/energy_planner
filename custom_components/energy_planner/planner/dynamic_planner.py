@@ -611,7 +611,8 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
     # Wait for a calculation already running, and the one after it
     await async_request_plan(hass, "dynamic planner", wait=True)
     plan = hass.data[DOMAIN].get("plan")
-    if plan is None or plan.end <= dt_utils.now():
+    # Timestamps: local times in the hour repeated when DST ends compare equal
+    if plan is None or plan.end.timestamp() <= dt_utils.now().timestamp():
         _LOGGER.warning("No battery plan, the dynamic planner writes no schedule")
         return
     # Planned for a moment after the request, so on the new forecast. An older one
