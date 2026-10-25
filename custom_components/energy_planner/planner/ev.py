@@ -139,6 +139,9 @@ def ev_action(plan: Plan | None, now: dt.datetime, plugged: bool) -> dict:
     run, reason = follow(
         plan, now, lambda p: [kw > 0 for kw in p.ev.power_kw] if p.ev else None
     )
+    if run is None and plan is not None and plan.ev is None and reason != "plan is old":
+        # Unplugged when the plan was made, or no need known (see battery_plan._vehicle)
+        reason = "car not planned"
     if run is None or car is None:
         return action(
             "charge", "fallback", plan=plan, reason=reason, power_kw=None, **summary

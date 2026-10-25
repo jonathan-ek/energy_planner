@@ -223,6 +223,27 @@ async def test_a_waiting_request_returns_after_its_run(mock_hass):
     assert seen == [2]
 
 
+async def test_a_request_while_the_lock_changes_hands_is_run(mock_hass):
+    """Test that a waiting request runs one made after the holder's last check."""
+    calls = []
+
+    async def update(hass):
+        calls.append(1)
+
+    lock = mock_hass.data[DOMAIN].setdefault("plan_lock", asyncio.Lock())
+    await lock.acquire()
+    with patch.object(battery_plan, "async_update_plan", update):
+        waiter = asyncio.create_task(
+            battery_plan.async_request_plan(mock_hass, "dynamic", wait=True)
+        )
+        await asyncio.sleep(0)
+        # The holder has finished its loop; this one only leaves a pending reason
+        await battery_plan.async_request_plan(mock_hass, "late")
+        lock.release()
+        await waiter
+    assert len(calls) == 1
+
+
 async def test_current_action_follows_an_auto_slot(mock_hass):
     """Test the action sensor's value for an auto slot."""
     await run(mock_hass)

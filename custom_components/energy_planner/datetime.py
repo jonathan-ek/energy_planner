@@ -5,6 +5,7 @@ from homeassistant.components.datetime import DateTimeEntity
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN, SLOT_COUNT, DATE_TIME_ENTITIES
+from .planner import settings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,7 +62,11 @@ class EnergyPlannerDateTimeEntity(DateTimeEntity):
         self._attr_has_entity_name = True
         self._attr_name = entity_definition["name"]
         self.data_store = entity_definition.get("data_store", "values")
-        self._attr_native_value = entity_definition.get("default", None)
+        self._attr_native_value = (
+            settings.default(self.id)
+            if self.data_store == "config"
+            else entity_definition.get("default", None)
+        )
         self._attr_assumed_state = entity_definition.get("assumed", False)
         self._attr_available = True
         self.is_added_to_hass = False
@@ -83,7 +88,13 @@ class EnergyPlannerDateTimeEntity(DateTimeEntity):
         """Update data."""
         self._attr_available = True
 
-        value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
+        store = self._hass.data[DOMAIN][self.data_store]
+        # A setting not in the store shows its default, as the planner reads it
+        value = (
+            settings.get(store, self.id)
+            if self.data_store == "config"
+            else store.get(self.id, None)
+        )
         self._attr_native_value = value
         self.schedule_update_ha_state()
 

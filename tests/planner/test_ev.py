@@ -130,6 +130,10 @@ def test_action_falls_back_to_charging():
     assert ev.ev_action(old, now, plugged=True)["source"] == "fallback"
     assert ev.ev_action(None, now, plugged=True)["state"] == "charge"
     assert ev.ev_action(old, now, plugged=False)["state"] is None
+    # A fresh plan without the car (no need known) says so
+    unplanned = make_plan(now, updated=now)
+    action = ev.ev_action(unplanned, now, plugged=True)
+    assert (action["source"], action["reason"]) == ("fallback", "car not planned")
 
 
 def test_action_has_the_plans_need():

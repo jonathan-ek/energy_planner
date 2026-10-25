@@ -509,7 +509,13 @@ class EnergyPlannerNumberEntity(NumberEntity):
         """Update data."""
         self._attr_available = True
 
-        value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
+        store = self._hass.data[DOMAIN][self.data_store]
+        # A setting not in the store shows its default, as the planner reads it
+        value = (
+            settings.get(store, self.id)
+            if self.data_store == "config"
+            else store.get(self.id, None)
+        )
         self._attr_native_value = value
         self.schedule_update_ha_state()
 

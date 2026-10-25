@@ -132,3 +132,10 @@ async def test_entities_match_the_table(platform):
     }
     for key in config_ids:
         assert hass.data[DOMAIN]["config"].get(key) == settings.default(key)
+    # A setting missing from the store shows its default, not unknown
+    hass.data[DOMAIN]["config"].clear()
+    with patch.object(Entity, "schedule_update_ha_state"):
+        for entity in entities:
+            if entity.data_store == "config":
+                entity.update()
+                assert entity._attr_native_value == settings.default(entity.id)

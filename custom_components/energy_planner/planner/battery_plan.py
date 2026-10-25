@@ -501,14 +501,15 @@ async def async_request_plan(
     """
     data = hass.data[DOMAIN]
     lock = data.setdefault("plan_lock", asyncio.Lock())
-    if lock.locked():
+    waited = lock.locked()
+    if waited:
         data["plan_pending"] = reason
-        if wait:
-            # The holder runs the pending calculation before it lets go
-            async with lock:
-                pass
-        return
+        if not wait:
+            return
     async with lock:
+        if waited:
+            # The holder ran ours; one made while the lock changed hands is pending
+            reason = data.get("plan_pending")
         while reason:
             data["plan_pending"] = None
             _LOGGER.debug("Updating the battery plan: %s", reason)
