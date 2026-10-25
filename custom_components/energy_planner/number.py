@@ -16,6 +16,7 @@ from homeassistant.components.sensor.const import (
 )
 
 from .const import DOMAIN, SLOT_COUNT, NUMBER_ENTITIES
+from .planner import settings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +47,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "basic_nr_of_charge_hours",
                 "name": "Number of charge hours",
-                "default": 4,
                 "min_val": 0,
                 "max_val": 12,
                 "step": 0.25,
@@ -60,7 +60,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "basic_nr_of_discharge_hours",
                 "name": "Number of discharge hours",
-                "default": 12,
                 "min_val": 0,
                 "max_val": 24,
                 "step": 0.25,
@@ -74,7 +73,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "cheapest_hours_nr_of_charge_hours",
                 "name": "Number of charge hours",
-                "default": 2,
                 "min_val": 0,
                 "max_val": 24,
                 "step": 0.25,
@@ -88,7 +86,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "price_peak_nr_of_charge_hours",
                 "name": "Number of charge hours",
-                "default": 2,
                 "min_val": 0,
                 "max_val": 24,
                 "step": 0.25,
@@ -102,7 +99,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "price_peak_nr_of_discharge_hours",
                 "name": "Number of discharge hours",
-                "default": 2,
                 "min_val": 0,
                 "max_val": 24,
                 "step": 0.25,
@@ -116,7 +112,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "price_peak_efficiency_factor",
                 "name": "Inverter efficiency factor (%)",
-                "default": 85,
                 "min_val": 0,
                 "max_val": 100,
                 "step": 1,
@@ -130,7 +125,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "max_charge_current",
                 "name": "Max charge current",
-                "default": 16,
                 "min_val": 0,
                 "max_val": 50,
                 "step": 1,
@@ -144,7 +138,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "max_discharge_current",
                 "name": "Max discharge current",
-                "default": 16,
                 "min_val": 0,
                 "max_val": 50,
                 "step": 1,
@@ -158,7 +151,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "battery_capacity",
                 "name": "Battery capacity",
-                "default": 25600,
                 "min_val": 0,
                 "max_val": 1000000,
                 "step": 1,
@@ -172,7 +164,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "battery_shutdown_soc",
                 "name": "Battery shutdown SOC",
-                "default": 20,
                 "min_val": 0,
                 "max_val": 100,
                 "step": 1,
@@ -189,7 +180,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # At or below the shutdown SOC: off
                 "id": "battery_reserve_soc",
                 "name": "Battery reserve SOC",
-                "default": 20,
                 "min_val": 0,
                 "max_val": 100,
                 "step": 1,
@@ -204,7 +194,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # Extra energy to keep for unplanned weekend load, Sat/Sun 16-20
                 "id": "forecast_weekend_reserve",
                 "name": "Weekend reserve",
-                "default": 4,
                 "min_val": 0,
                 "max_val": 20,
                 "step": 0.5,
@@ -218,7 +207,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "forecast_reserve_start",
                 "name": "Weekend reserve from",
-                "default": 18,
                 "min_val": 0,
                 "max_val": 23,
                 "step": 1,
@@ -232,7 +220,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "forecast_reserve_end",
                 "name": "Weekend reserve until",
-                "default": 22,
                 "min_val": 1,
                 "max_val": 24,
                 "step": 1,
@@ -246,7 +233,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "battery_max_soc",
                 "name": "Battery max SOC",
-                "default": 90,
                 "min_val": 0,
                 "max_val": 100,
                 "step": 1,
@@ -260,7 +246,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "network_compensation",
                 "name": "Network compensation when selling",
-                "default": 0,
                 "min_val": 0,
                 "max_val": 1000,
                 "step": 0.1,
@@ -276,7 +261,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "network_cost",
                 "name": "Network cost when buying",
-                "default": 0,
                 "min_val": 0,
                 "max_val": 1000,
                 "step": 0.1,
@@ -294,7 +278,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # battery when the price difference pays for it
                 "id": "battery_wear_cost",
                 "name": "Battery wear cost",
-                "default": 20,
                 "min_val": 0,
                 "max_val": 200,
                 "step": 1,
@@ -311,7 +294,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # Highest hourly mean grid import the planner may cause, 0 = no limit
                 "id": "grid_import_limit",
                 "name": "Grid import limit",
-                "default": 0,
                 "min_val": 0,
                 "max_val": 50,
                 "step": 0.1,
@@ -327,7 +309,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # the car included, below what it carries, 0 = not limited
                 "id": "main_fuse",
                 "name": "Main fuse",
-                "default": 0,
                 "min_val": 0,
                 "max_val": 100,
                 "step": 1,
@@ -343,7 +324,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # (planner/fuse.py), for loads that start before it reacts
                 "id": "fuse_margin",
                 "name": "Fuse margin",
-                "default": 2,
                 "min_val": 0,
                 "max_val": 20,
                 "step": 1,
@@ -357,7 +337,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "grid_import_limit_start",
                 "name": "Grid import limit from",
-                "default": 6,
                 "min_val": 0,
                 "max_val": 23,
                 "step": 1,
@@ -371,7 +350,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "grid_import_limit_end",
                 "name": "Grid import limit until",
-                "default": 23,
                 "min_val": 0,
                 "max_val": 24,
                 "step": 1,
@@ -388,7 +366,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # when it runs. 0 = do not plan the heat pump
                 "id": "heat_pump_power",
                 "name": "Heat pump power",
-                "default": 300,
                 "min_val": 0,
                 "max_val": 3000,
                 "step": 50,
@@ -404,7 +381,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # the highest, as the automation then only starts and stops it)
                 "id": "ev_charger_max_power",
                 "name": "Car charger max power",
-                "default": 11000,
                 "min_val": 1000,
                 "max_val": 22000,
                 "step": 100,
@@ -418,7 +394,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
             {
                 "id": "ev_charger_min_power",
                 "name": "Car charger min power",
-                "default": 0,
                 "min_val": 0,
                 "max_val": 22000,
                 "step": 100,
@@ -433,7 +408,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # Usable battery of the car, for the need from its SOC
                 "id": "ev_battery_capacity",
                 "name": "Car battery capacity",
-                "default": 75,
                 "min_val": 10,
                 "max_val": 200,
                 "step": 1,
@@ -449,7 +423,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # than district heating (öre per kWh of heat)
                 "id": "heat_pump_margin",
                 "name": "Heat pump margin",
-                "default": 5,
                 "min_val": 0,
                 "max_val": 100,
                 "step": 1,
@@ -467,7 +440,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 # temperature
                 "id": "heat_pump_heating_limit",
                 "name": "Heat pump heating limit",
-                "default": 15,
                 "min_val": -10,
                 "max_val": 25,
                 "step": 0.5,
@@ -505,7 +477,11 @@ class EnergyPlannerNumberEntity(NumberEntity):
         self._attr_has_entity_name = True
         self._attr_name = entity_definition["name"]
         self.data_store = entity_definition.get("data_store", "values")
-        self._attr_native_value = entity_definition.get("default", None)
+        self._attr_native_value = (
+            settings.default(self.id)
+            if self.data_store == "config"
+            else entity_definition.get("default", None)
+        )
         self._attr_assumed_state = entity_definition.get("assumed", False)
         self._attr_available = True
         self.is_added_to_hass = False

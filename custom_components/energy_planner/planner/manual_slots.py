@@ -4,6 +4,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_utils
 
 from .utils import clear_slot, parse_datetime
+from . import settings
 from ..const import DOMAIN, SLOT_COUNT
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,8 +69,8 @@ async def add_manual_slots(hass: HomeAssistant):
             continue
         state = s["state"]
 
-        max_soc = hass.data[DOMAIN]["config"].get("battery_max_soc", 100)
-        min_soc = hass.data[DOMAIN]["config"].get("battery_shutdown_soc", 20)
+        max_soc = settings.number(hass.data[DOMAIN]["config"], "battery_max_soc")
+        min_soc = settings.number(hass.data[DOMAIN]["config"], "battery_shutdown_soc")
         if state in ["charge", "sell"]:
             raw_soc = s.get("soc")
             if raw_soc is None:

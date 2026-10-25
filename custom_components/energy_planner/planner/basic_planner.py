@@ -12,6 +12,7 @@ from .utils import (
     restore_disable_state,
     write_schedule,
 )
+from . import settings
 from ..const import DOMAIN
 from homeassistant.util import dt as dt_utils
 
@@ -41,8 +42,8 @@ async def plan_day(hass: HomeAssistant, nordpool_values: list[dict], config: dic
         ],
         key=lambda x: x["start"],
     )
-    max_soc = hass.data[DOMAIN]["config"].get("battery_max_soc", 100)
-    min_soc = hass.data[DOMAIN]["config"].get("battery_shutdown_soc", 20)
+    max_soc = settings.number(hass.data[DOMAIN]["config"], "battery_max_soc")
+    min_soc = settings.number(hass.data[DOMAIN]["config"], "battery_shutdown_soc")
     # combine neighbouring hours
     schedule = []
     for hour in cheapest_hours:
@@ -143,13 +144,15 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
     )
     if yesterday is None or today is None:
         raise ValueError("Nordpool data not found")
-    earliest_charge = hass.data[DOMAIN]["config"].get("earliest_charge_time")
-    earliest_discharge = hass.data[DOMAIN]["config"].get("earliest_discharge_time")
+    earliest_charge = settings.get(hass.data[DOMAIN]["config"], "earliest_charge_time")
+    earliest_discharge = settings.get(
+        hass.data[DOMAIN]["config"], "earliest_discharge_time"
+    )
     nr_of_charge_hours = float(
-        hass.data[DOMAIN]["config"].get("basic_nr_of_charge_hours")
+        settings.get(hass.data[DOMAIN]["config"], "basic_nr_of_charge_hours")
     )
     nr_of_discharge_hours = float(
-        hass.data[DOMAIN]["config"].get("basic_nr_of_discharge_hours")
+        settings.get(hass.data[DOMAIN]["config"], "basic_nr_of_discharge_hours")
     )
     _LOGGER.info("Setting up basic planner")
     await store_disable_state(hass)

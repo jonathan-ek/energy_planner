@@ -6,6 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, TIME_ENTITIES
+from .planner import settings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +21,6 @@ async def async_setup_entry(
             hass,
             {
                 "id": "earliest_charge_time",
-                "default": dt.time(22, 0),
                 "name": "Earliest charge time",
                 "enabled": True,
                 "data_store": "config",
@@ -30,7 +30,6 @@ async def async_setup_entry(
             hass,
             {
                 "id": "earliest_discharge_time",
-                "default": dt.time(6, 0),
                 "name": "Earliest discharge time",
                 "enabled": True,
                 "data_store": "config",
@@ -42,7 +41,6 @@ async def async_setup_entry(
                 # The car should have its need charged by this time (the next one
                 # after now), see planner/ev.py
                 "id": "ev_ready_time",
-                "default": dt.time(6, 30),
                 "name": "Car ready time",
                 "enabled": True,
                 "data_store": "config",
@@ -78,7 +76,11 @@ class EnergyPlannerTimeEntity(TimeEntity):
         self._attr_has_entity_name = True
         self._attr_name = entity_definition["name"]
         self.data_store = entity_definition.get("data_store", "values")
-        self._attr_native_value = entity_definition.get("default", None)
+        self._attr_native_value = (
+            settings.default(self.id)
+            if self.data_store == "config"
+            else entity_definition.get("default", None)
+        )
         self._attr_assumed_state = entity_definition.get("assumed", False)
         self._attr_available = True
         self.is_added_to_hass = False

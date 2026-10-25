@@ -22,7 +22,6 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.start import async_at_started
 
 from .const import (
-    DEFAULT_BATTERY_SOC_SENSOR,
     DOMAIN,
     DATE_TIME_ENTITIES,
     FUSE_GUARD_SENSOR,
@@ -32,6 +31,7 @@ from .const import (
     TIME_ENTITIES,
     SLOT_COUNT,
 )
+from .planner import settings
 from .planner.ev import is_plugged as ev_is_plugged
 from .planner.fuse_guard import config_entities, update_guard
 from .planner import (
@@ -51,29 +51,6 @@ from .store import async_save_to_store, async_load_from_store
 
 _LOGGER = logging.getLogger(__name__)
 
-# Settings that change the battery plan: recalculate it when they change
-PLAN_SETTINGS = (
-    "battery_capacity",
-    "battery_shutdown_soc",
-    "battery_reserve_soc",
-    "battery_max_soc",
-    "battery_wear_cost",
-    "max_charge_current",
-    "max_discharge_current",
-    "price_peak_efficiency_factor",
-    "network_cost",
-    "network_compensation",
-    "grid_import_limit",
-    "grid_import_limit_start",
-    "grid_import_limit_end",
-    "main_fuse",
-    "heat_pump_power",
-    "heat_pump_margin",
-    "heat_pump_heating_limit",
-    "ev_charger_min_power",
-    "ev_charger_max_power",
-    "ev_battery_capacity",
-)
 # Recalculate the plan when the actual SOC is this many % from the plan
 SOC_DRIFT = 5.0
 # ... but not more often than this
@@ -141,7 +118,7 @@ def parse_stored_data(hass: HomeAssistant):
 
 async def run_planner(hass: HomeAssistant) -> None:
     """Run the selected planner."""
-    planner_state = hass.data[DOMAIN]["config"].get("planner_state", "basic")
+    planner_state = settings.get(hass.data[DOMAIN]["config"], "planner_state")
     if planner_state == "off":
         _LOGGER.info("Planner is off")
         return
@@ -382,11 +359,7 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
     entry.async_on_unload(
         async_track_state_change_event(
             hass,
-            [
-                *(f"number.{DOMAIN}_{key}" for key in PLAN_SETTINGS),
-                f"time.{DOMAIN}_ev_ready_time",
-                f"datetime.{DOMAIN}_ev_departure",
-            ],
+            settings.replan_entity_ids(),
             setting_changed,
         )
     )
@@ -398,16 +371,14 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if was != now:
             await async_request_plan(hass, "car plugged in" if now else "car unplugged")
 
-    status = config.get("ev_charger_status_sensor")
-    if status:
-        entry.async_on_unload(async_track_state_change_event(hass, status, car_plugged))
+    car = settings.car(config)
+    if car is not None:
+        entry.async_on_unload(
+            async_track_state_change_event(hass, car.status_sensor, car_plugged)
+        )
 
     async def soc_changed(event: Event[EventStateChangedData]):
-        new = event.data["new_state"]
-        try:
-            soc = float(new.state) if new is not None else None
-        except ValueError:
-            return
+        soc = settings.reading(hass, event.data["entity_id"])
         now = dt_utils.now()
         expected = expected_soc(hass, now)
         if soc is None or expected is None or abs(soc - expected) < SOC_DRIFT:
@@ -421,7 +392,7 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
     entry.async_on_unload(
         async_track_state_change_event(
             hass,
-            config.get("battery_soc_sensor", DEFAULT_BATTERY_SOC_SENSOR),
+            settings.get(config, "battery_soc_sensor"),
             soc_changed,
         )
     )

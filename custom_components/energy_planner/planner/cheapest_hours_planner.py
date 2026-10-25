@@ -12,6 +12,7 @@ from .utils import (
     write_schedule,
 )
 from .manual_slots import add_manual_slots
+from . import settings
 from ..const import DOMAIN
 from .nordpool_utils import fetch_nordpool_data, tzs
 
@@ -30,8 +31,8 @@ async def plan_day(hass: HomeAssistant, nordpool_values: list[dict], config: dic
         ],
         key=lambda x: x["start"],
     )
-    max_soc = hass.data[DOMAIN]["config"].get("battery_max_soc", 100)
-    min_soc = hass.data[DOMAIN]["config"].get("battery_shutdown_soc", 20)
+    max_soc = settings.number(hass.data[DOMAIN]["config"], "battery_max_soc")
+    min_soc = settings.number(hass.data[DOMAIN]["config"], "battery_shutdown_soc")
     # combine neighbouring hours
     schedule = []
     for hour in cheapest_hours:
@@ -98,7 +99,7 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
     if yesterday is None or today is None:
         raise ValueError("Nordpool data not found")
     nr_of_charge_hours = float(
-        hass.data[DOMAIN]["config"].get("cheapest_hours_nr_of_charge_hours")
+        settings.get(hass.data[DOMAIN]["config"], "cheapest_hours_nr_of_charge_hours")
     )
     await store_disable_state(hass)
     await reset(hass)

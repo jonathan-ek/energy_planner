@@ -15,6 +15,7 @@ from ..const import (
     SLOT_COUNT,
     TARIFF_CUSTOM,
 )
+from . import settings
 from .tariff import TARIFF_PRESETS, Tariff, flat_tariff, tariff_from_dict
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,8 +38,8 @@ def get_tariff(hass: HomeAssistant) -> Tariff:
         _LOGGER.exception("Invalid tariff, using the flat network settings")
     config = hass.data[DOMAIN]["config"]
     return flat_tariff(
-        float(config.get("network_cost") or 0.0),
-        float(config.get("network_compensation") or 0.0),
+        settings.number(config, "network_cost"),
+        settings.number(config, "network_compensation"),
     )
 
 
@@ -192,5 +193,5 @@ def get_nordpool_price_per_kwh_in_cent(raw_price, tax=0.25):
 def price_under_discard_point(hass: HomeAssistant, price):
     """Check if price is under discard point."""
     return price < -1 * int(
-        hass.data[DOMAIN]["config"].get("network_compensation", 1000)
+        settings.number(hass.data[DOMAIN]["config"], "network_compensation")
     )

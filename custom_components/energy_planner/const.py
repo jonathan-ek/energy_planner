@@ -17,34 +17,7 @@ SLOT_COUNT = 49
 TARIFF_FLAT = "flat"
 TARIFF_CUSTOM = "custom"
 
-# Statistics used by the forecast, can be overridden in the config store
-DEFAULT_FORECAST_LOAD_SENSOR = "sensor.solis_s6_solis_household_load_power"
-DEFAULT_FORECAST_PV_SENSOR = "sensor.solis_s6_solis_total_pv_power"
-DEFAULT_FORECAST_EV_SENSOR = "sensor.ehwuhqtp_effekt"
-# Local calendar with planned loads (sauna, laundry, EV charging, ...)
-DEFAULT_FORECAST_CALENDAR = "calendar.energiplan"
-
-# Inputs of the battery plan, can be overridden in the config store
-DEFAULT_BATTERY_SOC_SENSOR = "sensor.solis_s6_solis_battery_soc"
-DEFAULT_BATTERY_VOLTAGE_SENSOR = "sensor.solis_s6_solis_battery_voltage"
-# Energy counter of the grid import (here the electricity meter's HAN port); its
-# hourly changes this month give the power peaks already paid for
-DEFAULT_GRID_IMPORT_SENSOR = "sensor.matarstallning_aktiv_energi_uttag"
 PLAN_SENSORS = "plan_sensors"
 FUSE_GUARD_SENSOR = "fuse_guard_sensor"
 
-# Heat pump economy (planner/heat_pump.py), can be overridden in the config store
-DEFAULT_OUTDOOR_TEMPERATURE_SENSOR = "sensor.gw1100a_outdoor_temperature"
-# In the heat pump's room; with the outdoor temperature it gives the heat pump's draw
-DEFAULT_INDOOR_TEMPERATURE_SENSOR = "sensor.gw1100a_indoor_temperature"
-DEFAULT_HEAT_PUMP_MODEL = "msz_ap42"
-DEFAULT_DISTRICT_HEATING = "tekniska_verken_2026"
-# The heat pump's climate entity: hours in `heat` mode measure its draw and take it
-# out of the load history, the battery plan adds the heat pump where it plans it
-DEFAULT_HEAT_PUMP_CLIMATE = "climate.hallen"
-
-# Electric car (planner/ev.py): its sensors are in the config store only, with no
-# defaults. The car is planned only while ev_charger_status_sensor says it is plugged
-# in. ev_session_energy_sensor: kWh delivered since it was plugged in (Zaptec session
-# total charge); ev_soc_sensor / ev_charge_limit_sensor: the car's SOC and charge
-# limit (%), used for the need when both are known
+# The settings in the config store, with their defaults: planner/settings.py

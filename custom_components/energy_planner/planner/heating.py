@@ -11,13 +11,8 @@ import datetime as dt
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_utils
 
-from ..const import (
-    DEFAULT_DISTRICT_HEATING,
-    DEFAULT_HEAT_PUMP_MODEL,
-    DEFAULT_INDOOR_TEMPERATURE_SENSOR,
-    DEFAULT_OUTDOOR_TEMPERATURE_SENSOR,
-    DOMAIN,
-)
+from ..const import DOMAIN
+from . import settings
 from .battery_action import QUARTER, STALE_AFTER
 from .heat_pump import (
     COP_CURVES,
@@ -36,14 +31,13 @@ def _quarter(moment: dt.datetime) -> dt.datetime:
     )
 
 
-def _setting(hass: HomeAssistant, key: str, default: float) -> float:
-    return float(hass.data[DOMAIN]["config"].get(key, default))
+def _settings(hass: HomeAssistant) -> settings.HeatPumpSettings:
+    return settings.heat_pump(hass.data[DOMAIN]["config"])
 
 
 def curve(hass: HomeAssistant) -> tuple[tuple[float, float], ...]:
     """Return the heat pump's COP curve (heat_pump_model)."""
-    config = hass.data[DOMAIN]["config"]
-    return COP_CURVES.get(config.get("heat_pump_model", DEFAULT_HEAT_PUMP_MODEL), ())
+    return COP_CURVES.get(_settings(hass).model, ())
 
 
 def _power_kw(hass: HomeAssistant, outdoor: float | None) -> float:
@@ -52,37 +46,22 @@ def _power_kw(hass: HomeAssistant, outdoor: float | None) -> float:
     From the heat loss the forecast measured, the live indoor and the outdoor
     temperature, else the heat_pump_power setting. A setting of 0 turns planning off.
     """
-    setting = _setting(hass, "heat_pump_power", 300) / 1000
+    config = _settings(hass)
+    setting = config.power_kw
     loss = (hass.data[DOMAIN].get("forecast") or {}).get("heat_pump_loss")
-    indoor = _temperature(
-        hass, "indoor_temperature_sensor", DEFAULT_INDOOR_TEMPERATURE_SENSOR
-    )
+    indoor = settings.reading(hass, config.indoor_sensor)
     if setting <= 0 or not loss or indoor is None or outdoor is None:
         return setting
     return draw(loss, indoor, outdoor, curve(hass))
 
 
 def _seasons(hass: HomeAssistant):
-    config = hass.data[DOMAIN]["config"]
-    return DISTRICT_HEATING_PRESETS.get(
-        config.get("district_heating", DEFAULT_DISTRICT_HEATING), ()
-    )
-
-
-def _temperature(hass: HomeAssistant, key: str, default: str) -> float | None:
-    """Return a live temperature (°C) from the sensor configured under `key`."""
-    state = hass.states.get(hass.data[DOMAIN]["config"].get(key, default))
-    try:
-        return float(state.state) if state is not None else None
-    except ValueError:
-        return None
+    return DISTRICT_HEATING_PRESETS.get(_settings(hass).district_heating, ())
 
 
 def outdoor_temperature(hass: HomeAssistant) -> float | None:
     """Return the live outdoor temperature (°C)."""
-    return _temperature(
-        hass, "outdoor_temperature_sensor", DEFAULT_OUTDOOR_TEMPERATURE_SENSOR
-    )
+    return settings.reading(hass, _settings(hass).outdoor_sensor)
 
 
 def _planned_export(hass: HomeAssistant, moment: dt.datetime) -> float:
@@ -153,7 +132,8 @@ def plan_inputs(
     temps = [live if t is None else t for t in temperatures]
     cop_curve = curve(hass)
     seasons = _seasons(hass)
-    limit = _setting(hass, "heat_pump_heating_limit", 15)
+    config = _settings(hass)
+    limit = config.heating_limit_c
     hours = QUARTER.total_seconds() / 3600
     draws = [_power_kw(hass, t) * hours if cop_curve else 0.0 for t in temps]
     heating = [t is not None and t < limit for t in temps]
@@ -162,7 +142,7 @@ def plan_inputs(
         # More load is priced at the mean draw
         probe_kwh=sum(drawing) / len(drawing) if drawing else 0.0,
         draws=draws,
-        margin=_setting(hass, "heat_pump_margin", 5),
+        margin=config.margin_ore_per_kwh,
         temperatures=temps,
         cops=[None if t is None else cop(cop_curve, t) for t in temps],
         district=[district_heating_price(seasons, s) for s in starts],
@@ -209,10 +189,11 @@ def heat_pump_action(hass: HomeAssistant) -> dict:
             "marginal": None,
             "cop": None,
         }
+    config = _settings(hass)
     heat = (
         saving is not None
-        and saving >= _setting(hass, "heat_pump_margin", 5)
-        and outdoor < _setting(hass, "heat_pump_heating_limit", 15)
+        and saving >= config.margin_ore_per_kwh
+        and outdoor < config.heating_limit_c
     )
     return {
         "state": "on" if heat else "off",

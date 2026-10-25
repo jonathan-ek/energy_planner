@@ -17,101 +17,85 @@ by `sensor.energy_planner_fuse_guard`; the inverter script and the car automatio
 apply it.
 """
 
+import datetime as dt
 import logging
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_utils
 
 from ..const import DOMAIN
-from . import fuse
+from . import fuse, settings
 from .battery_plan import ev_plugged
 from .ev import ev_action
 
 _LOGGER = logging.getLogger(__name__)
 
 # Readings older than this are not used (the meter reports every 10-20 s)
-MAX_AGE_SECONDS = 120
+MAX_AGE = dt.timedelta(seconds=120)
 
 
 def _fresh(hass: HomeAssistant, entity_ids: list[str], now) -> bool:
-    """Return whether any of the entities reported within `MAX_AGE_SECONDS`.
+    """Return whether any of the entities reported within `MAX_AGE`.
 
     MQTT sensors (the parents' HAN port) do not write an unchanged value, so a phase
     that stays at 0 looks old; the meter is alive while any of its sensors reports.
     """
     return any(
         (state := hass.states.get(entity_id)) is not None
-        and (now - state.last_reported).total_seconds() <= MAX_AGE_SECONDS
+        and now - state.last_reported <= MAX_AGE
         for entity_id in entity_ids
     )
 
 
-def _value(
-    hass: HomeAssistant, entity_id: str, now, *, kilo: bool, check_age: bool = True
-) -> float | None:
-    """Return a sensor's value (kW when `kilo`, by its unit), None if missing or old."""
-    state = hass.states.get(entity_id)
-    if state is None:
-        return None
-    try:
-        value = float(state.state)
-    except ValueError:
-        return None
-    if check_age and (now - state.last_reported).total_seconds() > MAX_AGE_SECONDS:
-        return None
-    unit = state.attributes.get("unit_of_measurement")
-    if kilo and unit == "W":
-        return value / 1000
-    if not kilo and unit == "kW":
-        return value * 1000
-    return value
-
-
 def config_entities(config: dict) -> list[str]:
     """Return the entities whose changes update the guard."""
+    guard = settings.fuse(config)
+    if guard is None:
+        return []
     return [
-        *(config.get("grid_phase_import_sensors") or []),
-        *(config.get("grid_phase_export_sensors") or []),
+        *guard.phase_import_sensors,
+        *guard.phase_export_sensors,
         *(
-            config[key]
-            for key in ("inverter_ac_power_sensor", "inverter_grid_power_sensor")
-            if config.get(key)
+            entity_id
+            for entity_id in (
+                guard.inverter_ac_power_sensor,
+                guard.inverter_grid_power_sensor,
+            )
+            if entity_id
         ),
-        *(config.get("ev_phase_current_sensors") or []),
+        *guard.ev_phase_current_sensors,
     ]
 
 
-def _reading(hass: HomeAssistant, config: dict, now) -> fuse.Reading | None:
+def _reading(
+    hass: HomeAssistant, guard: settings.FuseSettings, now
+) -> fuse.Reading | None:
     """Return the live reading, None if a phase is missing or the meter is silent."""
-    imports = config.get("grid_phase_import_sensors") or []
-    exports = config.get("grid_phase_export_sensors") or []
+    imports = guard.phase_import_sensors
+    exports = guard.phase_export_sensors
     if not _fresh(hass, [*imports, *exports], now):
         return None
     phase_kw = []
     for index, entity_id in enumerate(imports):
-        kw = _value(hass, entity_id, now, kilo=True, check_age=False)
+        # The meter as a whole is fresh (_fresh): an unchanged phase is not old
+        kw = settings.reading(hass, entity_id, unit="kW")
         if kw is None:
             return None
         if index < len(exports):
-            kw -= _value(hass, exports[index], now, kilo=True, check_age=False) or 0.0
+            kw -= settings.reading(hass, exports[index], unit="kW") or 0.0
         phase_kw.append(kw)
-    inverter = config.get("inverter_ac_power_sensor")
-    delivered = _value(hass, inverter, now, kilo=True) if inverter else None
+    delivered = settings.reading(
+        hass, guard.inverter_ac_power_sensor, unit="kW", max_age=MAX_AGE, now=now
+    )
     currents = [
-        _value(hass, entity_id, now, kilo=False) or 0.0
-        for entity_id in config.get("ev_phase_current_sensors") or []
+        settings.reading(hass, entity_id, unit="A", max_age=MAX_AGE, now=now) or 0.0
+        for entity_id in guard.ev_phase_current_sensors
     ]
-    setting_id = config.get("ev_charger_current_number")
-    setting = hass.states.get(setting_id) if setting_id else None
-    try:
-        setting_a = float(setting.state) if setting is not None else None
-    except ValueError:
-        setting_a = None
     return fuse.Reading(
         tuple(phase_kw),
         -(delivered or 0.0),
         max(currents, default=0.0),
-        setting_a,
+        settings.reading(hass, guard.ev_charger_current_number),
     )
 
 
@@ -122,31 +106,30 @@ def update_guard(hass: HomeAssistant) -> None:
     inverter and the charger's cloud API only get real changes.
     """
     data = hass.data[DOMAIN]
-    config = data["config"]
-    fuse_a = float(config.get("main_fuse") or 0)
-    if fuse_a <= 0 or not config.get("grid_phase_import_sensors"):
+    config = settings.fuse(data["config"])
+    if config is None:
         data["fuse_guard"] = None
         return
     now = dt_utils.now()
     reading = _reading(hass, config, now)
     if reading is None:
         return
-    max_power = float(config.get("ev_charger_max_power") or 11000)
     # A car that has finished draws nothing: no room is kept for it
-    status_id = config.get("ev_charger_status_sensor")
+    status_id = config.ev_charger_status_sensor
     status = hass.states.get(status_id) if status_id else None
     finished = status is not None and status.state.lower().endswith("finished")
     guard = fuse.limits(
         reading,
-        fuse_a,
-        float(config.get("fuse_margin", 2) or 0),
+        config.main_fuse_a,
+        config.margin_a,
         # An 11 kW charger is 16 A
-        round(max_power / (len(reading.phase_kw) * fuse.VOLTAGE)),
+        round(config.charger_max_kw * 1000 / (len(reading.phase_kw) * fuse.VOLTAGE)),
         ev_wanted=not finished
         and ev_action(data.get("plan"), now, ev_plugged(hass))["state"] == "charge",
     )
-    meter_id = config.get("inverter_grid_power_sensor")
-    meter_kw = _value(hass, meter_id, now, kilo=True) if meter_id else None
+    meter_kw = settings.reading(
+        hass, config.inverter_grid_power_sensor, unit="kW", max_age=MAX_AGE, now=now
+    )
     if meter_kw is not None:
         # The inverter limits its own meter's reading: shift by what it misses
         offset = sum(reading.phase_kw) - meter_kw
@@ -162,7 +145,7 @@ def update_guard(hass: HomeAssistant) -> None:
         fuse.GRID_MARGIN_KW,
     )
     guard["grid_limit_kw"] = round(smoothing["grid"][0], 1)
-    if config.get("ev_charger_current_number"):
+    if config.ev_charger_current_number:
         smoothing["ev"] = fuse.smooth(
             smoothing.get("ev"),
             guard["ev_current_a"],

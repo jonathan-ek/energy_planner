@@ -13,7 +13,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_utils
 
 from . import ev as ev_need
-from . import forecast, heat_pump, heating
+from . import forecast, heat_pump, heating, settings
 from .battery_plan import async_request_plan
 from .manual_slots import add_manual_slots
 from .utils import (
@@ -23,17 +23,7 @@ from .utils import (
     update_entities,
     write_schedule,
 )
-from ..const import (
-    DOMAIN,
-    DEFAULT_FORECAST_CALENDAR,
-    DEFAULT_FORECAST_EV_SENSOR,
-    DEFAULT_FORECAST_LOAD_SENSOR,
-    DEFAULT_FORECAST_PV_SENSOR,
-    DEFAULT_HEAT_PUMP_CLIMATE,
-    DEFAULT_INDOOR_TEMPERATURE_SENSOR,
-    DEFAULT_OUTDOOR_TEMPERATURE_SENSOR,
-    FORECAST_SENSORS,
-)
+from ..const import DOMAIN, FORECAST_SENSORS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -136,16 +126,16 @@ def _solar_planes(
         if latitude is None or longitude is None:
             continue
         location = location or (latitude, longitude)
-        settings = [sub.data for sub in entry.get_subentries_of_type("plane")]
-        if not settings and "declination" in entry.options:
-            settings = [entry.options]  # before planes became subentries
+        entry_planes = [sub.data for sub in entry.get_subentries_of_type("plane")]
+        if not entry_planes and "declination" in entry.options:
+            entry_planes = [entry.options]  # before planes became subentries
         planes.extend(
             (
                 float(plane["declination"]),
                 float(plane["azimuth"]),
                 float(plane["modules_power"]) / 1000,
             )
-            for plane in settings
+            for plane in entry_planes
         )
     return location, planes
 
@@ -330,17 +320,14 @@ async def async_update_forecast(hass: HomeAssistant):
     be compared with what actually happens. Totals for today count from now.
     """
     config = hass.data[DOMAIN]["config"]
-    load_id = config.get("forecast_load_sensor", DEFAULT_FORECAST_LOAD_SENSOR)
-    pv_id = config.get("forecast_pv_sensor", DEFAULT_FORECAST_PV_SENSOR)
-    ev_id = config.get("forecast_ev_sensor", DEFAULT_FORECAST_EV_SENSOR)
-    heat_pump_id = config.get("heat_pump_climate", DEFAULT_HEAT_PUMP_CLIMATE)
-    indoor_id = config.get(
-        "indoor_temperature_sensor", DEFAULT_INDOOR_TEMPERATURE_SENSOR
-    )
-    outdoor_id = config.get(
-        "outdoor_temperature_sensor", DEFAULT_OUTDOOR_TEMPERATURE_SENSOR
-    )
-    calendar_id = config.get("forecast_calendar", DEFAULT_FORECAST_CALENDAR)
+    heat_pump_config = settings.heat_pump(config)
+    load_id = settings.get(config, "forecast_load_sensor")
+    pv_id = settings.get(config, "forecast_pv_sensor")
+    ev_id = settings.get(config, "forecast_ev_sensor")
+    heat_pump_id = heat_pump_config.climate
+    indoor_id = heat_pump_config.indoor_sensor
+    outdoor_id = heat_pump_config.outdoor_sensor
+    calendar_id = settings.get(config, "forecast_calendar")
 
     now = dt_utils.now()
     today = now.date()
@@ -385,7 +372,7 @@ async def async_update_forecast(hass: HomeAssistant):
         _local_hours(outdoor),
         curve,
     )
-    setting = float(config.get("heat_pump_power", 300)) / 1000
+    setting = heat_pump_config.power_kw
 
     def heat_pump_kw(hour):
         """Return what the heat pump drew while heating in an hour (kW)."""
@@ -408,9 +395,9 @@ async def async_update_forecast(hass: HomeAssistant):
     )
     reserve = forecast.reserve_quarters(
         quarters,
-        float(config.get("forecast_weekend_reserve", 4)),
-        int(config.get("forecast_reserve_start", 18)),
-        int(config.get("forecast_reserve_end", 22)),
+        settings.number(config, "forecast_weekend_reserve"),
+        int(settings.number(config, "forecast_reserve_start")),
+        int(settings.number(config, "forecast_reserve_end")),
         away,
     )
     planned_loads = await _planned_loads(hass, calendar_id, yesterday_start, end)
@@ -434,7 +421,7 @@ async def async_update_forecast(hass: HomeAssistant):
     temperature = None
     temperatures = {}
     # Hourly calibration: a factor per local hour of the day, for shaded panels
-    pv_model = config.get("forecast_pv_calibration", "daily")
+    pv_model = settings.get(config, "forecast_pv_calibration")
     hourly = None
 
     def hour_factors(produced, predicted):
@@ -515,7 +502,7 @@ async def async_update_forecast(hass: HomeAssistant):
 
     # Houses heated with electricity: the profile corrected for the outdoor temperature,
     # measured for the history days, Open-Meteo's for the forecast days
-    load_model = config.get("forecast_load_model", "profile")
+    load_model = settings.get(config, "forecast_load_model")
     slope = None
     if load_model == "temperature" and temperatures:
         measured = forecast.daily_means(_local_hours(outdoor))

@@ -14,6 +14,7 @@ from .utils import (
     write_schedule,
 )
 from ..const import DOMAIN
+from . import settings
 from homeassistant.util import dt as dt_utils
 
 _LOGGER = logging.getLogger(__name__)
@@ -372,19 +373,19 @@ def build_schedule(nordpool_values, matched, states, max_soc, min_soc):
 async def plan_day(hass: HomeAssistant, nordpool_values: list[dict], config: dict):
     """Plan a day based on nordpool values."""
     _LOGGER.info("plan_day: %s", nordpool_values)
-    settings = hass.data[DOMAIN]["config"]
-    charge_hours = float(settings.get("price_peak_nr_of_charge_hours", 2))
-    discharge_hours = float(settings.get("price_peak_nr_of_discharge_hours", 2))
-    efficiency = float(settings.get("price_peak_efficiency_factor", 85)) / 100
-    network_cost = float(settings.get("network_cost", 0.0))
-    network_compensation = float(settings.get("network_compensation", 0.0))
+    store = hass.data[DOMAIN]["config"]
+    charge_hours = settings.number(store, "price_peak_nr_of_charge_hours")
+    discharge_hours = settings.number(store, "price_peak_nr_of_discharge_hours")
+    efficiency = settings.number(store, "price_peak_efficiency_factor") / 100
+    network_cost = settings.number(store, "network_cost")
+    network_compensation = settings.number(store, "network_compensation")
     states = (
-        settings.get("price_peak_planner_cheap_state", "charge"),
-        settings.get("price_peak_planner_expensive_state", "discharge"),
-        settings.get("price_peak_planner_inbetween_state", "pause"),
+        settings.get(store, "price_peak_planner_cheap_state"),
+        settings.get(store, "price_peak_planner_expensive_state"),
+        settings.get(store, "price_peak_planner_inbetween_state"),
     )
-    max_soc = settings.get("battery_max_soc", 100)
-    min_soc = settings.get("battery_shutdown_soc", 20)
+    max_soc = settings.number(store, "battery_max_soc")
+    min_soc = settings.number(store, "battery_shutdown_soc")
 
     def profitable(charge_price, discharge_price):
         return is_profitable(

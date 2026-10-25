@@ -5,6 +5,9 @@ battery charge/discharge schedule from Nord Pool spot prices. The integration
 only *produces* the schedule as HA entities; applying it to an inverter is done
 outside the integration by scripts/automations (see `examples/`).
 
+Domain terms (plan, schedule, slot, mode, run, action, setting, reading) are defined
+in `GLOSSARY.md`.
+
 ## Layout
 
 | Path | What it is |
@@ -36,6 +39,7 @@ outside the integration by scripts/automations (see `examples/`).
 | `battery_action.py` | Pure: `resolve` turns slot 1 and the plan into the action now (slot state, source, SOC, current, import target, until), mode ↔ slot state maps |
 | `heat_pump.py` | Pure heat pump economy: COP curve per outdoor temperature (`COP_CURVES`), district heating price per month (`DISTRICT_HEATING_PRESETS`), `evaluate` compares a kWh of heat from both. See "Heat pump" |
 | `ev.py` | Pure car charging: `is_plugged` (charger state), `need_from_history` (the largest charging night, noon to noon), `need_from_soc`, `ready_time` / `deadline_index` (the next working morning's ready time, or an earlier departure), `ev_action` (charge/wait now). See "Car" |
+| `settings.py` | Every config store key with its one default (`SETTINGS`; the config entities take their defaults from it), `get` / `number`, typed groups in domain units (`battery`, `car`, `heat_pump`, `fuse`; `car` and `fuse` are None when not set up), `replans` (the plan triggers, `replan_entity_ids`) and `reading` (a sensor's float value, None if not configured, unavailable or old) |
 | `fuse.py` | Pure main fuse guard: `limits` splits the room on the busiest phase between the car charger and the battery's grid charging, `smooth` (hysteresis for the devices). See "Main fuse" |
 | `fuse_guard.py` | HA glue for `fuse.py`: live phase readings → `hass.data[DOMAIN]["fuse_guard"]` |
 | `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price now (`hass.data[DOMAIN]["prices"]`, stored by the battery plan), the tariff and the plan's export now |
@@ -109,7 +113,7 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   default 300, 0 = not planned),
   `heat_pump_margin` (öre per kWh of heat, default 5), `heat_pump_heating_limit`
   (°C outdoor, default 15)
-- Forecast inputs (config store only, defaults in `const.py`): `forecast_load_sensor`,
+- Forecast inputs (config store only, defaults in `planner/settings.py`): `forecast_load_sensor`,
   `forecast_pv_sensor`, `forecast_ev_sensor`, `forecast_calendar`
   (`calendar.energiplan`); battery plan inputs `battery_soc_sensor`,
   `battery_voltage_sensor`, `grid_import_sensor`; heat pump inputs
@@ -138,8 +142,9 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   statistics), once after HA has started, by the `update_forecast` service and by
   the dynamic planner. Errors are logged and do not stop the timers.
 - **Battery plan:** recalculated every quarter (:00:30, :15:30, …), after each timed
-  forecast update, and when tomorrow's prices arrive (`tomorrow_valid`), a plan setting
-  (`PLAN_SETTINGS` in `__init__.py`) or the tariff changes, manual slots change, or the
+  forecast update, and when tomorrow's prices arrive (`tomorrow_valid`), a setting with
+  `replans` (`planner/settings.py`, incl. `planner_state`) or the tariff
+  changes, manual slots change, or the
   SOC is `SOC_DRIFT` (5) % from the plan (at most every 5 min). All go through
   `async_request_plan`. The action sensor is rewritten every minute and when slot 1
   changes.
@@ -676,9 +681,13 @@ Holidays are not detected.
 
 ## Common changes
 
-- **New setting:** add a definition dict in the right platform file with
-  `"data_store": "config"`; read it as `hass.data[DOMAIN]["config"]["<id>"]`.
-  Defaults are only written when the key is missing from the store.
+- **New setting:** add a `Setting` to `SETTINGS` in `planner/settings.py` (its
+  default, platform, and `replans` if the battery plan reads it; a test checks that),
+  then, for an entity, a definition dict without `"default"` in the platform file with
+  `"data_store": "config"` and the setting's key as `"id"`. Read it with
+  `settings.get(config, "<key>")` / `settings.number(...)` or a typed group, never
+  `config.get` with a default of its own. Defaults are only written to the store when
+  the key is missing.
 - **New planner:** add `planner/<name>_planner.py` with `async def planner(hass, ...)`,
   export it in `planner/__init__.py`, add a branch in `run_planner`
   (`__init__.py`), and add the option to `planner_state` in `select.py`.

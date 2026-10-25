@@ -11,7 +11,7 @@ import aiohttp
 import pytest
 
 from custom_components.energy_planner.const import DOMAIN, PLAN_SENSORS
-from custom_components.energy_planner.planner import price_estimate
+from custom_components.energy_planner.planner import price_estimate, settings
 
 battery_plan = importlib.import_module(
     "custom_components.energy_planner.planner.battery_plan"
@@ -64,6 +64,8 @@ def mock_hass():
                 "max_discharge_current": 18,
                 "price_peak_efficiency_factor": 85,
                 "battery_wear_cost": 20,
+                # The scenarios do not keep a reserve unless they set one
+                "battery_reserve_soc": 0,
                 "grid_import_limit": 1.0,
                 "grid_import_limit_start": 6,
                 "grid_import_limit_end": 23,
@@ -419,6 +421,45 @@ async def test_plugged_car_charges_at_night(mock_hass):
     # In the 00-06 cheap hours, at the charger's 11 kW
     assert all(s.hour < 6 for s in charging)
     assert {kw for kw in car["power"] if kw > 0} == {11.0}
+
+
+class RecordingConfig(dict):
+    """A config store that records the keys read from it."""
+
+    def __init__(self, *args, **kwargs):
+        """Create the store with no keys read."""
+        super().__init__(*args, **kwargs)
+        self.read = set()
+
+    def get(self, key, default=None):
+        """Record and return a key."""
+        self.read.add(key)
+        return super().get(key, default)
+
+
+async def test_plan_settings_replan(mock_hass):
+    """Test that every setting with an entity the plan reads recalculates it."""
+    STATES["sensor.charger_status"] = "connected_charging"
+    config = RecordingConfig(
+        mock_hass.data[DOMAIN]["config"],
+        ev_charger_status_sensor="sensor.charger_status",
+    )
+    mock_hass.data[DOMAIN]["config"] = config
+    mock_hass.data[DOMAIN]["forecast"]["ev_need_kwh"] = 20.0
+    mock_hass.data[DOMAIN]["values"] = {}
+    try:
+        await run(mock_hass)
+        battery_plan.current_action(mock_hass)
+    finally:
+        del STATES["sensor.charger_status"]
+    assert "planner_state" in config.read
+    assert "heat_pump_margin" in config.read
+    missing = {
+        key
+        for key in config.read
+        if settings.SETTINGS[key].platform and not settings.SETTINGS[key].replans
+    }
+    assert missing == set()
 
 
 async def test_car_from_soc(mock_hass):

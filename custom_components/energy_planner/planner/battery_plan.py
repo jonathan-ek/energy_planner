@@ -19,16 +19,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_utils
 
-from ..const import (
-    DEFAULT_BATTERY_SOC_SENSOR,
-    DEFAULT_BATTERY_VOLTAGE_SENSOR,
-    DEFAULT_GRID_IMPORT_SENSOR,
-    DOMAIN,
-    PLAN_SENSORS,
-)
+from ..const import DOMAIN, PLAN_SENSORS
 from ..store import async_load_from_store, async_save_to_store
 from .battery_action import QUARTER, SLOT_MODES, BatteryState, Slot, resolve
-from . import ev
+from . import ev, settings
 from .battery_optimizer import (
     QUARTER_HOURS,
     Battery,
@@ -71,16 +65,6 @@ WIND_TIMEOUT = aiohttp.ClientTimeout(total=60)
 PRICE_STORE = "price_history"
 # Complete day-ahead prices per bidding zone (EUR/MWh) to fill the gaps
 ENERGY_CHARTS_URL = "https://api.energy-charts.info/price"
-
-
-def _state_float(hass: HomeAssistant, entity_id: str) -> float | None:
-    state = hass.states.get(entity_id)
-    if state is None:
-        return None
-    try:
-        return float(state.state)
-    except ValueError:
-        return None
 
 
 async def _hourly_import(hass: HomeAssistant, statistic_id: str, start, end):
@@ -355,32 +339,28 @@ async def _estimated_prices(
 
 def _battery(hass: HomeAssistant) -> Battery | None:
     """Battery limits from the settings and the live SOC and voltage."""
-    config = hass.data[DOMAIN]["config"]
-    soc = _state_float(
-        hass, config.get("battery_soc_sensor", DEFAULT_BATTERY_SOC_SENSOR)
-    )
-    voltage = _state_float(
-        hass, config.get("battery_voltage_sensor", DEFAULT_BATTERY_VOLTAGE_SENSOR)
-    )
+    config = settings.battery(hass.data[DOMAIN]["config"])
+    soc = settings.reading(hass, config.soc_sensor)
+    voltage = settings.reading(hass, config.voltage_sensor)
     if soc is None or not voltage:
         return None
-    capacity = float(config.get("battery_capacity", 0)) / 1000
+    capacity = config.capacity_kwh
     return Battery(
-        min_kwh=capacity * float(config.get("battery_shutdown_soc", 10)) / 100,
-        max_kwh=capacity * float(config.get("battery_max_soc", 90)) / 100,
+        min_kwh=capacity * config.shutdown_soc / 100,
+        max_kwh=capacity * config.max_soc / 100,
         soc_kwh=capacity * soc / 100,
-        max_grid_charge_kw=float(config.get("max_charge_current", 0)) * voltage / 1000,
-        max_power_kw=float(config.get("max_discharge_current", 0)) * voltage / 1000,
-        efficiency=float(config.get("price_peak_efficiency_factor", 90)) / 100,
-        wear_cost=float(config.get("battery_wear_cost", 0)) / 100,
-        reserve_kwh=capacity * float(config.get("battery_reserve_soc", 0)) / 100,
+        max_grid_charge_kw=config.max_charge_a * voltage / 1000,
+        max_power_kw=config.max_discharge_a * voltage / 1000,
+        efficiency=config.efficiency,
+        wear_cost=config.wear_sek_per_kwh,
+        reserve_kwh=capacity * config.reserve_soc / 100,
     )
 
 
 def ev_plugged(hass: HomeAssistant) -> bool:
     """Return whether the car is plugged in (False without a charger status)."""
-    status_id = hass.data[DOMAIN]["config"].get("ev_charger_status_sensor")
-    state = hass.states.get(status_id) if status_id else None
+    car = settings.car(hass.data[DOMAIN]["config"])
+    state = hass.states.get(car.status_sensor) if car is not None else None
     return ev.is_plugged(state.state if state is not None else None)
 
 
@@ -395,20 +375,20 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
     history's need, the car is not planned and the action falls back to charging, so
     a car that is not full is never paused.
     """
-    if not starts or not ev_plugged(hass):
+    car = settings.car(hass.data[DOMAIN]["config"])
+    if not starts or car is None or not ev_plugged(hass):
         return None, None
-    config = hass.data[DOMAIN]["config"]
-    capacity = float(config.get("ev_battery_capacity", 75))
-    ready = config.get("ev_ready_time") or dt.time(6, 30)
-    departure = config.get("ev_departure")
+    capacity = car.battery_kwh
+    ready = car.ready_time
+    departure = car.departure
     target = ev.ready_time(starts[0], ready, departure)
-    soc = _state_float(hass, config.get("ev_soc_sensor") or "")
-    limit = _state_float(hass, config.get("ev_charge_limit_sensor") or "")
+    soc = settings.reading(hass, car.soc_sensor)
+    limit = settings.reading(hass, car.charge_limit_sensor)
     if soc is not None and limit is not None:
         need = ev.need_from_soc(soc, limit, capacity)
         source = "soc"
     else:
-        delivered = _state_float(hass, config.get("ev_session_energy_sensor") or "")
+        delivered = settings.reading(hass, car.session_energy_sensor)
         if target == departure:
             need = ev.need_from_soc(0, 100, capacity)
             source = "trip"
@@ -420,8 +400,8 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle | None, dict | None]:
         need -= delivered or 0.0
         if need <= 0:
             return None, None
-    max_kw = float(config.get("ev_charger_max_power", 11000)) / 1000
-    min_kw = float(config.get("ev_charger_min_power", 0)) / 1000
+    max_kw = car.charger_max_kw
+    min_kw = car.charger_min_kw
     vehicle = Vehicle(
         powers_kw=charger_powers(min_kw, max_kw) if min_kw > 0 else (max_kw,),
         need_kwh=need,
@@ -442,7 +422,7 @@ def _forced(hass: HomeAssistant, starts) -> list[str | None]:
     Only with the dynamic planner, when the plan is what runs: otherwise the plan is a
     preview, and a long manual slot (e.g. self-use for weeks) would make it useless.
     """
-    if hass.data[DOMAIN]["config"].get("planner_state") != "dynamic":
+    if settings.get(hass.data[DOMAIN]["config"], "planner_state") != "dynamic":
         return [None] * len(starts)
     forced: list[str | None] = []
     for start in starts:
@@ -481,7 +461,7 @@ def expected_soc(hass: HomeAssistant, moment: dt.datetime) -> float | None:
 
 def current_action(hass: HomeAssistant) -> dict:
     """Return the action now, from slot 1 and the battery plan."""
-    config = hass.data[DOMAIN]["config"]
+    config = settings.battery(hass.data[DOMAIN]["config"])
     values = hass.data[DOMAIN]["values"]
     slot = None
     if values.get("slot_1_date_time_start") is not None:
@@ -492,21 +472,15 @@ def current_action(hass: HomeAssistant) -> dict:
             end=values.get("slot_2_date_time_start"),
             soc=float(values.get("slot_1_soc") or 0),
         )
-    soc = _state_float(
-        hass, config.get("battery_soc_sensor", DEFAULT_BATTERY_SOC_SENSOR)
-    )
-    voltage = _state_float(
-        hass, config.get("battery_voltage_sensor", DEFAULT_BATTERY_VOLTAGE_SENSOR)
-    )
     battery = BatteryState(
-        soc=soc or 0.0,
-        voltage=voltage or 0.0,
-        capacity_kwh=float(config.get("battery_capacity", 0)) / 1000,
-        min_soc=float(config.get("battery_shutdown_soc", 10)),
-        max_soc=float(config.get("battery_max_soc", 90)),
-        max_charge_a=float(config.get("max_charge_current", 0)),
-        max_discharge_a=float(config.get("max_discharge_current", 0)),
-        reserve_soc=float(config.get("battery_reserve_soc", 0)),
+        soc=settings.reading(hass, config.soc_sensor) or 0.0,
+        voltage=settings.reading(hass, config.voltage_sensor) or 0.0,
+        capacity_kwh=config.capacity_kwh,
+        min_soc=config.shutdown_soc,
+        max_soc=config.max_soc,
+        max_charge_a=config.max_charge_a,
+        max_discharge_a=config.max_discharge_a,
+        reserve_soc=config.reserve_soc,
     )
     return resolve(slot, hass.data[DOMAIN].get("plan"), dt_utils.now(), battery)
 
@@ -590,16 +564,16 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     config = hass.data[DOMAIN]["config"]
     tariff = get_tariff(hass)
     limit = Limit(
-        float(config.get("grid_import_limit", 0)),
-        int(config.get("grid_import_limit_start", 6)),
-        int(config.get("grid_import_limit_end", 23)),
-        fuse_power(float(config.get("main_fuse", 0) or 0)),
+        settings.number(config, "grid_import_limit"),
+        int(settings.number(config, "grid_import_limit_start")),
+        int(settings.number(config, "grid_import_limit_end")),
+        fuse_power(settings.number(config, "main_fuse")),
     )
     vehicle, car = _vehicle(hass, starts)
     month_start = dt_utils.start_of_local_day(now.date().replace(day=1))
     history = await _hourly_import(
         hass,
-        config.get("grid_import_sensor", DEFAULT_GRID_IMPORT_SENSOR),
+        settings.get(config, "grid_import_sensor"),
         month_start,
         now,
     )
@@ -641,7 +615,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
             )
         )
 
-    capacity = float(config.get("battery_capacity", 0)) / 1000
+    capacity = settings.battery(config).capacity_kwh
     hass.data[DOMAIN]["plan"] = {
         "updated": now.isoformat(),
         "starts": [s.isoformat() for s in plan.starts],
