@@ -557,3 +557,40 @@ async def test_calendar_all_day_events(mock_hass):
             "",
         )
     ]
+
+
+async def test_planner_writes_the_auto_slot_from_an_older_plan():
+    """Test that without a new plan the last one still replaces other slots."""
+    from .plans import make_plan
+
+    old = make_plan(
+        NOW.replace(minute=0), ["self_use"] * 8, updated=NOW - dt.timedelta(hours=1)
+    )
+    hass = MagicMock()
+    data: dict[str, object] = {"plan": old, "save": AsyncMock()}
+    hass.data = {DOMAIN: data}
+    write = MagicMock()
+    glue = {
+        name: AsyncMock()
+        for name in (
+            "async_update_forecast",
+            "async_request_plan",
+            "store_disable_state",
+            "reset",
+            "add_manual_slots",
+            "restore_disable_state",
+            "update_entities",
+        )
+    }
+    with (
+        patch.multiple(dynamic_planner, write_schedule=write, **glue),
+        patch.object(dynamic_planner.dt_utils, "now", return_value=NOW),
+    ):
+        await dynamic_planner.planner(hass)
+        write.assert_called_once()
+        assert write.call_args.args[1][0]["end"] == old.end
+        # No plan reaching now: the schedule is left alone
+        write.reset_mock()
+        data["plan"] = None
+        await dynamic_planner.planner(hass)
+    write.assert_not_called()

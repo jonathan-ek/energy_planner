@@ -27,6 +27,15 @@ STALE_AFTER = dt.timedelta(minutes=30)
 VAT = 1.25
 
 
+def quarter_start(moment: dt.datetime) -> dt.datetime:
+    """Return the start of the quarter containing `moment`, in UTC.
+
+    The key of the price dicts (battery_plan._prices), so lookups use this too.
+    """
+    utc = moment.astimezone(dt.UTC)
+    return utc.replace(minute=utc.minute - utc.minute % 15, second=0, microsecond=0)
+
+
 def quarter_end(start: dt.datetime) -> dt.datetime:
     """Return the end of the quarter from `start`, also over a DST change."""
     return (start.astimezone(dt.UTC) + QUARTER).astimezone(start.tzinfo)
@@ -138,7 +147,11 @@ class Plan:
         return self.soc[index - 1] + (self.soc[index] - self.soc[index - 1]) * share
 
     def to_attributes(self) -> dict[str, Any]:
-        """Return the plan as the plan sensor publishes it."""
+        """Return the plan as the plan sensor publishes it (built once per plan)."""
+        return self._attributes
+
+    @functools.cached_property
+    def _attributes(self) -> dict[str, Any]:
         ev = self.ev
         return {
             "updated": self.updated.isoformat(),

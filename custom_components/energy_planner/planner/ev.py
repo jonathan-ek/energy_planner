@@ -98,7 +98,12 @@ def ready_time(
     while target <= first or is_offday(day):
         day += dt.timedelta(days=1)
         target = dt.datetime.combine(day, ready, first.tzinfo)
-    if departure is not None and first < departure < target:
+    # Timestamps: a departure in the hour repeated when DST ends is not taken as
+    # the other 02:xx
+    if (
+        departure is not None
+        and first.timestamp() < departure.timestamp() < target.timestamp()
+    ):
         return departure
     return target
 
@@ -115,7 +120,11 @@ def deadline_index(
     if not starts:
         return 0
     target = ready_time(starts[0], ready, departure)
-    return next((i for i, start in enumerate(starts) if start >= target), len(starts))
+    deadline = target.timestamp()
+    return next(
+        (i for i, start in enumerate(starts) if start.timestamp() >= deadline),
+        len(starts),
+    )
 
 
 def ev_action(plan: Plan | None, now: dt.datetime, plugged: bool) -> dict:

@@ -13,7 +13,7 @@ from homeassistant.util import dt as dt_utils
 
 from ..const import DOMAIN
 from . import heat_pump, settings
-from .plan import QUARTER, Plan
+from .plan import QUARTER, Plan, quarter_start
 from .utils import get_tariff
 
 
@@ -58,11 +58,7 @@ def _spot(hass: HomeAssistant, now: dt.datetime) -> float | None:
 
     The prices are keyed in UTC, so the hour repeated when DST ends has its own.
     """
-    prices = hass.data[DOMAIN].get("spot_prices") or {}
-    utc = now.astimezone(dt.UTC)
-    return prices.get(
-        utc.replace(minute=utc.minute - utc.minute % 15, second=0, microsecond=0)
-    )
+    return (hass.data[DOMAIN].get("spot_prices") or {}).get(quarter_start(now))
 
 
 def heat_pump_economy(hass: HomeAssistant) -> dict:

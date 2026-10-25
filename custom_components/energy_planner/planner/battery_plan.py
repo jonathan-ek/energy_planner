@@ -36,7 +36,7 @@ from .forecast import quarter_starts
 from .heat_pump import schedule
 from .heating import plan_inputs
 from .nordpool_utils import fetch_nordpool_data
-from .plan import EvPlan, Plan
+from .plan import EvPlan, Plan, quarter_start
 from .price_estimate import (
     MIN_HOURS,
     WIND_FIT_DAYS,
@@ -111,7 +111,8 @@ async def _prices(hass: HomeAssistant) -> dict[dt.datetime, float]:
         start = value["start"]
         if isinstance(start, str):
             start = dt.datetime.fromisoformat(start)
-        prices[start.astimezone(dt.UTC)] = float(value["value"])
+        # A time without an offset is in HA's time zone (as_utc), as before
+        prices[quarter_start(dt_utils.as_utc(start))] = float(value["value"])
     return prices
 
 
@@ -439,7 +440,8 @@ def _forced(hass: HomeAssistant, starts) -> list[str | None]:
     for start in starts:
         mode = None
         for slot in hass.data[DOMAIN].get("manual_slots", []):
-            if slot["start"] <= start < slot["end"]:
+            # Timestamps: local times in the hour repeated when DST ends compare equal
+            if slot["start"].timestamp() <= start.timestamp() < slot["end"].timestamp():
                 mode = SLOT_MODES.get(slot["state"], mode)
         forced.append(mode)
     return forced
@@ -542,8 +544,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         _LOGGER.info("No forecast or battery state, skipping the battery plan")
         return
     now = dt_utils.now()
-    utc = now.astimezone(dt.UTC)
-    current = utc.replace(minute=utc.minute - utc.minute % 15, second=0, microsecond=0)
+    current = quarter_start(now)
     # The day after the published prices is estimated, so the plan can see whether
     # energy is worth keeping past the coming night
     estimated = await _estimated_prices(hass, prices, now)

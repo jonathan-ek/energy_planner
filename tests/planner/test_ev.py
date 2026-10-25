@@ -148,3 +148,13 @@ def test_action_has_the_plans_need():
     # An old plan's need is not published as if it were current
     old = plan(now - dt.timedelta(hours=1), [0.0, 11.0])
     assert ev.ev_action(old, now, plugged=True)["need_kwh"] is None
+
+
+def test_departure_in_the_repeated_hour():
+    """Test that a departure in the second 02:xx when DST ends is not the first."""
+    utc = dt.datetime(2026, 10, 24, 22, 0, tzinfo=dt.UTC)  # 00:00 CEST
+    starts = [(utc + dt.timedelta(minutes=15 * i)).astimezone(TZ) for i in range(24)]
+    # 02:30 CET: the second 02:30, 3.5 h after the first quarter
+    departure = dt.datetime(2026, 10, 25, 1, 30, tzinfo=dt.UTC).astimezone(TZ)
+    assert departure.fold == 1
+    assert ev.deadline_index(starts, dt.time(6, 30), departure) == 14

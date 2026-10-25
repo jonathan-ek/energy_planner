@@ -704,3 +704,29 @@ async def test_prices_in_the_repeated_hour(mock_hass):
     assert sorted(prices.values()) == [float(i) for i in range(8)]
     # Both 02:xx hours are local hour 2: the hourly mean takes all eight
     assert battery_plan._hourly(prices)[dt.date(2026, 10, 25)] == {2: 3.5}
+
+
+def test_forced_slot_in_the_repeated_hour(mock_hass):
+    """Test that a manual slot in the first 02:xx is not forced into the second."""
+    utc = dt.datetime(2026, 10, 25, 0, 0, tzinfo=dt.UTC)  # 02:00 CEST
+    starts = [(utc + dt.timedelta(minutes=15 * i)).astimezone(TZ) for i in range(8)]
+    mock_hass.data[DOMAIN]["config"]["planner_state"] = "dynamic"
+    mock_hass.data[DOMAIN]["manual_slots"] = [
+        {"start": starts[0], "end": starts[2], "state": "charge", "soc": 90}
+    ]
+    forced = battery_plan._forced(mock_hass, starts)
+    assert forced == ["charge", "charge"] + [None] * 6
+
+
+async def test_prices_without_an_offset_are_local(mock_hass):
+    """Test that a time without an offset is in HA's time zone, not the host's."""
+    mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = (
+        "sensor.nordpool_kwh_se3_sek"
+    )
+    mock_hass.states.get = lambda _: SimpleNamespace(attributes={})
+    quarters = [{"start": "2026-01-13T21:00:00", "value": 1.0}]
+    with patch.object(
+        battery_plan, "fetch_nordpool_data", AsyncMock(return_value=([], quarters, []))
+    ):
+        prices = await battery_plan._prices(mock_hass)
+    assert list(prices) == [dt.datetime(2026, 1, 13, 20, 0, tzinfo=dt.UTC)]
