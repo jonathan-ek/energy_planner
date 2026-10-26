@@ -376,9 +376,9 @@ async def async_update_forecast(hass: HomeAssistant):
 
     def heat_pump_kw(hour):
         """Return what the heat pump drew while heating in an hour (kW)."""
-        if loss is None or indoor.get(hour) is None or outdoor.get(hour) is None:
-            return setting
-        return heat_pump.draw(loss, indoor[hour], outdoor[hour], curve)
+        return heat_pump.power_kw(
+            setting, loss, indoor.get(hour), outdoor.get(hour), curve
+        )
 
     house = {
         hour: max(kw - shares.get(hour, 0.0) * heat_pump_kw(hour), 0.0)

@@ -141,7 +141,8 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
   for price peak) → `add_manual_slots` → `restore_disable_state` → `update_entities`
   → `save`.
 - **Services:** `add_slot` (appends to `manual_slots` and re-applies them),
-  `run_planner`, `clear_manual_slots`, `update_forecast`, `update_battery_plan`
+  `run_planner`, `clear_manual_slots` (reruns the planner so the schedule loses them;
+  with the planner off it clears the schedule), `update_forecast`, `update_battery_plan`
   (also the button `button.energy_planner_update_battery_plan`).
 - **Forecast:** recalculated at :05 every hour (after the recorder compiles hourly
   statistics), once after HA has started, by the `update_forecast` service and by
@@ -349,7 +350,9 @@ planners the plan is a preview and ignores them.
   turns the plan's `self_use`, `sell_excess` and `hold` into `hold` with that level as
   import target (`reserve: true`): the inverter's peak shaving only uses the reserve,
   down to the shutdown SOC, for import that would raise the power charge or trip the fuse; without a
-  power charge or fuse the battery is just kept.
+  power charge or fuse the battery is just kept. Without a SOC reading the action
+  uses the SOC the plan expects now (`Plan.soc_at`), not 0, which would look like an
+  empty battery.
 - Car: `optimize(vehicle=Vehicle(...))` plans an EV with the battery (in HA see
   "Car" below). `Vehicle`: charger powers (`charger_powers(min, max)`, 0 or one
   of them per quarter), the energy needed at the plug, when it is plugged in and the
@@ -436,7 +439,9 @@ heat: district heating at the season's energy price against electricity / COP.
   0.2 kW/K warming up and 0.14 later: 0.4 kW at 10 °C, 1.5 kW at −5 °C. The plan uses
   it per quarter with the live indoor and the forecast outdoor temperature, the saving
   sensor with both live (`heating._power_kw`); without a measurement or indoor
-  temperature `heat_pump_power` (W) is used, and 0 turns planning off. The draw per
+  temperature `heat_pump_power` (W) is used, and 0 turns planning off (the
+  forecast then keeps the heat pump's draw in the house load; `heat_pump.power_kw`
+  serves both). The draw per
   hour is also taken out of the load history. Not modelled: the setpoint (the room
   hardly reaches it, and it can not be fitted from a night; a changed setpoint shows
   in the measurement over the following days), warming up after an off period, and

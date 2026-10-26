@@ -34,6 +34,7 @@ from .const import (
 from .planner import settings
 from .planner.ev import is_plugged as ev_is_plugged
 from .planner.fuse_guard import config_entities, update_guard
+from .planner.utils import reset
 from .planner import (
     async_request_plan,
     async_update_forecast,
@@ -146,6 +147,23 @@ async def run_planner(hass: HomeAssistant) -> None:
     raise ValueError("Invalid planner state")
 
 
+async def clear_manual_slots(hass: HomeAssistant) -> None:
+    """Drop the manual slots and rebuild the schedule without them.
+
+    The manual slots are also written into the schedule, so emptying the list alone
+    would leave them running there. The selected planner rebuilds it; with the
+    planner off the schedule holds only manual slots and edits, so it is cleared.
+    """
+    hass.data[DOMAIN]["manual_slots"] = []
+    if settings.get(hass.data[DOMAIN]["config"], "planner_state") == "off":
+        await reset(hass)
+        await update_entities(hass)
+    else:
+        await run_planner(hass)
+    await hass.data[DOMAIN]["save"]()
+    await async_request_plan(hass, "manual slots cleared")
+
+
 async def async_setup(hass: HomeAssistant, config):
     """Set up the Energy Planner component."""
     if DOMAIN not in hass.data:
@@ -195,12 +213,8 @@ async def async_setup(hass: HomeAssistant, config):
 
     @callback
     async def clear_manual_slots_service(call: ServiceCall) -> None:
-        """Service to run the planner."""
-        _LOGGER.info("Running planner: %s", config)
-        _LOGGER.info("Received planning data: %s", call.data)
-        hass.data[DOMAIN]["manual_slots"] = []
-        await hass.data[DOMAIN]["save"]()
-        await async_request_plan(hass, "manual slots cleared")
+        """Service to clear the manual slots."""
+        await clear_manual_slots(hass)
 
     async def update_forecast_service(call: ServiceCall) -> None:
         """Service to recalculate the forecast."""

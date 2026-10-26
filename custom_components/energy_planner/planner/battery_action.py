@@ -62,7 +62,7 @@ class Slot:
 class BatteryState:
     """The live battery state and the settings the action needs."""
 
-    soc: float  # %
+    soc: float | None  # %, None: no reading (the plan's expected SOC is used)
     voltage: float  # V
     capacity_kwh: float
     min_soc: float  # %
@@ -112,6 +112,10 @@ def plan_action(
         return _action("discharge", "fallback", plan=plan, reason=reason)
     index = run.index
     mode = run.value
+    # Without a reading, the SOC the plan expects: 0 would look like an empty battery
+    soc = battery.soc if battery.soc is not None else plan.soc_at(now)
+    if soc is None:
+        soc = plan.soc[index]
     until = run.until
     target_soc = plan.soc[run.last]
     capacity = battery.capacity_kwh / 100  # kWh per %
@@ -121,7 +125,7 @@ def plan_action(
     if (
         mode in ("self_use", "sell_excess", "hold")
         and battery.reserve_soc > battery.min_soc
-        and battery.soc <= reserve
+        and soc <= reserve
     ):
         # Keep the reserve for peaks; no power charge: just keep it
         mode = "hold"
@@ -131,7 +135,7 @@ def plan_action(
     if mode == "charge":
         extra["soc"] = round(target_soc)
         extra["current_a"] = _current(
-            (target_soc - battery.soc) * capacity,
+            (target_soc - soc) * capacity,
             until,
             now,
             battery,
@@ -140,7 +144,7 @@ def plan_action(
     elif mode == "sell":
         extra["soc"] = round(target_soc)
         extra["current_a"] = _current(
-            (battery.soc - target_soc) * capacity,
+            (soc - target_soc) * capacity,
             until,
             now,
             battery,

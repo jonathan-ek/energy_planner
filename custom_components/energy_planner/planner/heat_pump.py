@@ -171,6 +171,24 @@ def draw(
     return min(max(loss * (indoor - outdoor) / pump_cop, 0.0), MAX_DRAW_KW)
 
 
+def power_kw(
+    setting: float,
+    loss: float | None,
+    indoor: float | None,
+    outdoor: float | None,
+    curve: Sequence[tuple[float, float]],
+) -> float:
+    """Return what the heat pump draws while it heats (kW).
+
+    From the measured heat loss and the temperatures, else the heat_pump_power
+    setting. A setting of 0 means the heat pump is not planned, so it draws nothing
+    here either: the forecast then keeps its draw in the house load.
+    """
+    if setting <= 0 or not loss or indoor is None or outdoor is None:
+        return max(setting, 0.0)
+    return draw(loss, indoor, outdoor, curve)
+
+
 def schedule(
     marginal: Sequence[float],
     cops: Sequence[float | None],

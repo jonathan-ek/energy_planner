@@ -200,6 +200,16 @@ def test_draw():
     assert heat_pump.draw(10.0, 21.0, -10.0, CURVE) == heat_pump.MAX_DRAW_KW
 
 
+def test_power_from_the_loss_or_the_setting():
+    """Test the measured draw, the setting without it, and nothing when not planned."""
+    loss = 1.5 / 21
+    assert heat_pump.power_kw(0.3, loss, 21.0, 0.0, CURVE) == pytest.approx(0.5)
+    assert heat_pump.power_kw(0.3, None, 21.0, 0.0, CURVE) == 0.3
+    assert heat_pump.power_kw(0.3, loss, None, 0.0, CURVE) == 0.3
+    # Not planned: the forecast keeps the draw in the house load
+    assert heat_pump.power_kw(0.0, loss, 21.0, 0.0, CURVE) == 0.0
+
+
 def test_plan_inputs_use_the_heat_loss():
     """Test that the measured heat loss gives the draw per quarter."""
     hass = plan_hass({"sensor.gw1100a_indoor_temperature": "21"})

@@ -116,6 +116,20 @@ def test_above_the_reserve_the_plan_is_followed():
     assert sell_excess["soc"] == 20
 
 
+def test_missing_soc_is_not_an_empty_battery():
+    """Test that without a SOC reading the plan's expected SOC is used."""
+    unknown = dataclasses.replace(RESERVE, soc=None)
+    planned = plan(["self_use"], [40.0], peak_levels=[3.5])
+    result = action.resolve(auto(), planned, NOW, unknown)
+    assert result["state"] == "discharge"
+    assert "reserve" not in result
+    # Expected at 22:05: 50 -> 60 % a third through the quarter, 53.3 %; the
+    # 6.7 % left is 1.33 kWh in 10 minutes: 8 kW, 16 A at 500 V
+    charge = plan(["charge"], [60.0], [4.0])
+    result = action.resolve(auto(), charge, NOW, unknown)
+    assert (result["soc"], result["current_a"]) == (60, 16)
+
+
 def test_old_plan_falls_back_to_self_use():
     """Test that a plan not updated for over half an hour is not followed."""
     old = plan(["charge"], [60.0], updated=START - dt.timedelta(hours=1))

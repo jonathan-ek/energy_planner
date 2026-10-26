@@ -461,7 +461,7 @@ def current_action(hass: HomeAssistant) -> dict:
             soc=float(values.get("slot_1_soc") or 0),
         )
     battery = BatteryState(
-        soc=settings.reading(hass, config.soc_sensor) or 0.0,
+        soc=settings.reading(hass, config.soc_sensor),
         voltage=settings.reading(hass, config.voltage_sensor) or 0.0,
         capacity_kwh=config.capacity_kwh,
         min_soc=config.shutdown_soc,
