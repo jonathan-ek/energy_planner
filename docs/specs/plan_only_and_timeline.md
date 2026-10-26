@@ -183,3 +183,12 @@ Findings from the code reviews between the steps that were not fixed, and why.
   on. That is the HA automation id in the houses that still have it; check it when
   the houses are upgraded.
 - Step 2: `examples/energi_dashboard.yaml` (untracked) also has the slot card.
+- Step 4, deviations from the spec: `build_forecast(inputs)` takes `now` inside
+  `ForecastInputs`; `known_until(moment)` is a method; the totals, calibration and
+  yesterday's actual totals the sensors show are in an untyped `Forecast.details`
+  mapping (only the sensors and one log line read them). Type them when something
+  else needs them.
+- Step 4: the glue tests (`test_forecast_update.py`) still patch the fetches to test
+  the wiring end to end; the forecast's behaviour is tested on `build_forecast`
+  (`test_build_forecast.py`).
+

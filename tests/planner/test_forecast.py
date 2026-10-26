@@ -1,46 +1,25 @@
 """Tests for the pure forecast functions."""
 
+import dataclasses
 import datetime as dt
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from custom_components.energy_planner.planner import forecast
+from custom_components.energy_planner.planner.timeline import Timeline, at_local
 
 TZ = ZoneInfo("Europe/Stockholm")
+
+
+def quarter_starts(start, end):
+    """Return the local quarter starts from start's quarter until end."""
+    return list(Timeline.between(start, end, start.tzinfo).locals)
 
 
 def history_for(days, value_for):
     """Build {(date, hour): kWh} for the given dates."""
     return {(day, hour): value_for(day, hour) for day in days for hour in range(24)}
-
-
-class TestQuarterStarts:
-    """Tests for quarter_starts."""
-
-    def test_starts_at_current_quarter(self):
-        """Test that the quarter containing start is included."""
-        start = dt.datetime(2026, 10, 4, 10, 7, 30, tzinfo=TZ)
-        end = dt.datetime(2026, 10, 4, 11, 0, tzinfo=TZ)
-        quarters = forecast.quarter_starts(start, end)
-        assert [q.strftime("%H:%M") for q in quarters] == [
-            "10:00",
-            "10:15",
-            "10:30",
-            "10:45",
-        ]
-
-    def test_dst_end_has_100_quarters(self):
-        """Test the 25 hour day when daylight saving ends."""
-        start = dt.datetime(2026, 10, 25, 0, 0, tzinfo=TZ)
-        end = dt.datetime(2026, 10, 26, 0, 0, tzinfo=TZ)
-        assert len(forecast.quarter_starts(start, end)) == 100
-
-    def test_dst_start_has_92_quarters(self):
-        """Test the 23 hour day when daylight saving starts."""
-        start = dt.datetime(2026, 3, 29, 0, 0, tzinfo=TZ)
-        end = dt.datetime(2026, 3, 30, 0, 0, tzinfo=TZ)
-        assert len(forecast.quarter_starts(start, end)) == 92
 
 
 class TestLoadForecast:
@@ -79,7 +58,7 @@ class TestLoadForecast:
         """Test that the hourly forecast is split evenly."""
         days = [self.today - dt.timedelta(days=i) for i in range(1, 15)]
         history = history_for(days, lambda d, h: float(h))
-        quarters = forecast.quarter_starts(
+        quarters = quarter_starts(
             dt.datetime(2026, 10, 7, 9, 0, tzinfo=TZ),
             dt.datetime(2026, 10, 7, 10, 0, tzinfo=TZ),
         )
@@ -94,7 +73,7 @@ class TestPv:
         day = dt.datetime(2026, 7, 1, tzinfo=TZ)
         # 0 W at 10:00 rising to 4000 W at 11:00
         watts = {day.replace(hour=10): 0, day.replace(hour=11): 4000}
-        quarters = forecast.quarter_starts(day.replace(hour=10), day.replace(hour=11))
+        quarters = quarter_starts(day.replace(hour=10), day.replace(hour=11))
         result = forecast.pv_quarters(watts, quarters)
         assert result == pytest.approx([0.125, 0.375, 0.625, 0.875])
         assert sum(result) == pytest.approx(2.0)  # 2 kW average for an hour
@@ -103,7 +82,7 @@ class TestPv:
         """Test that there is no production outside the forecast."""
         day = dt.datetime(2026, 7, 1, tzinfo=TZ)
         watts = {day.replace(hour=10): 1000, day.replace(hour=11): 1000}
-        quarters = forecast.quarter_starts(day.replace(hour=6), day.replace(hour=7))
+        quarters = quarter_starts(day.replace(hour=6), day.replace(hour=7))
         assert forecast.pv_quarters(watts, quarters) == [0.0] * 4
 
     def test_calibration_ratio(self):
@@ -129,7 +108,7 @@ class TestPv:
 def test_reserve_only_weekend_window():
     """Test that the reserve only covers weekend evenings (default 18-22)."""
     friday = dt.datetime(2026, 10, 9, 0, 0, tzinfo=TZ)
-    quarters = forecast.quarter_starts(friday, friday + dt.timedelta(days=2))
+    quarters = quarter_starts(friday, friday + dt.timedelta(days=2))
     reserve = forecast.reserve_quarters(quarters, 4.0)
     by_day = {}
     for start, value in zip(quarters, reserve, strict=True):
@@ -143,7 +122,7 @@ def test_reserve_only_weekend_window():
 def test_reserve_custom_and_empty_window():
     """Test a custom reserve window and that an empty window gives no reserve."""
     saturday = dt.datetime(2026, 10, 10, 0, 0, tzinfo=TZ)
-    quarters = forecast.quarter_starts(saturday, saturday + dt.timedelta(days=1))
+    quarters = quarter_starts(saturday, saturday + dt.timedelta(days=1))
     reserve = forecast.reserve_quarters(quarters, 2.0, 19, 21)
     assert sum(reserve) == pytest.approx(2.0)
     assert {q.hour for q, v in zip(quarters, reserve, strict=True) if v} == {19, 20}
@@ -187,7 +166,7 @@ def test_planned_event_energy(summary, description, expected):
 def test_planned_quarters_spreads_by_overlap():
     """Test that an event is spread by how much of each quarter it covers."""
     start = dt.datetime(2026, 10, 4, 19, 0, tzinfo=TZ)
-    quarters = forecast.quarter_starts(start, start + dt.timedelta(hours=1))
+    quarters = quarter_starts(start, start + dt.timedelta(hours=1))
     # 4 kWh from 19:10 to 19:50: 40 minutes, so 0.1 kWh per minute
     event = (start + dt.timedelta(minutes=10), start + dt.timedelta(minutes=50), 4.0)
     result = forecast.planned_quarters([event], quarters)
@@ -240,7 +219,7 @@ def test_hourly_power_to_watts_keeps_energy():
     hourly = {ten + dt.timedelta(hours=i): kw for i, kw in enumerate([0, 4, 4, 0])}
     watts = forecast.hourly_power_to_watts(hourly)
     assert watts[ten + dt.timedelta(minutes=90)] == 4000
-    quarters = forecast.quarter_starts(ten, ten + dt.timedelta(hours=4))
+    quarters = quarter_starts(ten, ten + dt.timedelta(hours=4))
     assert sum(forecast.pv_quarters(watts, quarters)) == pytest.approx(8.0)
 
 
@@ -290,7 +269,7 @@ def test_heat_pump_excess_needs_references():
 def test_no_reserve_while_away():
     """Test that quarters inside an away period get no reserve."""
     saturday = dt.datetime(2026, 10, 10, 0, 0, tzinfo=TZ)
-    quarters = forecast.quarter_starts(saturday, saturday + dt.timedelta(days=2))
+    quarters = quarter_starts(saturday, saturday + dt.timedelta(days=2))
     sunday = saturday + dt.timedelta(days=1)
     away = forecast.away_quarters([(saturday, sunday)], quarters)
     assert sum(away) == 96
@@ -325,7 +304,7 @@ class TestTemperatureLoad:
             for i, day in enumerate(days)
         }
         self.history = history_for(days, lambda d, h: (40 - 2 * self.measured[d]) / 24)
-        self.quarters = forecast.quarter_starts(
+        self.quarters = quarter_starts(
             dt.datetime.combine(self.today, dt.time(), TZ),
             dt.datetime.combine(self.today + dt.timedelta(days=2), dt.time(), TZ),
         )
@@ -398,7 +377,84 @@ def test_pv_hourly_calibration_limits():
 def test_calibrated_quarters():
     """Test the hour's factor per quarter, the daily factor for other hours."""
     start = dt.datetime(2026, 9, 1, 14, 30, tzinfo=TZ)
-    quarters = forecast.quarter_starts(start, start + dt.timedelta(hours=1))
+    quarters = quarter_starts(start, start + dt.timedelta(hours=1))
     pv = forecast.calibrated_quarters([1.0] * 4, quarters, 1.5, {15: 0.5})
     assert pv == [1.5, 1.5, 0.5, 0.5]
     assert forecast.calibrated_quarters([1.0], quarters[:1], 1.5) == [1.5]
+
+
+NOW = dt.datetime(2026, 10, 7, 14, 10, tzinfo=TZ)  # Wednesday afternoon
+
+
+def inputs(**changes):
+    """Return forecast inputs: 1 kW load for 35 days, no PV, car or heat pump."""
+    start = (NOW - dt.timedelta(days=35)).replace(minute=0).astimezone(dt.UTC)
+    hours = [start + dt.timedelta(hours=i) for i in range(35 * 24)]
+    base = forecast.ForecastInputs(
+        now=NOW,
+        tz=TZ,
+        load=dict.fromkeys(hours, 1.0),
+        pv={},
+        ev={},
+        indoor={},
+        outdoor={},
+        heating_shares={},
+        planned_loads=[],
+        away_periods=[],
+        open_meteo=None,
+        forecast_solar=[],
+        load_model="profile",
+        pv_calibration="daily",
+        weekend_reserve_kwh=4.0,
+        reserve_start=18,
+        reserve_end=22,
+        heat_pump_power_kw=0.0,
+        cop_curve=((-15.0, 3.0), (15.0, 4.0)),
+    )
+    return dataclasses.replace(base, **changes)
+
+
+def test_build_forecast_from_plain_inputs():
+    """Test the forecast's quarters, profile, planned load and missing PV source."""
+    sauna = (
+        dt.datetime(2026, 10, 8, 19, tzinfo=TZ),
+        dt.datetime(2026, 10, 8, 20, tzinfo=TZ),
+        4.0,
+        "Bastu",
+    )
+    result = forecast.build_forecast(inputs(planned_loads=[sauna]))
+    assert len(result.timeline) == 3 * 96
+    assert result.timeline.local(0) == dt.datetime(2026, 10, 7, tzinfo=TZ)
+    assert set(result.load) == {0.25}
+    assert sum(result.planned) == pytest.approx(4.0)
+    assert result.pv is None
+    assert result.details["load_tomorrow"] == pytest.approx(24 + 4)
+    # Without a PV source the whole forecast is known
+    assert result.known_until(NOW) == result.timeline.end
+
+
+def test_known_until_stops_where_pv_does():
+    """Test that the known part ends at the first quarter without PV."""
+    watts = {
+        dt.datetime(2026, 10, 7, h, tzinfo=TZ): 0.0 for h in range(24)
+    }  # Forecast.Solar reaching only today
+    result = forecast.build_forecast(inputs(forecast_solar=[(watts, {})]))
+    assert result.known_until(NOW) == at_local(dt.date(2026, 10, 8), dt.time(0), TZ)
+    assert result.known_until(result.timeline.end) == result.timeline.end
+
+
+def test_published_attributes():
+    """Test the keys the forecast sensors publish (the dashboard reads them)."""
+    attributes = forecast.build_forecast(inputs()).to_attributes()
+    assert set(attributes) == {
+        "updated", "starts", "load", "planned", "reserve", "away", "pv",
+        "temperature", "heat_pump_loss", "ev_need_kwh", "heat_pump_loss_hours",
+        "load_model", "heating_slope", "planned_events", "load_today_remaining",
+        "load_tomorrow", "base_tomorrow", "planned_tomorrow", "pv_today_remaining",
+        "pv_tomorrow", "pv_tomorrow_uncalibrated", "pv_calibration",
+        "pv_calibration_model", "pv_hourly_calibration", "pv_source",
+        "yesterday_starts", "yesterday_load", "yesterday_pv", "yesterday_load_kwh",
+        "yesterday_load_actual_kwh", "yesterday_pv_kwh", "yesterday_pv_actual_kwh",
+    }  # fmt: skip
+    assert attributes["starts"][0] == "2026-10-07T00:00:00+02:00"
+    assert len(attributes["yesterday_starts"]) == 96

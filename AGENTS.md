@@ -32,7 +32,7 @@ are defined in `GLOSSARY.md`. Decisions: `docs/adr/`.
 | File | Role |
 | --- | --- |
 | `__init__.py` | Re-exports `async_update_forecast` and the plan run's `async_request_plan`, `async_update_plan` and `write_plan_sensors` |
-| `dynamic_planner.py` | The forecast glue: `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]` |
+| `forecast_update.py` | The forecast's HA glue: `async_update_forecast` fetches recorder hourly statistics, the heat pump's `heat` hours, the calendar, Open-Meteo (or Forecast.Solar's estimates) into a `forecast.ForecastInputs`, builds the `Forecast` and stores it in `hass.data[DOMAIN]["forecast"]` |
 | `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `discard_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
 | `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores a `plan.Plan` in `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `car_action` |
 | `timeline.py` | Pure: time kept as UTC instants. `Timeline` (consecutive quarters: `between`, `of`, `index_at`, `quarter_end`, `local` / `local_end` / `local_hour` / `local_date` / `isoformat` for calendar logic and display), `quarter_start` (the price dicts' key), `hour_start` (the key of hourly sums), `at_local` (a local date and wall-clock time as an instant). Its tests are the DST suite |
@@ -48,7 +48,7 @@ are defined in `GLOSSARY.md`. Decisions: `docs/adr/`.
 | `price_estimate.py` | Pure: tomorrow's prices before they are published (same-type days + a learned correction per hour, Swedish holidays). See "Battery plan" |
 | `../comfort/schedule.py`, `../comfort/thermal.py` | WIP comfort control, not wired into HA yet. See "Comfort" |
 | `tariff.py` | Pure grid tariff model: `Tariff` with `buy_fee` / `sell_fee` (öre/kWh) and `power_cost` (kr), parsed from a dict by `tariff_from_dict`, presets in `TARIFF_PRESETS`, the household's `import_limit`. Format in the module docstring |
-| `forecast.py` | Pure forecast functions, no HA imports: quarter list (DST safe), load forecast per hour, PV integration of the `watts` forecast, PV calibration, weekend reserve |
+| `forecast.py` | Pure forecast, no HA imports: `build_forecast(ForecastInputs) -> Forecast` (load, planned, reserve, PV per quarter on a `Timeline`, `known_until` (where load and PV are known), `yesterday`, `to_attributes` for the sensors), and its functions: load forecast per hour, PV integration of the `watts` forecast, PV calibration, weekend reserve |
 | `nordpool_utils.py` | `fetch_nordpool_data` (via the `nordpool.hourly` service, cached per date) and the area → timezone map `tzs` |
 | `utils.py` | `get_tariff` |
 
@@ -67,6 +67,8 @@ Everything lives in `hass.data["energy_planner"]`:
 - `options` — a copy of the config entry options (`tariff_preset`, `tariff`), kept
   current by an update listener. Read the tariff with `get_tariff(hass)` (`utils.py`),
   which falls back to a flat tariff from `network_cost` / `network_compensation`.
+- `forecast` — the `forecast.Forecast` (see "Forecast"); `plan` — the `plan.Plan`
+  (see "Battery plan"). Neither is stored; both are rebuilt after a restart.
 - `spot_prices` — the published spot prices per quarter (SEK/MWh excl. VAT, keyed by
   the quarter's start in UTC, so the hour repeated when DST ends has its own), written
   by every plan run before it can fail on a missing forecast or battery state; read by
@@ -208,12 +210,15 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   `away` (`forecast.AWAY_WORDS`, all-day events too) mark the quarters they cover as
   `away`: no weekend reserve there. The battery keeps `battery_reserve_soc`, and the
   load profile is not lowered.
-- Output: `hass.data[DOMAIN]["forecast"]` with parallel lists `starts`, `load`
-  (profile), `planned`, `reserve`, `pv` (kWh per quarter, all of today and the next two days, `FORECAST_DAYS`; the
-  plan uses the third day once tomorrow's prices are published),
+- Output: a `forecast.Forecast` in `hass.data[DOMAIN]["forecast"]`: a `timeline` and
+  per-quarter `load` (profile), `planned`, `reserve`, `pv` (kWh per quarter, all of
+  today and the next two days, `FORECAST_DAYS`; the plan uses the third day once
+  tomorrow's prices are published; it plans to `known_until`),
   `temperature` (Open-Meteo air temperature mid-quarter, None without Open-Meteo),
-  `heat_pump_loss` / `heat_pump_loss_hours` (measured heat loss, kW/K),
-  `planned_events`, `away` (bool per quarter), and totals. `load_tomorrow` / `load_today_remaining` = profile +
+  `away` (bool per quarter), `heat_pump_loss` (measured heat loss, kW/K) and
+  `ev_need_kwh`; what only the sensors show is in `details`: `heat_pump_loss_hours`,
+  `planned_events`, the totals and the PV calibration. Published by
+  `to_attributes` as before (local ISO `starts`). `load_tomorrow` / `load_today_remaining` = profile +
   planned (today counted from the current quarter); `base_tomorrow` and
   `planned_tomorrow` split it. The sensors expose the lists as attributes, which are
   kept out of the recorder. The Energi dashboard has a "Prognos" view
@@ -736,9 +741,10 @@ make format         # ruff format
   when DST ends sorts into (and in a dict merges with) its copy, and adding a
   timedelta keeps the wall clock. Use `timeline.py`: the plan's quarters, manual
   slots, price keys (`quarter_start`) and hourly sums (`hour_start`, the import
-  history and the optimizer's power charge hours) are UTC. The forecast's starts are
-  still local ISO strings until it moves onto a `Timeline`. Local time is only for
-  calendar logic (day windows, hour of day) and display.
+  history and the optimizer's power charge hours) are UTC, and the forecast is on a
+  `Timeline`. `forecast.py`'s functions still take local quarter starts for their
+  calendar logic; compare those as timestamps. Local time is only for calendar logic
+  (day windows, hour of day) and display.
 - Dates and times in `config` and `manual_slots` are always objects in memory
   (`parse_stored_data` and `_load_manual_slots` convert them on load), so do not add
   string checks. The `nordpool_values` price cache is the exception and still holds

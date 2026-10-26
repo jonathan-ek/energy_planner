@@ -3,7 +3,7 @@ from .battery_plan import (
     async_update_plan,
     write_plan_sensors,
 )
-from .dynamic_planner import async_update_forecast
+from .forecast_update import async_update_forecast
 
 __all__ = [
     "async_request_plan",

@@ -25,6 +25,7 @@ from ..store import async_load_from_store, async_save_to_store
 from . import manual
 from .battery_action import BatteryState, resolve
 from . import ev, settings
+from .forecast import Forecast
 from .battery_optimizer import (
     QUARTER_HOURS,
     Battery,
@@ -33,7 +34,6 @@ from .battery_optimizer import (
     charger_powers,
     optimize,
 )
-from .forecast import quarter_starts
 from .heat_pump import schedule
 from .heating import plan_inputs
 from .nordpool_utils import fetch_nordpool_data
@@ -326,10 +326,14 @@ async def _estimated_prices(
     if hourly is None:
         return {}
     fallback = mean(hourly.values())
-    start = dt_utils.start_of_local_day(day)
+    quarters = Timeline.between(
+        dt_utils.start_of_local_day(day),
+        dt_utils.start_of_local_day(day + dt.timedelta(days=1)),
+        dt_utils.get_default_time_zone(),
+    )
     estimated = {
-        quarter.astimezone(dt.UTC): hourly.get(quarter.hour, fallback)
-        for quarter in quarter_starts(start, start + dt.timedelta(days=1))
+        start: hourly.get(quarters.local_hour(index), fallback)
+        for index, start in enumerate(quarters.starts)
     }
     hass.data[DOMAIN]["price_estimate"] = {
         "day": day,
@@ -406,7 +410,8 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle, EvPlan] | tuple[None
             need = ev.need_from_soc(0, 100, capacity)
             source = "trip"
         else:
-            need = (hass.data[DOMAIN].get("forecast") or {}).get("ev_need_kwh")
+            forecast = hass.data[DOMAIN].get("forecast")
+            need = forecast.ev_need_kwh if forecast is not None else None
             if need is None:
                 return None, None
             source = "history"
@@ -549,7 +554,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["spot_prices"] = prices
     # Also when the plan can not be made
     await _prune_manual_slots(hass, dt_utils.now())
-    forecast = hass.data[DOMAIN].get("forecast")
+    forecast: Forecast | None = hass.data[DOMAIN].get("forecast")
     battery = _battery(hass)
     if not forecast or battery is None or battery.max_kwh <= battery.min_kwh:
         _LOGGER.info("No forecast or battery state, skipping the battery plan")
@@ -560,26 +565,30 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     # energy is worth keeping past the coming night
     estimated = await _estimated_prices(hass, prices, now)
 
+    # From the current quarter while the forecast knows load and PV and a price
+    # (published or estimated) exists
     starts, price_list, load, pv, temperatures = [], [], [], [], []
     is_estimate = []
-    for index, start_text in enumerate(forecast["starts"]):
-        start = dt_utils.as_local(dt.datetime.fromisoformat(start_text))
-        # In UTC, so the hour repeated when DST ends is not taken as the same
-        key = start.astimezone(dt.UTC)
-        if key < current:
-            continue
-        base = forecast["load"][index]
+    quarters = forecast.timeline
+    until = forecast.known_until(current)
+    first = quarters.index_at(current)
+    for index in range(first or 0, len(quarters) if first is not None else 0):
+        key = quarters.starts[index]
         price = prices.get(key, estimated.get(key))
-        solar = forecast["pv"][index] if forecast["pv"] else 0.0
-        if price is None or base is None or solar is None:
+        if key >= until or price is None:
             break
-        starts.append(start)
+        starts.append(quarters.local(index))
         price_list.append(price)
         is_estimate.append(key not in prices)
-        load.append(base + forecast["planned"][index] + forecast["reserve"][index])
-        pv.append(solar)
+        # Known up to `until`: neither is None there
+        load.append(
+            (forecast.load[index] or 0.0)
+            + forecast.planned[index]
+            + forecast.reserve[index]
+        )
+        pv.append((forecast.pv[index] or 0.0) if forecast.pv is not None else 0.0)
         temperatures.append(
-            forecast["temperature"][index] if forecast.get("temperature") else None
+            forecast.temperature[index] if forecast.temperature is not None else None
         )
     if not starts:
         _LOGGER.info("No prices for the forecast, skipping the battery plan")

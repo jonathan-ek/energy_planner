@@ -213,7 +213,7 @@ def test_power_from_the_loss_or_the_setting():
 def test_plan_inputs_use_the_heat_loss():
     """Test that the measured heat loss gives the draw per quarter."""
     hass = plan_hass({"sensor.gw1100a_indoor_temperature": "21"})
-    hass.data[DOMAIN]["forecast"] = {"heat_pump_loss": 1.5 / 21}
+    hass.data[DOMAIN]["forecast"] = SimpleNamespace(heat_pump_loss=1.5 / 21)
     with patch.object(heating.dt_utils, "now", return_value=NOW):
         inputs = heating.plan_inputs(hass, [QUARTER] * 2, [0.0, 7.0])
     # 0.5 kW at 0 °C, 14 / 21 * 1.5 kW heat at COP 3.62 at 7 °C
@@ -221,7 +221,7 @@ def test_plan_inputs_use_the_heat_loss():
     assert inputs.probe_kwh == pytest.approx((0.125 + 0.25 / 3.62) / 2)
     # Without an indoor temperature the setting is used
     hass = plan_hass({})
-    hass.data[DOMAIN]["forecast"] = {"heat_pump_loss": 1.5 / 21}
+    hass.data[DOMAIN]["forecast"] = SimpleNamespace(heat_pump_loss=1.5 / 21)
     with patch.object(heating.dt_utils, "now", return_value=NOW):
         inputs = heating.plan_inputs(hass, [QUARTER], [0.0])
     assert inputs.draws == pytest.approx([0.075])

@@ -47,7 +47,8 @@ def _power_kw(
     From the heat loss the forecast measured, the live indoor and the outdoor
     temperature, else the heat_pump_power setting. A setting of 0 turns planning off.
     """
-    loss = (hass.data[DOMAIN].get("forecast") or {}).get("heat_pump_loss")
+    forecast = hass.data[DOMAIN].get("forecast")
+    loss = forecast.heat_pump_loss if forecast is not None else None
     return heat_pump.power_kw(config.power_kw, loss, indoor, outdoor, cop_curve)
 
 

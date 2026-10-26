@@ -1,6 +1,7 @@
 """Tests for the battery plan glue."""
 
 import asyncio
+import dataclasses
 import datetime as dt
 import importlib
 import math
@@ -12,7 +13,13 @@ import aiohttp
 import pytest
 
 from custom_components.energy_planner.const import DOMAIN, PLAN_SENSORS
-from custom_components.energy_planner.planner import manual, price_estimate, settings
+from custom_components.energy_planner.planner import (
+    forecast,
+    manual,
+    price_estimate,
+    settings,
+)
+from custom_components.energy_planner.planner.timeline import Timeline
 
 battery_plan = importlib.import_module(
     "custom_components.energy_planner.planner.battery_plan"
@@ -71,19 +78,32 @@ def mock_hass():
                 "grid_import_limit_start": 6,
                 "grid_import_limit_end": 23,
             },
-            "forecast": {
-                "starts": [s.isoformat() for s in STARTS],
-                "load": [0.25 if s.hour < 17 else 0.5 for s in STARTS],
-                "planned": [0.0] * 192,
-                "reserve": [0.0] * 192,
-                "pv": [0.0] * 192,
-            },
+            "forecast": make_forecast(STARTS),
             PLAN_SENSORS: [MagicMock()],
             battery_plan.PRICE_STORE: {},
         }
     }
     yield hass
     battery_plan.dt_utils.set_default_time_zone(default)
+
+
+def make_forecast(starts):
+    """Return a forecast: 1 kW load until 17, 2 kW after, no PV or planned loads."""
+    count = len(starts)
+    return forecast.Forecast(
+        updated=starts[0],
+        timeline=Timeline.of(starts),
+        load=tuple(0.25 if s.hour < 17 else 0.5 for s in starts),
+        planned=(0.0,) * count,
+        reserve=(0.0,) * count,
+        pv=(0.0,) * count,
+    )
+
+
+def forecast_data(hass, **changes):
+    """Change fields of the mock forecast."""
+    data = hass.data[DOMAIN]
+    data["forecast"] = dataclasses.replace(data["forecast"], **changes)
 
 
 def prices():
@@ -273,7 +293,7 @@ async def test_heat_pump_is_planned(mock_hass, temperature, heats):
     mock_hass.data[DOMAIN]["config"].update(
         {"heat_pump_power": 300, "heat_pump_margin": 5, "heat_pump_heating_limit": 15}
     )
-    mock_hass.data[DOMAIN]["forecast"]["temperature"] = [temperature] * 192
+    forecast_data(mock_hass, temperature=(temperature,) * 192)
     plan = await run(mock_hass)
     on = dict(zip(plan["starts"], plan["heat_pump"], strict=True))
     night = dt.datetime(2026, 1, 14, 3, tzinfo=TZ).isoformat()
@@ -323,13 +343,7 @@ async def test_tomorrow_is_estimated(mock_hass):
 def three_days(hass):
     """Extend the mock forecast to today and the next two days."""
     starts = [START + dt.timedelta(minutes=15 * i) for i in range(288)]
-    hass.data[DOMAIN]["forecast"] = {
-        "starts": [s.isoformat() for s in starts],
-        "load": [0.25 if s.hour < 17 else 0.5 for s in starts],
-        "planned": [0.0] * 288,
-        "reserve": [0.0] * 288,
-        "pv": [0.0] * 288,
-    }
+    hass.data[DOMAIN]["forecast"] = make_forecast(starts)
     return starts
 
 
@@ -380,8 +394,7 @@ async def test_day_after_tomorrow_is_estimated(mock_hass):
 async def test_plan_ends_where_the_pv_forecast_does(mock_hass):
     """Test that quarters without a PV forecast (Forecast.Solar) end the plan."""
     starts = three_days(mock_hass)
-    pv = mock_hass.data[DOMAIN]["forecast"]["pv"]
-    pv[192:] = [None] * 96
+    forecast_data(mock_hass, pv=(0.0,) * 192 + (None,) * 96)
     mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = "sensor.nordpool_kwh_se3"
     plan = await run(mock_hass, price_history=sensor_history())
     assert plan["starts"][-1] == starts[191].isoformat()
@@ -458,7 +471,7 @@ async def test_plugged_car_charges_at_night(mock_hass):
         config["ev_charger_status_sensor"] = "sensor.charger_status"
         config["ev_session_energy_sensor"] = "sensor.charger_session"
         config["ev_ready_time"] = dt.time(6, 30)
-        mock_hass.data[DOMAIN]["forecast"]["ev_need_kwh"] = 20.0
+        forecast_data(mock_hass, ev_need_kwh=20.0)
         plan = await run(mock_hass)
     finally:
         del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
@@ -498,7 +511,7 @@ async def test_plan_settings_replan(mock_hass):
         ev_charger_status_sensor="sensor.charger_status",
     )
     mock_hass.data[DOMAIN]["config"] = config
-    mock_hass.data[DOMAIN]["forecast"]["ev_need_kwh"] = 20.0
+    forecast_data(mock_hass, ev_need_kwh=20.0)
     mock_hass.data[DOMAIN]["values"] = {}
     try:
         await run(mock_hass)
@@ -551,7 +564,7 @@ async def test_car_past_its_history_need_is_not_planned(mock_hass):
         config = mock_hass.data[DOMAIN]["config"]
         config["ev_charger_status_sensor"] = "sensor.charger_status"
         config["ev_session_energy_sensor"] = "sensor.charger_session"
-        mock_hass.data[DOMAIN]["forecast"]["ev_need_kwh"] = 20.0
+        forecast_data(mock_hass, ev_need_kwh=20.0)
         plan = await run(mock_hass)
     finally:
         del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
@@ -569,7 +582,7 @@ async def test_car_trip_charges_full(mock_hass):
         config["ev_session_energy_sensor"] = "sensor.charger_session"
         config["ev_battery_capacity"] = 45
         config["ev_departure"] = departure
-        mock_hass.data[DOMAIN]["forecast"]["ev_need_kwh"] = 20.0
+        forecast_data(mock_hass, ev_need_kwh=20.0)
         plan = await run(mock_hass)
     finally:
         del STATES["sensor.charger_status"], STATES["sensor.charger_session"]

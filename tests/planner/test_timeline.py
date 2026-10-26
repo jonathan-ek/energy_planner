@@ -30,6 +30,18 @@ def test_days_have_their_quarters(date, quarters):
     assert {quarters_of_day.local_date(i) for i in range(quarters)} == {date}
 
 
+def test_between_starts_with_the_quarter_of_its_start():
+    """Test that a start inside a quarter includes that quarter."""
+    start = dt.datetime(2026, 10, 4, 10, 7, 30, tzinfo=TZ)
+    quarters = Timeline.between(start, start.replace(hour=11, minute=0, second=0), TZ)
+    assert [q.strftime("%H:%M") for q in quarters.locals] == [
+        "10:00",
+        "10:15",
+        "10:30",
+        "10:45",
+    ]
+
+
 def test_the_repeated_hour_is_two_hours():
     """Test lookup, local hours and display in the hour repeated when DST ends."""
     quarters = day(AUTUMN)

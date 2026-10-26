@@ -16,13 +16,19 @@ capped in the history and added back from calendar events (planned loads) or cov
 by a reserve.
 """
 
+import dataclasses
 import datetime as dt
+import functools
 import re
 from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from statistics import mean, median
+from typing import Any
 
-QUARTER = dt.timedelta(minutes=15)
+from . import ev as ev_need
+from . import heat_pump
+from .timeline import QUARTER, Timeline, at_local
+
 
 # Profile settings
 PROFILE_DAYS = 7  # days in the recent profile
@@ -91,24 +97,6 @@ HEAT_PUMP_MAX_KW = 2.5
 def is_offday(day: dt.date) -> bool:
     """Weekend; holidays are not known here."""
     return day.weekday() >= 5
-
-
-def quarter_starts(start: dt.datetime, end: dt.datetime) -> list[dt.datetime]:
-    """Quarter starts from the quarter containing start up to end (exclusive).
-
-    Works on UTC so a daylight saving change gives 92 or 100 quarters as it should.
-    """
-    tz = start.tzinfo
-    current = start.astimezone(dt.UTC)
-    current = current.replace(
-        minute=current.minute - current.minute % 15, second=0, microsecond=0
-    )
-    end = end.astimezone(dt.UTC)
-    result = []
-    while current < end:
-        result.append(current.astimezone(tz))
-        current += QUARTER
-    return result
 
 
 def hourly_load_forecast(
@@ -450,8 +438,12 @@ def is_away_event(summary: str) -> bool:
 def away_quarters(
     periods: Sequence[tuple[dt.datetime, dt.datetime]], quarters: list[dt.datetime]
 ) -> list[bool]:
-    """Return per quarter whether it starts inside one of the (start, end) periods."""
-    return [any(start <= q < end for start, end in periods) for q in quarters]
+    """Return per quarter whether it starts inside one of the (start, end) periods.
+
+    Compared as instants, so the hour repeated when DST ends is not taken twice.
+    """
+    spans = [(start.timestamp(), end.timestamp()) for start, end in periods]
+    return [any(start <= q.timestamp() < end for start, end in spans) for q in quarters]
 
 
 def planned_event_energy(summary: str, description: str = "") -> float | None:
@@ -479,16 +471,19 @@ def planned_event_energy(summary: str, description: str = "") -> float | None:
 def planned_quarters(
     events: list[tuple[dt.datetime, dt.datetime, float]], quarters: list[dt.datetime]
 ) -> list[float]:
-    """Spread each (start, end, kWh) event evenly over the time it covers."""
+    """Spread each (start, end, kWh) event evenly over the time it covers.
+
+    In timestamps: local times compare and add by wall clock (see timeline.py).
+    """
     result = [0.0] * len(quarters)
+    starts = [quarter.timestamp() for quarter in quarters]
     for start, end, kwh in events:
-        duration = (end - start).total_seconds()
+        first, last = start.timestamp(), end.timestamp()
+        duration = last - first
         if duration <= 0:
             continue
-        for i, quarter in enumerate(quarters):
-            overlap = (
-                min(end, quarter + QUARTER) - max(start, quarter)
-            ).total_seconds()
+        for i, quarter in enumerate(starts):
+            overlap = min(last, quarter + QUARTER.total_seconds()) - max(first, quarter)
             if overlap > 0:
                 result[i] += kwh * overlap / duration
     return result
@@ -577,7 +572,7 @@ def temperature_quarters(
     points = sorted((m.timestamp(), value) for m, value in temperatures.items())
     result = []
     for start in quarters:
-        middle = (start + QUARTER / 2).timestamp()
+        middle = start.timestamp() + QUARTER.total_seconds() / 2
         if not points or not points[0][0] <= middle <= points[-1][0]:
             result.append(None)
             continue
@@ -589,3 +584,426 @@ def hourly_power_to_watts(hourly_kw: Mapping[dt.datetime, float]) -> dict:
     """Place hourly mean power (kW) mid-hour, in W, as input for pv_quarters."""
     half = dt.timedelta(minutes=30)
     return {hour + half: kw * 1000 for hour, kw in hourly_kw.items()}
+
+
+# The forecast covers today and the next two days: the battery plan uses the third
+# day once tomorrow's prices are published (it then estimates that day's prices)
+FORECAST_DAYS = 3
+# Days of PV history the calibration compares with the forecast
+CALIBRATION_DAYS = 14
+# Hourly PV means above this are Modbus glitches
+PV_MAX_KW = 25
+
+
+@dataclasses.dataclass(frozen=True)
+class ForecastInputs:
+    """What a forecast is made from, fetched by forecast_update.py.
+
+    Hourly means are kW (= kWh for the hour) keyed by the UTC hour start.
+    """
+
+    now: dt.datetime
+    tz: dt.tzinfo
+    load: Mapping[dt.datetime, float]  # house load, the car and heat pump included
+    pv: Mapping[dt.datetime, float]  # produced
+    ev: Mapping[dt.datetime, float]  # car charging
+    indoor: Mapping[dt.datetime, float]  # °C in the heat pump's room
+    outdoor: Mapping[dt.datetime, float]  # °C
+    heating_shares: Mapping[dt.datetime, float]  # share of each hour it heated
+    # (start, end, kWh, summary) from the calendar
+    planned_loads: Sequence[tuple[dt.datetime, dt.datetime, float, str]]
+    away_periods: Sequence[tuple[dt.datetime, dt.datetime]]
+    # Open-Meteo's latest and day-before PV power (kW per UTC hour, all planes) and
+    # air temperature per UTC timestamp; None without planes or when it failed
+    open_meteo: tuple[Mapping, Mapping, Mapping] | None
+    # Forecast.Solar per entry: its `watts` forecast and the history of its power
+    # production estimate (kW per UTC hour, empty without the sensor)
+    forecast_solar: Sequence[tuple[Mapping[dt.datetime, float], Mapping]]
+    load_model: str  # LOAD_MODELS
+    pv_calibration: str  # PV_CALIBRATIONS
+    weekend_reserve_kwh: float
+    reserve_start: int
+    reserve_end: int
+    heat_pump_power_kw: float  # the setting, 0: not planned
+    cop_curve: Sequence[tuple[float, float]]
+
+
+@dataclasses.dataclass(frozen=True)
+class Forecast:
+    """Load and PV per quarter (kWh) on a timeline, and what the sensors publish.
+
+    `load` is the profile; `planned` (calendar) and `reserve` come on top. `pv` is
+    None without a PV source, and a quarter's PV is None where Forecast.Solar does
+    not reach. `yesterday` is yesterday's forecast rebuilt as it was made (load,
+    planned and PV). `details` are the totals and calibration only the sensors show
+    (yesterday's actual totals too), as `to_attributes` publishes them.
+    """
+
+    updated: dt.datetime
+    timeline: Timeline
+    load: tuple[float | None, ...]
+    planned: tuple[float, ...] = ()
+    reserve: tuple[float, ...] = ()
+    away: tuple[bool, ...] = ()
+    pv: tuple[float | None, ...] | None = None
+    temperature: tuple[float | None, ...] | None = None  # °C mid-quarter
+    heat_pump_loss: float | None = None  # kW of heat per °C, measured
+    ev_need_kwh: float | None = None  # the car's need from its charging nights
+    yesterday: "Forecast | None" = None
+    details: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Check that every series given has a value per quarter."""
+        for name in ("load", "planned", "reserve", "away", "pv", "temperature"):
+            series = getattr(self, name)
+            if series and len(series) != len(self.timeline):
+                raise ValueError(
+                    f"{name} has {len(series)} values, not {len(self.timeline)}"
+                )
+
+    def known_until(self, moment: dt.datetime) -> dt.datetime:
+        """Return the end (UTC) of the quarters from `moment` with load and PV known.
+
+        `moment` itself if its quarter is not known (or outside the forecast).
+        """
+        index = self.timeline.index_at(moment)
+        if index is None:
+            return moment
+        last = None
+        for i in range(index, len(self.timeline)):
+            if self.load[i] is None or (self.pv is not None and self.pv[i] is None):
+                break
+            last = i
+        return moment if last is None else self.timeline.quarter_end(last)
+
+    def to_attributes(self) -> dict[str, Any]:
+        """Return everything the two forecast sensors publish (local ISO times).
+
+        Built once and shared: read only.
+        """
+        return self._attributes
+
+    @functools.cached_property
+    def _attributes(self) -> dict[str, Any]:
+        details = dict(self.details)
+        yesterday = self.yesterday
+        return {
+            "updated": self.updated.isoformat(),
+            "starts": self.timeline.isoformat(),
+            "load": list(self.load),
+            "planned": list(self.planned),
+            "reserve": list(self.reserve),
+            "away": list(self.away),
+            "pv": None if self.pv is None else list(self.pv),
+            "temperature": None if self.temperature is None else list(self.temperature),
+            "heat_pump_loss": self.heat_pump_loss,
+            "ev_need_kwh": self.ev_need_kwh,
+            **details,
+            "yesterday_starts": yesterday.timeline.isoformat() if yesterday else [],
+            # Profile plus planned loads, what was expected
+            "yesterday_load": None
+            if yesterday is None
+            else [
+                None if base is None else round(base + extra, 3)
+                for base, extra in zip(yesterday.load, yesterday.planned, strict=True)
+            ],
+            "yesterday_pv": None
+            if yesterday is None or yesterday.pv is None
+            else list(yesterday.pv),
+        }
+
+
+def _local_hours(
+    hourly: Mapping[dt.datetime, float], tz: dt.tzinfo
+) -> dict[tuple[dt.date, int], float]:
+    """Key hourly values by (local date, hour) instead of the UTC hour start."""
+    result = {}
+    for hour, value in hourly.items():
+        local = hour.astimezone(tz)
+        result[(local.date(), local.hour)] = value
+    return result
+
+
+def _rounded(values, digits: int = 3):
+    """Round a series, keeping None (the series and its values)."""
+    if values is None:
+        return None
+    return tuple(None if v is None else round(v, digits) for v in values)
+
+
+def _total(values) -> float | None:
+    """Sum a series, None if it has no values."""
+    if values is None or all(v is None for v in values):
+        return None
+    return round(sum(v for v in values if v is not None), 2)
+
+
+def _daily_totals(timeline: Timeline, values, since: dt.datetime) -> dict:
+    """Sum per local date, counting only the quarters from `since` on."""
+    first = timeline.index_at(since)
+    first = 0 if first is None else first
+    totals: dict[dt.date, float] = {}
+    for index in range(first, len(timeline)):
+        value = values[index]
+        if value is not None:
+            day = timeline.local_date(index)
+            totals[day] = totals.get(day, 0.0) + value
+    return totals
+
+
+def _day_total(hourly, start: dt.datetime, end: dt.datetime) -> float | None:
+    """Sum hourly kWh from start to end, None if more than an hour is missing."""
+    start_utc, end_utc = start.astimezone(dt.UTC), end.astimezone(dt.UTC)
+    values = [kw for hour, kw in hourly.items() if start_utc <= hour < end_utc]
+    if len(values) < (end_utc - start_utc) / dt.timedelta(hours=1) - 1:
+        return None
+    return round(sum(values), 2)
+
+
+def build_forecast(inputs: ForecastInputs) -> Forecast:
+    """Forecast load and PV per quarter for all of today and the next two days.
+
+    Today's forecast only uses days before today, so it is the same all day and can
+    be compared with what actually happens. Totals for today count from now.
+
+    1. Load history: the house load minus the car's charging and the heat pump
+       (the share of each hour it heated times its draw, measured from the load
+       where possible: `heat_pump.heat_loss`), large one-off loads capped.
+    2. Load per quarter from the profile (`load_quarters`), or with the
+       temperature model corrected for the outdoor temperature; planned loads from
+       the calendar and the weekend reserve (not while away) on top.
+    3. PV from Open-Meteo, else Forecast.Solar, scaled by the actual / forecast
+       ratio of the last `CALIBRATION_DAYS` (per hour of the day with the hourly
+       calibration). Forecast.Solar's PV is None past the last day it reaches.
+    4. Yesterday rebuilt as it was: the same profile, the calendar, and Open-Meteo's
+       day-before forecast calibrated on the days before yesterday.
+    """
+    tz, now = inputs.tz, inputs.now.astimezone(inputs.tz)
+    today = now.date()
+    yesterday = today - dt.timedelta(days=1)
+    tomorrow = today + dt.timedelta(days=1)
+    midnight = at_local(today, dt.time(0), tz)
+    end = at_local(today + dt.timedelta(days=FORECAST_DAYS), dt.time(0), tz)
+    timeline = Timeline.between(midnight, end, tz)
+    quarters = list(timeline.locals)
+    yesterday_start = at_local(yesterday, dt.time(0), tz)
+    past = Timeline.between(yesterday_start, midnight, tz)
+    yesterday_quarters = list(past.locals)
+
+    # 1. The house load without the car and the heat pump
+    without_ev = {
+        hour: max(kw - max(inputs.ev.get(hour, 0.0), 0.0), 0.0)
+        for hour, kw in inputs.load.items()
+    }
+    curve = inputs.cop_curve
+    loss, loss_hours = heat_pump.heat_loss(
+        heat_pump_excess(
+            _local_hours(without_ev, tz), _local_hours(inputs.heating_shares, tz)
+        ),
+        _local_hours(inputs.indoor, tz),
+        _local_hours(inputs.outdoor, tz),
+        curve,
+    )
+    house = {
+        hour: max(
+            kw
+            - inputs.heating_shares.get(hour, 0.0)
+            * heat_pump.power_kw(
+                inputs.heat_pump_power_kw,
+                loss,
+                inputs.indoor.get(hour),
+                inputs.outdoor.get(hour),
+                curve,
+            ),
+            0.0,
+        )
+        for hour, kw in without_ev.items()
+    }
+    # One-off large loads are added back from the calendar or covered by the reserve
+    history = cap_large_loads(_local_hours(house, tz))
+
+    # 2. Load per quarter
+    load = load_quarters(history, quarters, today)
+    yesterday_load = load_quarters(history, yesterday_quarters, yesterday)
+    # Nobody home: no reserve for unplanned load (here and the battery's reserve SOC)
+    away = away_quarters(inputs.away_periods, quarters)
+    reserve = reserve_quarters(
+        quarters,
+        inputs.weekend_reserve_kwh,
+        inputs.reserve_start,
+        inputs.reserve_end,
+        away,
+    )
+    planned_energy = [
+        (start, stop, kwh) for start, stop, kwh, _ in inputs.planned_loads
+    ]
+    planned = planned_quarters(planned_energy, quarters)
+    yesterday_planned = planned_quarters(planned_energy, yesterday_quarters)
+
+    # 3. PV: Open-Meteo, or Forecast.Solar if that is missing
+    since = now - dt.timedelta(days=CALIBRATION_DAYS)
+    pv_actual = {hour: kw for hour, kw in inputs.pv.items() if 0 <= kw <= PV_MAX_KW}
+    actual = {hour: kw for hour, kw in pv_actual.items() if hour >= since}
+    yesterday_pv = None
+    pv = None
+    calibration = None
+    raw = None
+    pv_source = None
+    temperature = None
+    temperatures: Mapping = {}
+    hourly = None
+
+    def hour_factors(produced, predicted):
+        """Return the factor per local hour with the hourly calibration, else None."""
+        if inputs.pv_calibration != "hourly":
+            return None
+        return pv_hourly_calibration(
+            _local_hours(produced, tz), _local_hours(predicted, tz)
+        )
+
+    if inputs.open_meteo is not None:
+        latest, previous, temperatures = inputs.open_meteo
+        recent = {hour: kw for hour, kw in previous.items() if hour >= since}
+        calibration = pv_calibration(actual, recent)
+        hourly = hour_factors(actual, recent)
+        raw = pv_quarters(hourly_power_to_watts(latest), quarters)
+        pv_source = "open-meteo"
+        temperature = temperature_quarters(temperatures, quarters)
+        # Yesterday: the day-before forecast, calibrated on the days before it
+        window = (
+            yesterday_start - dt.timedelta(days=CALIBRATION_DAYS),
+            yesterday_start,
+        )
+        produced = {h: kw for h, kw in pv_actual.items() if window[0] <= h < window[1]}
+        predicted = {h: kw for h, kw in previous.items() if window[0] <= h < window[1]}
+        yesterday_pv = calibrated_quarters(
+            pv_quarters(hourly_power_to_watts(previous), yesterday_quarters),
+            yesterday_quarters,
+            pv_calibration(produced, predicted),
+            hour_factors(produced, predicted),
+        )
+    if raw is None and inputs.forecast_solar:
+        predicted = {}
+        for _, estimates in inputs.forecast_solar:
+            for hour, kw in estimates.items():
+                if hour >= since:
+                    predicted[hour] = predicted.get(hour, 0.0) + kw
+        calibration = pv_calibration(actual, predicted)
+        hourly = hour_factors(actual, predicted)
+        raw = [0.0] * len(quarters)
+        for watts, _ in inputs.forecast_solar:
+            plane = pv_quarters(watts, quarters)
+            raw = [a + b for a, b in zip(raw, plane, strict=True)]
+        pv_source = "forecast.solar"
+    raw_totals = {}
+    if raw is not None and calibration is not None:
+        raw_totals = _daily_totals(timeline, raw, now)
+        pv = calibrated_quarters(raw, quarters, calibration, hourly)
+    if pv is not None and pv_source == "forecast.solar":
+        # Forecast.Solar may not reach the last day: no PV there (not 0), so the
+        # battery plan ends where the forecast does
+        covered = min(
+            (
+                at_local(
+                    max(watts).astimezone(tz).date() + dt.timedelta(days=1),
+                    dt.time(0),
+                    tz,
+                )
+                for watts, _ in inputs.forecast_solar
+                if watts
+            ),
+            default=midnight,
+        )
+        pv = [
+            value if timeline.starts[i] < covered else None
+            for i, value in enumerate(pv)
+        ]
+
+    # Houses heated with electricity: the profile corrected for the outdoor
+    # temperature, measured for the history days, Open-Meteo's for the forecast days
+    slope = None
+    if inputs.load_model == "temperature" and temperatures:
+        measured = daily_means(_local_hours(inputs.outdoor, tz))
+        expected = daily_means(_local_hours(temperatures, tz))
+        slope = heating_slope(history, measured, today)
+        load = temperature_load_quarters(history, quarters, today, measured, expected)
+        yesterday_load = temperature_load_quarters(
+            history, yesterday_quarters, yesterday, measured, expected
+        )
+    yesterday_expected = [
+        None if base is None else base + extra
+        for base, extra in zip(yesterday_load, yesterday_planned, strict=True)
+    ]
+
+    # 4. Totals for the sensors
+    base_totals = _daily_totals(timeline, load, now)
+    planned_totals = _daily_totals(timeline, planned, now)
+    pv_totals = _daily_totals(timeline, pv, now) if pv is not None else {}
+
+    def total(day):
+        """Return the expected load for a day: profile plus planned loads."""
+        if day not in base_totals:
+            return None
+        return round(base_totals[day] + planned_totals.get(day, 0.0), 2)
+
+    def two_decimals(value):
+        return None if value is None else round(value, 2)
+
+    details = {
+        "heat_pump_loss_hours": loss_hours,
+        "load_model": inputs.load_model,
+        # Temperature model: daily load change per °C warmer (kWh/°C), 0 = none
+        "heating_slope": None if slope is None else round(slope, 2),
+        "planned_events": [
+            {
+                "summary": summary,
+                "start": start.isoformat(),
+                "end": stop.isoformat(),
+                "kwh": kwh,
+            }
+            for start, stop, kwh, summary in inputs.planned_loads
+            if stop > quarters[0]
+        ],
+        "load_today_remaining": total(today),
+        "load_tomorrow": total(tomorrow),
+        "base_tomorrow": two_decimals(base_totals.get(tomorrow)),
+        "planned_tomorrow": round(planned_totals.get(tomorrow, 0.0), 2),
+        "pv_today_remaining": round(pv_totals.get(today, 0.0), 2)
+        if pv is not None
+        else None,
+        "pv_tomorrow": two_decimals(pv_totals.get(tomorrow)),
+        "pv_tomorrow_uncalibrated": two_decimals(raw_totals.get(tomorrow)),
+        "pv_calibration": None if calibration is None else round(calibration, 3),
+        "pv_calibration_model": inputs.pv_calibration,
+        # Hourly calibration: the factor per local hour of the day (others: daily)
+        "pv_hourly_calibration": None
+        if hourly is None
+        else {hour: round(factor, 3) for hour, factor in sorted(hourly.items())},
+        "pv_source": pv_source,
+        "yesterday_load_kwh": _total(yesterday_expected),
+        "yesterday_load_actual_kwh": _day_total(house, yesterday_start, midnight),
+        "yesterday_pv_kwh": _total(yesterday_pv),
+        "yesterday_pv_actual_kwh": _day_total(pv_actual, yesterday_start, midnight),
+    }
+    return Forecast(
+        updated=inputs.now,
+        timeline=timeline,
+        load=_rounded(load) or (),
+        planned=tuple(round(v, 3) for v in planned),
+        reserve=tuple(round(v, 3) for v in reserve),
+        away=tuple(away),
+        pv=_rounded(pv),
+        temperature=_rounded(temperature),
+        heat_pump_loss=None if loss is None else round(loss, 3),
+        ev_need_kwh=two_decimals(
+            ev_need.need_from_history(_local_hours(inputs.ev, tz), today)
+        ),
+        yesterday=Forecast(
+            updated=inputs.now,
+            timeline=past,
+            load=_rounded(yesterday_load) or (),
+            planned=tuple(round(v, 3) for v in yesterday_planned),
+            pv=_rounded(yesterday_pv),
+        ),
+        details=details,
+    )

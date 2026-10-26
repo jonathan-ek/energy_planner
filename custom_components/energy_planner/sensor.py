@@ -140,8 +140,9 @@ class EnergyPlannerForecastSensor(SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{key}"
 
     @property
-    def _forecast(self):
-        return self._hass.data[DOMAIN].get("forecast", {})
+    def _forecast(self) -> dict:
+        forecast = self._hass.data[DOMAIN].get("forecast")
+        return forecast.to_attributes() if forecast is not None else {}
 
     @property
     def native_value(self):
