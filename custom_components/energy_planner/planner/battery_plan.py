@@ -431,11 +431,8 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle, EvPlan] | tuple[None
 def _forced(hass: HomeAssistant, starts) -> list[str | None]:
     """Return the mode of the manual slot covering each quarter (None: no slot).
 
-    Only with the dynamic planner, when the plan is what runs: otherwise the plan is a
-    preview, and a long manual slot (e.g. self-use for weeks) would make it useless.
+    Also while the planner is off: manual slots still run then.
     """
-    if settings.get(hass.data[DOMAIN]["config"], "planner_state") != "dynamic":
-        return [None] * len(starts)
     forced: list[str | None] = []
     for start in starts:
         mode = None
@@ -452,7 +449,11 @@ def current_action(hass: HomeAssistant) -> dict:
     config = settings.battery(hass.data[DOMAIN]["config"])
     values = hass.data[DOMAIN]["values"]
     slot = None
-    if values.get("slot_1_date_time_start") is not None:
+    # Off: an auto slot is not followed, so the battery runs self-use
+    enabled = settings.get(hass.data[DOMAIN]["config"], "enabled")
+    if values.get("slot_1_date_time_start") is not None and (
+        enabled or values.get("slot_1_state") != "auto"
+    ):
         slot = Slot(
             state=values.get("slot_1_state", "off"),
             active=bool(values.get("slot_1_active")),

@@ -63,7 +63,7 @@ def mock_hass():
                 "battery_max_soc": 90,
                 "max_charge_current": 20,
                 "max_discharge_current": 18,
-                "price_peak_efficiency_factor": 85,
+                "battery_efficiency": 85,
                 "battery_wear_cost": 20,
                 # The scenarios do not keep a reserve unless they set one
                 "battery_reserve_soc": 0,
@@ -153,7 +153,6 @@ async def test_no_battery_state(mock_hass):
 
 async def test_manual_slot_is_planned_around(mock_hass):
     """Test that a manual sell slot forces the plan's mode in its quarters."""
-    mock_hass.data[DOMAIN]["config"]["planner_state"] = "dynamic"
     start = dt.datetime(2026, 1, 14, 18, tzinfo=TZ)
     mock_hass.data[DOMAIN]["manual_slots"] = [
         {
@@ -167,12 +166,12 @@ async def test_manual_slot_is_planned_around(mock_hass):
     modes = dict(zip(plan["starts"], plan["modes"], strict=True))
     hour = [modes[(start + dt.timedelta(minutes=15 * i)).isoformat()] for i in range(4)]
     assert hour == ["sell"] * 4
-    # A preview with another planner is not forced
-    mock_hass.data[DOMAIN]["config"]["planner_state"] = "off"
+    # Manual slots run while the planner is off too, so the plan keeps them
+    mock_hass.data[DOMAIN]["config"]["enabled"] = False
     plan = await run(mock_hass)
     modes = dict(zip(plan["starts"], plan["modes"], strict=True))
     hour = [modes[(start + dt.timedelta(minutes=15 * i)).isoformat()] for i in range(4)]
-    assert hour != ["sell"] * 4
+    assert hour == ["sell"] * 4
 
 
 async def test_running_mode_is_passed_on(mock_hass):
@@ -258,6 +257,11 @@ async def test_current_action_follows_an_auto_slot(mock_hass):
         result = battery_plan.current_action(mock_hass)
     assert result["source"] == "plan"
     assert result["mode"] == mock_hass.data[DOMAIN]["plan"].modes[0]
+    # With the planner off the auto slot is not followed
+    mock_hass.data[DOMAIN]["config"]["enabled"] = False
+    with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
+        result = battery_plan.current_action(mock_hass)
+    assert (result["state"], result["source"]) == ("discharge", "none")
 
 
 @pytest.mark.parametrize(("temperature", "heats"), [(0.0, True), (20.0, False)])
@@ -498,11 +502,12 @@ async def test_plan_settings_replan(mock_hass):
         battery_plan.current_action(mock_hass)
     finally:
         del STATES["sensor.charger_status"]
-    assert "planner_state" in config.read
     assert "heat_pump_margin" in config.read
+    # The action follows the switch through its own listener (__init__.py)
+    assert "enabled" in config.read
     missing = {
         key
-        for key in config.read
+        for key in config.read - {"enabled"}
         if settings.SETTINGS[key].platform and not settings.SETTINGS[key].replans
     }
     assert missing == set()
@@ -710,7 +715,6 @@ def test_forced_slot_in_the_repeated_hour(mock_hass):
     """Test that a manual slot in the first 02:xx is not forced into the second."""
     utc = dt.datetime(2026, 10, 25, 0, 0, tzinfo=dt.UTC)  # 02:00 CEST
     starts = [(utc + dt.timedelta(minutes=15 * i)).astimezone(TZ) for i in range(8)]
-    mock_hass.data[DOMAIN]["config"]["planner_state"] = "dynamic"
     mock_hass.data[DOMAIN]["manual_slots"] = [
         {"start": starts[0], "end": starts[2], "state": "charge", "soc": 90}
     ]

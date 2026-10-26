@@ -9,7 +9,6 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.energy_planner.const import DOMAIN, SLOT_COUNT
 from custom_components.energy_planner.planner import battery_action
-from custom_components.energy_planner.planner.cheapest_hours_planner import planner
 from custom_components.energy_planner.planner.utils import (
     clear_passed_slots,
     write_schedule,
@@ -40,7 +39,6 @@ def _hass() -> MagicMock:
         DOMAIN: {
             "config": {
                 "nordpool_entity_id": "sensor.nordpool_kwh_se3_sek_3_10_025",
-                "cheapest_hours_nr_of_charge_hours": 1,
                 "battery_max_soc": 90,
                 "battery_shutdown_soc": 20,
             },
@@ -74,43 +72,6 @@ async def test_a_slot_in_the_second_copy_has_not_started_in_the_first():
     with patch(update), patch("homeassistant.util.dt.now", return_value=later):
         await clear_passed_slots(hass)
     assert _starts(hass)[0] == utc(25, 1, 30)
-
-
-async def test_cheapest_hours_over_the_repeated_hour():
-    """Test that the cheapest hour across both 02:xx copies is one charge slot."""
-    hass = _hass()
-    quarters = [
-        (MIDNIGHT.astimezone(dt.UTC) + dt.timedelta(minutes=15 * i)).astimezone(TZ)
-        for i in range(100)  # 25 hours
-    ]
-    # 02:30, 02:45 CEST and 02:00, 02:15 CET are the cheapest
-    prices = [10.0 if 10 <= i <= 13 else 100.0 for i in range(100)]
-    today = [
-        {
-            "start": start.isoformat(),
-            "end": (start.astimezone(dt.UTC) + dt.timedelta(minutes=15))
-            .astimezone(TZ)
-            .isoformat(),
-            "value": price,
-        }
-        for start, price in zip(quarters, prices, strict=True)
-    ]
-    hass.states.get.return_value = MagicMock(attributes={"tomorrow_valid": False})
-    module = "custom_components.energy_planner.planner.cheapest_hours_planner"
-    with (
-        patch(f"{module}.fetch_nordpool_data", return_value=([], today, None)),
-        patch(f"{module}.update_entities"),
-        patch(
-            "homeassistant.util.dt.now", return_value=MIDNIGHT + dt.timedelta(hours=1)
-        ),
-        patch("homeassistant.util.dt.async_get_time_zone", return_value=TZ),
-    ):
-        await planner(hass)
-    values = hass.data[DOMAIN]["values"]
-    states = [values[f"slot_{i}_state"] for i in range(1, 5)]
-    assert states == ["discharge", "charge", "discharge", "off"]
-    # The day is 25 h long
-    assert _starts(hass) == [utc(24, 22), utc(25, 0, 30), utc(25, 1, 30), utc(25, 23)]
 
 
 def test_battery_current_in_the_repeated_hour():

@@ -3,8 +3,6 @@
 import datetime as dt
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 import custom_components.energy_planner as integration
 from custom_components.energy_planner.const import (
     DATE_TIME_ENTITIES,
@@ -18,7 +16,7 @@ from custom_components.energy_planner.const import (
 START = dt.datetime(2026, 3, 11, 23, 0, tzinfo=dt.UTC)
 
 
-def make_hass(planner_state):
+def make_hass():
     """Return a hass with one manual charge slot written into the schedule."""
     hass = MagicMock()
     values = {
@@ -33,7 +31,7 @@ def make_hass(planner_state):
     }
     hass.data = {
         DOMAIN: {
-            "config": {"planner_state": planner_state},
+            "config": {},
             "values": values,
             "manual_slots": [
                 {
@@ -59,23 +57,12 @@ def make_hass(planner_state):
     return hass
 
 
-async def test_clearing_manual_slots_with_the_planner_off_clears_the_schedule():
-    """Test that a cleared manual slot no longer runs from the schedule."""
-    hass = make_hass("off")
-    with patch.object(integration, "async_request_plan", AsyncMock()) as request:
-        await integration.clear_manual_slots(hass)
-    data = hass.data[DOMAIN]
-    assert data["manual_slots"] == []
-    assert data["values"]["slot_1_state"] == "off"
-    assert data["values"]["slot_1_date_time_start"] is None
-    data["save"].assert_awaited()
-    request.assert_awaited_once()
+async def test_clearing_manual_slots_rebuilds_the_schedule():
+    """Test that the planner rewrites the schedule without the manual slots.
 
-
-@pytest.mark.parametrize("planner_state", ["dynamic", "basic"])
-async def test_clearing_manual_slots_rebuilds_the_schedule(planner_state):
-    """Test that the planner rewrites the schedule without the manual slots."""
-    hass = make_hass(planner_state)
+    Also while the planner is off: it still writes the auto slot.
+    """
+    hass = make_hass()
     with (
         patch.object(integration, "async_request_plan", AsyncMock()),
         patch.object(integration, "run_planner", AsyncMock()) as run,

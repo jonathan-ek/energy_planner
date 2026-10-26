@@ -20,24 +20,6 @@ async def async_setup_entry(
         EnergyPlannerTimeEntity(
             hass,
             {
-                "id": "earliest_charge_time",
-                "name": "Earliest charge time",
-                "enabled": True,
-                "data_store": "config",
-            },
-        ),
-        EnergyPlannerTimeEntity(
-            hass,
-            {
-                "id": "earliest_discharge_time",
-                "name": "Earliest discharge time",
-                "enabled": True,
-                "data_store": "config",
-            },
-        ),
-        EnergyPlannerTimeEntity(
-            hass,
-            {
                 # The car should have its need charged by this time (the next one
                 # after now), see planner/ev.py
                 "id": "ev_ready_time",

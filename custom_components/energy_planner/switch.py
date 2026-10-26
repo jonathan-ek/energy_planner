@@ -4,6 +4,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN, SLOT_COUNT, SWITCH_ENTITIES
+from .planner import settings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,6 +24,18 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         )
         for i in range(1, SLOT_COUNT + 1)
     ]
+    switches.append(
+        EnergyPlannerSwitchEntity(
+            hass,
+            {
+                # Off: the battery does not follow the plan, see battery_action.py
+                "id": "enabled",
+                "name": "Planner enabled",
+                "enabled": True,
+                "data_store": "config",
+            },
+        )
+    )
 
     hass.data[DOMAIN][SWITCH_ENTITIES] = switches
 
@@ -49,7 +62,11 @@ class EnergyPlannerSwitchEntity(SwitchEntity):
         self._attr_has_entity_name = True
         self._attr_name = entity_definition["name"]
         self.data_store = entity_definition.get("data_store", "values")
-        self._attr_native_value = entity_definition.get("default", None)
+        self._attr_native_value = (
+            settings.default(self.id)
+            if self.data_store == "config"
+            else entity_definition.get("default", None)
+        )
         self._attr_assumed_state = entity_definition.get("assumed", False)
         self._attr_available = True
         self.is_added_to_hass = False
@@ -69,7 +86,13 @@ class EnergyPlannerSwitchEntity(SwitchEntity):
     def update(self):
         """Update data."""
         self._attr_available = True
-        value = self._hass.data[DOMAIN][self.data_store].get(self.id, None)
+        store = self._hass.data[DOMAIN][self.data_store]
+        # A setting not in the store shows its default, as the planner reads it
+        value = (
+            settings.get(store, self.id)
+            if self.data_store == "config"
+            else store.get(self.id, None)
+        )
         self._attr_native_value = value
         self.schedule_update_ha_state()
 

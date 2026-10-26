@@ -20,20 +20,18 @@ in `GLOSSARY.md`.
 | `custom_components/energy_planner/store.py` | Thin wrapper around HA `Store` (`.storage/energy_planner.<key>`) |
 | `custom_components/energy_planner/config_flow.py` | Setup asks for `nordpool_entity_id`; the options flow chooses the grid tariff (flat, a preset or custom YAML) |
 | `custom_components/energy_planner/services.yaml`, `translations/en.json` | Service descriptions |
-| `tests/planner/` | Tests for the basic planner, the price peak planner, the forecast functions and the forecast glue. The `.md`/`.txt`/`ARCHITECTURE.py` files in `tests/` are documentation |
+| `custom_components/energy_planner/migrate.py` | Moves stored settings of older versions to the current keys (`migrate_config`, on load) and removes the registry entries of entities that are gone (`remove_entities`, on setup) |
+| `tests/` | `planner/`: the planning modules and their HA glue; `comfort/`; at the top config flow, entities, services, triggers and the migration. `tests/README.md` says how they reach HA |
 | `examples/` | Scripts, automations and cards that consume the schedule, by topic: `battery/` (the inverter scripts, incl. Remote Dispatch and its test), `ev/`, `heat_pump/`, `comfort/` (the heating test package), `dashboard/`; index in `examples/README.md` |
-| `energy_planner_extras.yaml`, `add_slot_form.yml`, `Basic_config_card.yml` | HA package + cards for the manual "add slot" form |
+| `energy_planner_extras.yaml`, `add_slot_form.yml` | HA package + card for the manual "add slot" form |
 | `local_deploy.sh` | Copies the component into `~/projects/ha_demo/config` and restarts its docker compose |
 
 ### `planner/`
 
 | File | Role |
 | --- | --- |
-| `__init__.py` | Re-exports each module's `planner()` as `basic_planner`, `cheapest_hours_planner`, `price_peak_planner`, `dynamic_planner`, plus `async_update_forecast`. Note `planner.dynamic_planner` is then the function, not the module (tests use `importlib`) |
-| `basic_planner.py` | N cheapest quarters between earliest charge and earliest discharge time → charge; N most expensive after → discharge; rest pause |
-| `cheapest_hours_planner.py` | N cheapest quarters per calendar day → charge; everything else discharge |
-| `price_peak_planner.py` | `find_charge_periods` / `find_discharge_periods` pick the cheapest / most expensive windows (best first), `remove_overlaps` drops conflicts, `match_charge_discharge_periods` pairs them where `is_profitable` says the spread pays off, `build_schedule` turns pairs into slots. All pure and tested; `plan_day` is the HA glue |
-| `dynamic_planner.py` | WIP planner. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` updates the forecast and the plan (waiting for a calculation already running) and writes one `auto` slot to the plan's end, with manual slots laid over it; without a new plan from the last one (with a warning), without a plan reaching now not at all |
+| `__init__.py` | Re-exports `dynamic_planner` (the module's `planner()`) and `async_update_forecast`. Note `planner.dynamic_planner` is then the function, not the module (tests use `importlib`) |
+| `dynamic_planner.py` | The planner, and the forecast glue. `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]`. `planner()` updates the forecast and the plan (waiting for a calculation already running) and writes one `auto` slot to the plan's end, with manual slots laid over it; without a new plan from the last one (with a warning), without a plan reaching now not at all |
 | `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `discard_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
 | `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores a `plan.Plan` in `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `car_action` |
 | `plan.py` | Pure: `Plan`, the battery plan as one object (per-quarter series parallel to `starts`, canonical units: spot SEK/MWh excl. VAT, SOC %, kW), `index_at`, `value_at` (a series' value at a moment), `run_at` (a `Run` of equal values from now, with `until`), `is_stale` (`STALE_AFTER` 30 min from `finished`, when the plan became available; `updated` is the moment it was planned for), `soc_at` (in the first quarter from `soc_start`, the SOC when planned), `start` / `end` (times compared and added in UTC, so the hour repeated when DST ends works; `quarter_start` / `quarter_end`, the price dicts' UTC keys), `to_attributes` (what the plan sensor publishes). `follow` (the run now, or why not: no plan, plan is old, plan does not cover now) and `action` (the keys every action has: `state`, `source`, `until`, `reason`, `plan_updated`) for the resolvers |
@@ -94,16 +92,15 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 
 ### Config keys (entity ids are `<platform>.energy_planner_<key>`)
 
-- `select`: `planner_state` (`basic`, `cheapest hours`, `dynamic`, `price peak`, `off`),
-  `price_peak_planner_{cheap,expensive,inbetween}_state`, `forecast_load_model`
+- `switch`: `enabled` (on; off: the plan is still made and shown, but the battery
+  action does not follow it, manual slots still run; the car and heat pump actions
+  follow the plan either way)
+- `select`: `forecast_load_model`
   (`profile`, default; `temperature`) and `forecast_pv_calibration` (`daily`, default;
   `hourly`), see "Forecast"
-- `time`: `earliest_charge_time` (22:00), `earliest_discharge_time` (06:00),
-  `ev_ready_time` (06:30)
+- `time`: `ev_ready_time` (06:30)
 - `datetime`: `ev_departure` (a trip, see "Car")
-- `number`: `basic_nr_of_charge_hours`, `basic_nr_of_discharge_hours`,
-  `cheapest_hours_nr_of_charge_hours`, `price_peak_nr_of_charge_hours`,
-  `price_peak_nr_of_discharge_hours`, `price_peak_efficiency_factor` (%),
+- `number`: `battery_efficiency` (%, round trip),
   `max_charge_current`, `max_discharge_current`, `battery_capacity` (Wh),
   `battery_shutdown_soc`, `battery_reserve_soc` (%, default 20: the plan does not
   discharge below it, see "Battery plan"), `battery_max_soc`, `network_cost` (öre/kWh incl. VAT paid on
@@ -135,25 +132,27 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 - **Triggers:** a timer that fires every hour at :31:15 and acts when it is 15:xx
   Stockholm time (after next-day prices are published), and the
   `energy_planner.run_planner` service. Both call `run_planner(hass)` in
-  `__init__.py`, which dispatches on `config["planner_state"]`.
-- **A planner run:** fetch prices → `store_disable_state` → `reset` (all slots off)
-  → `plan_day` (once per day for basic/cheapest hours, once over the whole range
-  for price peak) → `add_manual_slots` → `restore_disable_state` → `update_entities`
-  → `save`.
+  `__init__.py`, which runs the dynamic planner, also while `enabled` is off (only
+  the battery action ignores the `auto` slot then). The rule-based planners were
+  removed (docs/adr/0001-one-planner-no-schedule.md); a house that ran one gets the
+  dynamic planner's slots once HA has started (`migrate.migrate_config`).
+- **A planner run:** update the forecast and the plan → `store_disable_state` →
+  `reset` (all slots off) → one `auto` slot → `add_manual_slots` →
+  `restore_disable_state` → `update_entities` → `save`.
 - **Services:** `add_slot` (appends to `manual_slots` and re-applies them),
-  `run_planner`, `clear_manual_slots` (reruns the planner so the schedule loses them;
-  with the planner off it clears the schedule), `update_forecast`, `update_battery_plan`
+  `run_planner`, `clear_manual_slots` (reruns the planner so the schedule loses
+  them), `update_forecast`, `update_battery_plan`
   (also the button `button.energy_planner_update_battery_plan`).
 - **Forecast:** recalculated at :05 every hour (after the recorder compiles hourly
   statistics), once after HA has started, by the `update_forecast` service and by
   the dynamic planner. Errors are logged and do not stop the timers.
 - **Battery plan:** recalculated every quarter (:00:30, :15:30, …), after each timed
   forecast update, and when tomorrow's prices arrive (`tomorrow_valid`), a setting with
-  `replans` (`planner/settings.py`, incl. `planner_state`) or the tariff
+  `replans` (`planner/settings.py`) or the tariff
   changes, manual slots change, or the
   SOC is `SOC_DRIFT` (5) % from the plan (at most every 5 min). All go through
   `async_request_plan`. The action sensor is rewritten every minute and when slot 1
-  changes.
+  or `enabled` changes.
 - **Entities** are passive views: `update()` reads from `hass.data`, setters write
   back and call `save`.
 
@@ -239,12 +238,12 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
 `battery_optimizer.optimize`, published as `sensor.energy_planner_battery_plan`.
 The plan is not written to the slots, because it changes every quarter. Instead the
 dynamic planner writes one `auto` slot, and `sensor.energy_planner_battery_action`
-resolves what to do now (`battery_action.resolve`): a running slot with a real state
-(manual, or from another planner) wins; an `auto` slot follows the plan (self-use if
-the plan is stale, see `plan.py`, or ends); otherwise self-use. An inverter script follows
-the action sensor (`examples/battery/follow_battery_action.py`). With the dynamic planner, manual
-slots are also forced into the plan (`forced`), so it plans around them; with the other
-planners the plan is a preview and ignores them.
+resolves what to do now (`battery_action.resolve`): a running manual slot wins; an
+`auto` slot follows the plan (self-use if the plan is stale, see `plan.py`, or ends),
+unless `enabled` is off; otherwise self-use. An inverter script follows
+the action sensor (`examples/battery/follow_battery_action.py`). Manual slots are
+also forced into the plan (`forced`), so it plans around them, also while `enabled`
+is off.
 
 - Horizon: the current quarter until the last quarter with both a price and a load
   forecast. Load = forecast profile + planned + reserve; PV = forecast.
@@ -368,7 +367,7 @@ planners the plan is a preview and ignores them.
   run is joint. Plan fields: `ev_kwh`, `ev_missing_kwh`, `ev_missing_cost`.
 - Battery: capacity, shutdown/max SOC, charge/discharge current × the live voltage
   (`battery_voltage_sensor`), SOC (`battery_soc_sensor`), round-trip efficiency
-  `price_peak_efficiency_factor`. About 1 s per day of quarters, run in the executor.
+  `battery_efficiency`. About 1 s per day of quarters, run in the executor.
   The efficiency was measured from the recorder's hourly statistics (Oct 2026): night
   runs of 3 h or more without PV, the battery only charging or only discharging above
   0.8 kW, SOC 15-95%; the Solis AC port energy against the SOC change, charge leg times
@@ -683,13 +682,6 @@ Holidays are not detected.
 - Requires the `nordpool` custom integration for the `nordpool.hourly` service.
 - Nord Pool prices are SEK/MWh excluding VAT; the network settings are öre/kWh
   including VAT (`* 1.25` adds VAT, `* 10` converts öre/kWh to SEK/MWh).
-- Price peak cost model (`is_profitable`): a delivered kWh costs
-  `(charge price * 1.25 + network cost) / efficiency`. Used at home
-  (`discharge`) it is worth `discharge price * 1.25 + network cost`, so the fees only
-  count on the losses; sold (`sell`, `sell-excess`) it is worth
-  `discharge price + network compensation` (no VAT for private sellers).
-- A planning "day" in the basic planner runs from earliest charge time to the next
-  earliest charge time, not midnight to midnight, so it pulls in yesterday's prices.
 
 ## Common changes
 
@@ -700,9 +692,8 @@ Holidays are not detected.
   `settings.get(config, "<key>")` / `settings.number(...)` or a typed group, never
   `config.get` with a default of its own. Defaults are only written to the store when
   the key is missing.
-- **New planner:** add `planner/<name>_planner.py` with `async def planner(hass, ...)`,
-  export it in `planner/__init__.py`, add a branch in `run_planner`
-  (`__init__.py`), and add the option to `planner_state` in `select.py`.
+- **Removed setting or entity:** add it to `migrate.REMOVED_ENTITIES` (or
+  `RENAMED_SETTINGS`), so stored values and registry entries are cleaned up.
 - **New slot state:** update the lists in `select.py`, the validation in
   `add_slot_service`, `services.yaml`, SOC handling in `manual_slots.py`, and the
   consumers in `examples/`.
@@ -712,7 +703,6 @@ Holidays are not detected.
 ```bash
 make install        # uv sync (creates .venv from pyproject.toml + uv.lock)
 make test           # pytest tests/ -v
-make test-basic     # only tests/planner/test_basic_planner.py
 make lint           # ruff check custom_components/energy_planner/ tests/
 make check          # all checks: scripts/check.sh
 make hooks          # enable the git hooks
@@ -727,11 +717,9 @@ make format         # ruff format
 - Ruff rule set is strict (`D`, `S`, `T20`, `N`, `RET`, `SIM`, …): public functions
   need docstrings and `print` is rejected.
 - pytest uses `asyncio_mode = auto` and `pytest-homeassistant-custom-component`.
-  Tests mock `hass` with `MagicMock`, patch `fetch_nordpool_data`, and freeze
-  `dt_utils.now` at 2026-03-12 00:00 Stockholm time (autouse `fixed_now` fixture).
-- The basic and price peak planners, the forecast, the tariff and the options flow
-  have tests. The cheapest hours
-  planner, manual slots and `clear_passed_slots` are untested.
+  Tests mock `hass` with `MagicMock`, patch `fetch_nordpool_data` and patch
+  `dt_utils.now` where the time matters.
+- Manual slots (`add_manual_slots`) are untested.
 - CI: `.github/workflows/validate.yml` (ruff, hassfest, HACS) and `tests.yml`
   (pytest on 3.14 + ruff).
 
@@ -757,7 +745,7 @@ make format         # ruff format
 - Compare and sort instants, never local times in one zone: Python compares those
   by wall clock and ignores `fold`, so the hour repeated when DST ends sorts into
   its copy, and adding a timedelta keeps the wall clock. So slot and manual slot
-  times and the basic and cheapest hours planners' quarters are UTC; the plan's and
+  times are UTC; the plan's and
   the forecast's starts are local and compared by timestamp (`plan.py`). Local time
   is only for calendar logic (day windows, hour of day) and display.
 - Dates and times in `values`, `config` and `manual_slots` are always objects in
@@ -766,7 +754,4 @@ make format         # ruff format
 - An `off` slot can appear in the middle of the list when manual slots leave a gap
   (for example a manual slot before the first planned slot). Unused slots are the
   ones whose start is `None`.
-- The basic planner only plans the current day's window when tomorrow's prices
-  exist or the window started yesterday; with `earliest_charge_time` at 00:00 it
-  plans nothing for today until tomorrow's prices are published.
 - Card labels and some example entity names are in Swedish.

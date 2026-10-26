@@ -8,7 +8,7 @@ from homeassistant.helpers.entity import Entity
 import pytest
 
 from custom_components.energy_planner import datetime as datetime_platform
-from custom_components.energy_planner import number, select, time
+from custom_components.energy_planner import number, select, switch, time
 from custom_components.energy_planner.const import DOMAIN
 from custom_components.energy_planner.planner import settings
 
@@ -50,7 +50,7 @@ def test_battery_in_domain_units():
     battery = settings.battery(
         {
             "battery_capacity": 10000,
-            "price_peak_efficiency_factor": 91,
+            "battery_efficiency": 91,
             "battery_wear_cost": 25,
         }
     )
@@ -107,16 +107,15 @@ def test_reading():
 
 
 def test_replan_entities():
-    """Test that the plan triggers cover every platform, the planner choice too."""
+    """Test that the plan triggers cover every platform."""
     entity_ids = settings.replan_entity_ids()
     assert f"number.{DOMAIN}_battery_reserve_soc" in entity_ids
-    assert f"select.{DOMAIN}_planner_state" in entity_ids
     assert f"time.{DOMAIN}_ev_ready_time" in entity_ids
     assert f"datetime.{DOMAIN}_ev_departure" in entity_ids
     assert f"number.{DOMAIN}_forecast_weekend_reserve" not in entity_ids
 
 
-@pytest.mark.parametrize("platform", [number, select, time, datetime_platform])
+@pytest.mark.parametrize("platform", [number, select, switch, time, datetime_platform])
 async def test_entities_match_the_table(platform):
     """Test that every config entity is a setting and writes the setting's default."""
     hass = MagicMock()

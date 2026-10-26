@@ -92,10 +92,6 @@ clean:
 quick:
 	@uv run pytest tests/ -x --tb=short
 
-# Test specific file
-test-basic:
-	@uv run pytest tests/planner/test_basic_planner.py -v
-
 # CI simulation
 ci:
 	@echo "Running CI pipeline..."

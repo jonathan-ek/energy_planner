@@ -45,18 +45,8 @@ def _number(key: str, default: float, *, replans: bool = False) -> Setting:
 SETTINGS: dict[str, Setting] = {
     setting.key: setting
     for setting in (
-        # The planners
-        Setting("planner_state", "basic", "select", replans=True),
-        Setting("price_peak_planner_cheap_state", "charge", "select"),
-        Setting("price_peak_planner_expensive_state", "discharge", "select"),
-        Setting("price_peak_planner_inbetween_state", "pause", "select"),
-        Setting("earliest_charge_time", dt.time(22, 0), "time"),
-        Setting("earliest_discharge_time", dt.time(6, 0), "time"),
-        _number("basic_nr_of_charge_hours", 4),
-        _number("basic_nr_of_discharge_hours", 12),
-        _number("cheapest_hours_nr_of_charge_hours", 2),
-        _number("price_peak_nr_of_charge_hours", 2),
-        _number("price_peak_nr_of_discharge_hours", 2),
+        # Off: the plan is still made and shown, but the battery does not follow it
+        Setting("enabled", True, "switch"),
         # Set up from the config entry
         Setting("nordpool_entity_id", None),
         # The battery
@@ -69,7 +59,7 @@ SETTINGS: dict[str, Setting] = {
         _number("max_charge_current", 16, replans=True),
         _number("max_discharge_current", 16, replans=True),
         # Round trip, %
-        _number("price_peak_efficiency_factor", 85, replans=True),
+        _number("battery_efficiency", 85, replans=True),
         # öre per kWh taken out
         _number("battery_wear_cost", 20, replans=True),
         Setting("battery_soc_sensor", "sensor.solis_s6_solis_battery_soc"),
@@ -188,7 +178,7 @@ def battery(config: Mapping[str, Any]) -> BatterySettings:
         max_soc=number(config, "battery_max_soc"),
         max_charge_a=number(config, "max_charge_current"),
         max_discharge_a=number(config, "max_discharge_current"),
-        efficiency=number(config, "price_peak_efficiency_factor") / 100,
+        efficiency=number(config, "battery_efficiency") / 100,
         wear_sek_per_kwh=number(config, "battery_wear_cost") / 100,
         soc_sensor=get(config, "battery_soc_sensor"),
         voltage_sensor=get(config, "battery_voltage_sensor"),

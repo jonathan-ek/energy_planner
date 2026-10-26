@@ -4,12 +4,12 @@ Pure functions, no Home Assistant imports. `resolve` combines the current slot (
 1) and the battery plan into one action for the inverter script
 (`sensor.energy_planner_battery_action`):
 
-- An active slot with a real state (a manual slot, or a slot from the basic or price
-  peak planner) wins: source `slot`.
+- An active slot with a real state (a manual slot) wins: source `slot`.
 - An active `auto` slot follows the battery plan: source `plan`. If the plan is
   missing, stale (plan.py) or does not cover now, the battery falls back to
   self-use: source `fallback`.
-- Otherwise (no slot, `off`, disabled) self-use: source `none`.
+- Otherwise (no slot, `off`, disabled) self-use: source `none`. With the planner
+  switched off the glue (battery_plan.current_action) hands over no `auto` slot.
 
 The plan keeps the battery above the reserve SOC. When the battery is at or below it
 anyway (more load than forecast), the plan's `self_use`, `sell_excess` and `hold` turn

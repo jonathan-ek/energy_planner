@@ -604,7 +604,7 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
 
     The plan is recalculated every quarter, so it is not written to the slots; the
     `auto` slot makes sensor.energy_planner_battery_action follow it. Manual slots are
-    laid over it as with the other planners.
+    laid over it.
     """
     await async_update_forecast(hass)
     requested = dt_utils.now()
@@ -616,7 +616,7 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
         _LOGGER.warning("No battery plan, the dynamic planner writes no schedule")
         return
     # Planned for a moment after the request, so on the new forecast. An older one
-    # still replaces another planner's slots: the auto slot follows later plans
+    # still writes the auto slot, which follows later plans
     if plan.updated < requested:
         _LOGGER.warning(
             "No new battery plan, the auto slot ends where the last one does"

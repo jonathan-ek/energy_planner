@@ -31,21 +31,18 @@ from .const import (
     TIME_ENTITIES,
     SLOT_COUNT,
 )
+from .migrate import migrate_config, remove_entities
 from .planner import settings
 from .planner.ev import is_plugged as ev_is_plugged
 from .planner.fuse_guard import config_entities, update_guard
-from .planner.utils import reset
 from .planner import (
     async_request_plan,
     async_update_forecast,
     write_plan_sensors,
-    basic_planner,
     dynamic_planner,
-    cheapest_hours_planner,
     add_manual_slots,
     clear_passed_slots,
     update_entities,
-    price_peak_planner,
 )
 from .store import async_save_to_store, async_load_from_store
 
@@ -91,10 +88,15 @@ async def async_setup_data_structure(hass: HomeAssistant):
     }
     hass.data[DOMAIN]["values"] = await async_load_from_store(hass, "values")
     hass.data[DOMAIN]["config"] = await async_load_from_store(hass, "config")
+    original = dict(hass.data[DOMAIN]["config"])
+    # A removed planner's slots are replaced once Home Assistant has started
+    hass.data[DOMAIN]["replan_migrated"] = migrate_config(hass.data[DOMAIN]["config"])
     hass.data[DOMAIN]["manual_slots"] = (
         await async_load_from_store(hass, "manual_slots") or []
     )
     parse_stored_data(hass)
+    if hass.data[DOMAIN]["config"] != original:
+        await async_save_to_store(hass, "config", hass.data[DOMAIN]["config"])
 
 
 def _parse_utc(value: str) -> dt.datetime | None:
@@ -111,9 +113,8 @@ def parse_stored_data(hass: HomeAssistant):
         if type(values.get(key)) is str:
             values[key] = _parse_utc(values[key])
     config = hass.data[DOMAIN]["config"]
-    for key in ["earliest_charge_time", "earliest_discharge_time", "ev_ready_time"]:
-        if type(config.get(key)) is str:
-            config[key] = dt.time.fromisoformat(config[key])
+    if type(config.get("ev_ready_time")) is str:
+        config["ev_ready_time"] = dt.time.fromisoformat(config["ev_ready_time"])
     if type(config.get("ev_departure")) is str:
         config["ev_departure"] = dt_utils.parse_datetime(config["ev_departure"])
     for slot in hass.data[DOMAIN]["manual_slots"]:
@@ -123,43 +124,22 @@ def parse_stored_data(hass: HomeAssistant):
 
 
 async def run_planner(hass: HomeAssistant) -> None:
-    """Run the selected planner."""
-    planner_state = settings.get(hass.data[DOMAIN]["config"], "planner_state")
-    if planner_state == "off":
-        _LOGGER.info("Planner is off")
-        return
-    if planner_state == "basic":
-        _LOGGER.info("Running basic planner")
-        await basic_planner(hass)
-        return
-    if planner_state == "cheapest hours":
-        _LOGGER.info("Running cheapest hours planner")
-        await cheapest_hours_planner(hass)
-        return
-    if planner_state == "price peak":
-        _LOGGER.info("Running price peak planner")
-        await price_peak_planner(hass)
-        return
-    if planner_state == "dynamic":
-        _LOGGER.info("Running dynamic planner")
-        await dynamic_planner(hass)
-        return
-    raise ValueError("Invalid planner state")
+    """Run the planner: one `auto` slot, also while it is turned off.
+
+    Off only stops the battery from following the `auto` slot
+    (battery_plan.current_action), so turning it on takes effect at once.
+    """
+    await dynamic_planner(hass)
 
 
 async def clear_manual_slots(hass: HomeAssistant) -> None:
     """Drop the manual slots and rebuild the schedule without them.
 
     The manual slots are also written into the schedule, so emptying the list alone
-    would leave them running there. The selected planner rebuilds it; with the
-    planner off the schedule holds only manual slots and edits, so it is cleared.
+    would leave them running there.
     """
     hass.data[DOMAIN]["manual_slots"] = []
-    if settings.get(hass.data[DOMAIN]["config"], "planner_state") == "off":
-        await reset(hass)
-        await update_entities(hass)
-    else:
-        await run_planner(hass)
+    await run_planner(hass)
     await hass.data[DOMAIN]["save"]()
     await async_request_plan(hass, "manual slots cleared")
 
@@ -252,6 +232,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     hass.data[DOMAIN]["config"]["entry_id"] = entry.entry_id
     hass.data[DOMAIN]["config"]["nordpool_entity_id"] = entry.data["nordpool_entity_id"]
     hass.data[DOMAIN]["options"] = dict(entry.options)
+    remove_entities(hass)
 
     async def options_updated(hass: HomeAssistant, entry: ConfigEntry):
         # Read by get_tariff, no reload needed
@@ -295,6 +276,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         async_track_utc_time_change(hass, update_forecast, minute=5, second=0)
     )
     entry.async_on_unload(async_at_started(hass, update_forecast))
+
+    async def replace_migrated_slots(*_):
+        if hass.data[DOMAIN].pop("replan_migrated", False):
+            _LOGGER.info("Replacing the slots of a removed planner")
+            await run_planner(hass)
+
+    entry.async_on_unload(async_at_started(hass, replace_migrated_slots))
 
     async def forecast_setting_changed(event: Event[EventStateChangedData]):
         old, new = event.data["old_state"], event.data["new_state"]
@@ -426,7 +414,11 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
     entry.async_on_unload(
         async_track_state_change_event(
             hass,
-            [f"select.{DOMAIN}_slot_1_state", f"switch.{DOMAIN}_slot_1_active"],
+            [
+                f"select.{DOMAIN}_slot_1_state",
+                f"switch.{DOMAIN}_slot_1_active",
+                f"switch.{DOMAIN}_enabled",
+            ],
             slot_changed,
         )
     )

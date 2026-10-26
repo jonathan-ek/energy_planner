@@ -12,7 +12,7 @@ cards:
         name: Batteri min SOC
       - entity: number.energy_planner_battery_max_soc
         name: Batteri max SOC
-      - entity: select.energy_planner_planner_state
+      - entity: switch.energy_planner_enabled
     title: Inställningar
   - type: entities
     entities:
@@ -39,22 +39,6 @@ cards:
         - entity: input_button.energy_planner_extras_add_slot
           name: Spara
     title: Manuella Slots
-  - type: entities
-    entities:
-      - entity: number.energy_planner_basic_nr_of_charge_hours
-        name: Laddningstimmar
-      - entity: number.energy_planner_basic_nr_of_discharge_hours
-        name: Urladdningstimmar
-      - entity: time.energy_planner_earliest_charge_time
-        name: Första tillåtna laddningstid
-      - entity: time.energy_planner_earliest_discharge_time
-        name: Första tillåtna urladdningstid
-    title: Basic inställningar
-  - type: entities
-    entities:
-      - entity: number.energy_planner_cheapest_hours_nr_of_charge_hours
-        name: Laddningstimmar
-    title: Billigaste timmar inställningar
   - type: entities
     entities:
       - entity: input_button.energy_planner_extras_run

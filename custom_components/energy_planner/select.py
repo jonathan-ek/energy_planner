@@ -54,67 +54,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerSelectEntity(
             hass,
             {
-                "id": "planner_state",
-                "options": ["basic", "cheapest hours", "dynamic", "price peak", "off"],
-                "name": "Planner state",
-                "enabled": True,
-                "data_store": "config",
-            },
-        ),
-        EnergyPlannerSelectEntity(
-            hass,
-            {
-                "id": "price_peak_planner_cheap_state",
-                "options": [
-                    "charge",
-                    "discharge",
-                    "sell",
-                    "sell-excess",
-                    "discard-excess",
-                    "pause",
-                ],
-                "name": "Price peak planner cheap hours state",
-                "enabled": True,
-                "data_store": "config",
-            },
-        ),
-        EnergyPlannerSelectEntity(
-            hass,
-            {
-                "id": "price_peak_planner_expensive_state",
-                "options": [
-                    "charge",
-                    "discharge",
-                    "sell",
-                    "sell-excess",
-                    "discard-excess",
-                    "pause",
-                ],
-                "name": "Price peak planner expensive hours state",
-                "enabled": True,
-                "data_store": "config",
-            },
-        ),
-        EnergyPlannerSelectEntity(
-            hass,
-            {
-                "id": "price_peak_planner_inbetween_state",
-                "options": [
-                    "charge",
-                    "discharge",
-                    "sell",
-                    "sell-excess",
-                    "discard-excess",
-                    "pause",
-                ],
-                "name": "Price peak planner inbetween hours state",
-                "enabled": True,
-                "data_store": "config",
-            },
-        ),
-        EnergyPlannerSelectEntity(
-            hass,
-            {
                 # profile: the load profile alone; temperature: corrected for the
                 # outdoor temperature, for houses heated with electricity
                 "id": "forecast_load_model",

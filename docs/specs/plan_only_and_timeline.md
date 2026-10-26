@@ -161,3 +161,11 @@ first. Oscar and the fifth user stay on `v-last-slot-planners` until they are mo
 - A readings snapshot and resolving all actions at one moment (candidate 5).
 - Typed runtime data instead of `hass.data` (candidate 6).
 - Moving the fifth user to the optimizer.
+
+## Left open after the reviews
+
+Findings from the code reviews between the steps that were not fixed, and why.
+
+- Step 1: `examples/energi_dashboard.yaml` (the owner's dashboard copy, untracked and
+  not part of these commits) still lists the removed entities. Update it with the
+  owner's dashboard when the houses are upgraded.
