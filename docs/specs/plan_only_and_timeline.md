@@ -191,4 +191,5 @@ Findings from the code reviews between the steps that were not fixed, and why.
 - Step 4: the glue tests (`test_forecast_update.py`) still patch the fetches to test
   the wiring end to end; the forecast's behaviour is tested on `build_forecast`
   (`test_build_forecast.py`).
-
+- Step 5: nothing left open. A ready time in the hour skipped when DST starts means
+  the same time in summer time an hour later (`timeline.at_local`).

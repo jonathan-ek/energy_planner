@@ -379,7 +379,9 @@ def ev_plugged(hass: HomeAssistant) -> bool:
     return ev.is_plugged(state.state if state is not None else None)
 
 
-def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle, EvPlan] | tuple[None, None]:
+def _vehicle(
+    hass: HomeAssistant, quarters: Timeline
+) -> tuple[Vehicle, EvPlan] | tuple[None, None]:
     """Return the car to plan with the battery, and its need as the plan publishes it.
 
     The `EvPlan`'s charging is filled in from the optimizer's result.
@@ -393,12 +395,12 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle, EvPlan] | tuple[None
     a car that is not full is never paused.
     """
     car = settings.car(hass.data[DOMAIN]["config"])
-    if not starts or car is None or not ev_plugged(hass):
+    if not len(quarters) or car is None or not ev_plugged(hass):
         return None, None
     capacity = car.battery_kwh
     ready = car.ready_time
     departure = car.departure
-    target = ev.ready_time(starts[0], ready, departure)
+    target = ev.ready_time(quarters.local(0), ready, departure)
     soc = settings.reading(hass, car.soc_sensor)
     limit = settings.reading(hass, car.charge_limit_sensor)
     if soc is not None and limit is not None:
@@ -423,8 +425,8 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle, EvPlan] | tuple[None
     vehicle = Vehicle(
         powers_kw=charger_powers(min_kw, max_kw) if min_kw > 0 else (max_kw,),
         need_kwh=need,
-        plugged=[True] * len(starts),
-        deadline=ev.deadline_index(starts, ready, departure),
+        plugged=[True] * len(quarters),
+        deadline=ev.deadline_index(quarters, ready, departure),
     )
     return vehicle, EvPlan(
         need_kwh=round(need, 2),
@@ -602,7 +604,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         int(settings.number(config, "grid_import_limit_end")),
         fuse_power(settings.number(config, "main_fuse")),
     )
-    vehicle, car = _vehicle(hass, starts)
+    planned = Timeline.of(starts)
+    vehicle, car = _vehicle(hass, planned)
     capacity = settings.battery(config).capacity_kwh
     # Manual slots, planned around; also while the planner is off, as they still run
     forced, forced_soc = manual.forced(
@@ -659,7 +662,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["plan"] = Plan(
         updated=now,
         finished=dt_utils.now(),
-        timeline=Timeline.of(plan.starts),
+        timeline=planned,
         modes=tuple(plan.modes),
         soc_start=round(battery.soc_kwh / capacity * 100, 1),
         soc=tuple(round(kwh / capacity * 100, 1) for kwh in plan.soc),

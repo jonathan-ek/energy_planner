@@ -20,11 +20,12 @@ departure (`datetime.energy_planner_ev_departure`, for a trip) comes first.
 """
 
 import datetime as dt
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 from .plan import Plan, action, follow
 from .price_estimate import is_offday
+from .timeline import Timeline, at_local
 
 # Charger states that mean no car (others, e.g. Zaptec's connected_requesting,
 # connected_charging, connected_finished, mean plugged in)
@@ -93,39 +94,32 @@ def ready_time(
     before the next working morning. A departure (a trip) after first wins when it
     is earlier.
     """
+    tz = first.tzinfo or dt.UTC
+    now = first.astimezone(dt.UTC)
     day = first.date()
-    target = dt.datetime.combine(day, ready, first.tzinfo)
-    # Timestamps: local times in the hour repeated when DST ends compare equal
-    while target.timestamp() <= first.timestamp() or is_offday(day):
+    # Instants (UTC): local times compare by wall clock (see timeline.py)
+    target = at_local(day, ready, tz)
+    while target <= now or is_offday(day):
         day += dt.timedelta(days=1)
-        target = dt.datetime.combine(day, ready, first.tzinfo)
-    # Timestamps: a departure in the hour repeated when DST ends is not taken as
-    # the other 02:xx
-    if (
-        departure is not None
-        and first.timestamp() < departure.timestamp() < target.timestamp()
-    ):
-        return departure
-    return target
+        target = at_local(day, ready, tz)
+    if departure is not None and now < departure.astimezone(dt.UTC) < target:
+        # Local like the ready time (the departure is stored in UTC)
+        return departure.astimezone(tz)
+    return target.astimezone(tz)
 
 
 def deadline_index(
-    starts: Sequence[dt.datetime],
+    quarters: Timeline,
     ready: dt.time,
     departure: dt.datetime | None = None,
 ) -> int:
     """Return the index of the first quarter at or after ready_time.
 
-    len(starts) when it is past the end.
+    The number of quarters when it is past the end.
     """
-    if not starts:
+    if not len(quarters):
         return 0
-    target = ready_time(starts[0], ready, departure)
-    deadline = target.timestamp()
-    return next(
-        (i for i, start in enumerate(starts) if start.timestamp() >= deadline),
-        len(starts),
-    )
+    return quarters.first_from(ready_time(quarters.local(0), ready, departure))
 
 
 def ev_action(plan: Plan | None, now: dt.datetime, plugged: bool) -> dict:

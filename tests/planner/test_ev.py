@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from custom_components.energy_planner.planner import ev
+from custom_components.energy_planner.planner.timeline import Timeline
 
 from .plans import make_plan
 
@@ -61,15 +62,19 @@ def test_need_from_soc():
     assert ev.need_from_soc(85, 80, 75) == 0.0
 
 
+def quarters(start, count):
+    """Return `count` quarters from `start`."""
+    return Timeline.between(start, start + dt.timedelta(minutes=15 * count), TZ)
+
+
 def test_deadline_is_the_next_ready_time():
     """Test that the deadline is the coming morning's ready time."""
-    evening = dt.datetime(2026, 10, 13, 17, 0, tzinfo=TZ)  # Tuesday
-    starts = [evening + dt.timedelta(minutes=15 * i) for i in range(96)]
-    index = ev.deadline_index(starts, dt.time(6, 30))
-    assert starts[index] == dt.datetime(2026, 10, 14, 6, 30, tzinfo=TZ)
-    early = [s - dt.timedelta(hours=15) for s in starts]  # from 02:00
-    assert early[ev.deadline_index(early, dt.time(6, 30))].hour == 6
-    assert ev.deadline_index(starts[:8], dt.time(6, 30)) == 8
+    evening = quarters(dt.datetime(2026, 10, 13, 17, 0, tzinfo=TZ), 96)  # Tuesday
+    index = ev.deadline_index(evening, dt.time(6, 30))
+    assert evening.local(index) == dt.datetime(2026, 10, 14, 6, 30, tzinfo=TZ)
+    early = quarters(dt.datetime(2026, 10, 14, 2, 0, tzinfo=TZ), 96)
+    assert early.local(ev.deadline_index(early, dt.time(6, 30))).hour == 6
+    assert ev.deadline_index(evening[:8], dt.time(6, 30)) == 8
 
 
 def test_ready_on_working_days_only():
@@ -85,8 +90,7 @@ def test_ready_on_working_days_only():
     assert ev.ready_time(
         dt.datetime(2026, 12, 23, 18, 0, tzinfo=TZ), dt.time(6, 30)
     ) == dt.datetime(2026, 12, 28, 6, 30, tzinfo=TZ)
-    starts = [friday + dt.timedelta(minutes=15 * i) for i in range(96)]
-    assert ev.deadline_index(starts, dt.time(6, 30)) == len(starts)
+    assert ev.deadline_index(quarters(friday, 96), dt.time(6, 30)) == 96
 
 
 def test_departure_comes_first():
@@ -94,8 +98,13 @@ def test_departure_comes_first():
     friday = dt.datetime(2026, 10, 9, 17, 0, tzinfo=TZ)
     trip = dt.datetime(2026, 10, 10, 9, 0, tzinfo=TZ)
     assert ev.ready_time(friday, dt.time(6, 30), trip) == trip
-    starts = [friday + dt.timedelta(minutes=15 * i) for i in range(96)]
-    assert starts[ev.deadline_index(starts, dt.time(6, 30), trip)] == trip
+    # Stored in UTC, published in local time
+    stored = trip.astimezone(dt.UTC)
+    assert ev.ready_time(friday, dt.time(6, 30), stored).isoformat() == (
+        trip.isoformat()
+    )
+    weekend = quarters(friday, 96)
+    assert weekend.local(ev.deadline_index(weekend, dt.time(6, 30), trip)) == trip
     # Past, or after the working morning: ignored
     monday = dt.datetime(2026, 10, 12, 6, 30, tzinfo=TZ)
     for departure in (friday - dt.timedelta(hours=1), monday + dt.timedelta(days=1)):
@@ -153,8 +162,8 @@ def test_action_has_the_plans_need():
 def test_departure_in_the_repeated_hour():
     """Test that a departure in the second 02:xx when DST ends is not the first."""
     utc = dt.datetime(2026, 10, 24, 22, 0, tzinfo=dt.UTC)  # 00:00 CEST
-    starts = [(utc + dt.timedelta(minutes=15 * i)).astimezone(TZ) for i in range(24)]
+    night = Timeline.between(utc, utc + dt.timedelta(hours=6), TZ)
     # 02:30 CET: the second 02:30, 3.5 h after the first quarter
     departure = dt.datetime(2026, 10, 25, 1, 30, tzinfo=dt.UTC).astimezone(TZ)
     assert departure.fold == 1
-    assert ev.deadline_index(starts, dt.time(6, 30), departure) == 14
+    assert ev.deadline_index(night, dt.time(6, 30), departure) == 14
