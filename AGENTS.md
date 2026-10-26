@@ -79,7 +79,7 @@ in `values`, each mirrored by an entity `<platform>.energy_planner_<key>`:
 
 | Key | Platform | Notes |
 | --- | --- | --- |
-| `slot_{i}_date_time_start` | `datetime` | tz-aware; stored as ISO string, parsed back on load by `parse_stored_data` |
+| `slot_{i}_date_time_start` | `datetime` | UTC in memory (`write_schedule`, `parse_stored_data` on load, the entity and `add_slot` convert); stored as ISO string, shown in local time |
 | `slot_{i}_state` | `select` | `auto` (follow the battery plan), `charge`, `discharge`, `sell`, `sell-excess`, `discard-excess`, `pause`, `off` |
 | `slot_{i}_soc` | `number` | target SOC % |
 | `slot_{i}_active` | `switch` | user can disable a slot |
@@ -749,6 +749,12 @@ make format         # ruff format
 
 - Manual slot times and `add_slot` input are interpreted in HA's configured time
   zone. `Europe/Stockholm` is only hardcoded for the Nord Pool publish time.
+- Compare and sort instants, never local times in one zone: Python compares those
+  by wall clock and ignores `fold`, so the hour repeated when DST ends sorts into
+  its copy, and adding a timedelta keeps the wall clock. So slot and manual slot
+  times and the basic and cheapest hours planners' quarters are UTC; the plan's and
+  the forecast's starts are local and compared by timestamp (`plan.py`). Local time
+  is only for calendar logic (day windows, hour of day) and display.
 - Dates and times in `values`, `config` and `manual_slots` are always objects in
   memory (`parse_stored_data` converts them on load), so do not add string checks.
   The `nordpool_values` price cache is the exception and still holds ISO strings.

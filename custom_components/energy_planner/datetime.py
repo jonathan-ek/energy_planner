@@ -3,6 +3,7 @@ import logging
 
 from homeassistant.components.datetime import DateTimeEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.util import dt as dt_utils
 
 from .const import DOMAIN, SLOT_COUNT, DATE_TIME_ENTITIES
 from .planner import settings
@@ -100,6 +101,8 @@ class EnergyPlannerDateTimeEntity(DateTimeEntity):
 
     async def async_set_value(self, value: datetime.datetime) -> None:
         """Update the current value."""
+        # UTC like the planners' slot times; HA passes them in its own time zone
+        value = dt_utils.as_utc(value)
         self._attr_native_value = value
         self._hass.data[DOMAIN][self.data_store][self.id] = value
         await self._hass.data[DOMAIN]["save"]()
@@ -112,5 +115,5 @@ class EnergyPlannerDateTimeEntity(DateTimeEntity):
             return super()._stringify_state(available)
         if self._attr_native_value is None:
             return "unknown"
-        val = self._attr_native_value
+        val = dt_utils.as_local(self._attr_native_value)
         return f"{val.day}/{val.month} {val.strftime('%H:%M')}"

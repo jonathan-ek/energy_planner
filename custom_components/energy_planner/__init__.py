@@ -96,13 +96,19 @@ async def async_setup_data_structure(hass: HomeAssistant):
     parse_stored_data(hass)
 
 
+def _parse_utc(value: str) -> dt.datetime | None:
+    """Parse a stored time to UTC, like the planners write the slots."""
+    parsed = dt_utils.parse_datetime(value)
+    return dt_utils.as_utc(parsed) if parsed is not None else None
+
+
 def parse_stored_data(hass: HomeAssistant):
     """Convert dates and times, which are stored as strings, back to objects."""
     values = hass.data[DOMAIN]["values"]
     for i in range(1, SLOT_COUNT + 1):
         key = f"slot_{i}_date_time_start"
         if type(values.get(key)) is str:
-            values[key] = dt_utils.parse_datetime(values[key])
+            values[key] = _parse_utc(values[key])
     config = hass.data[DOMAIN]["config"]
     for key in ["earliest_charge_time", "earliest_discharge_time", "ev_ready_time"]:
         if type(config.get(key)) is str:
@@ -112,7 +118,7 @@ def parse_stored_data(hass: HomeAssistant):
     for slot in hass.data[DOMAIN]["manual_slots"]:
         for key in ["start", "end"]:
             if type(slot.get(key)) is str:
-                slot[key] = dt_utils.parse_datetime(slot[key])
+                slot[key] = _parse_utc(slot[key])
 
 
 async def run_planner(hass: HomeAssistant) -> None:
@@ -149,12 +155,11 @@ async def async_setup(hass: HomeAssistant, config):
     async def add_slot_service(call: ServiceCall) -> None:
         """Service to add a slot."""
         try:
-            start_datetime = dt_utils.as_local(
+            # UTC like the slots; a time without an offset is in HA's time zone
+            start_datetime = dt_utils.as_utc(
                 dt.datetime.fromisoformat(call.data["start"])
             )
-            end_datetime = dt_utils.as_local(
-                dt.datetime.fromisoformat(call.data["end"])
-            )
+            end_datetime = dt_utils.as_utc(dt.datetime.fromisoformat(call.data["end"]))
             state = call.data.get("state")
             soc = call.data.get("soc")
             if start_datetime > end_datetime:

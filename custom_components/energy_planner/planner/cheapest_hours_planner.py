@@ -65,7 +65,7 @@ async def plan_day(hass: HomeAssistant, nordpool_values: list[dict], config: dic
             "start": schedule[-1]["end"]
             if len(schedule) > 0
             else config["start_of_day"],
-            "end": config["start_of_day"] + dt.timedelta(days=1),
+            "end": config["end_of_day"],
             "state": "discharge",
             "soc": min_soc,
         }
@@ -76,6 +76,18 @@ async def plan_day(hass: HomeAssistant, nordpool_values: list[dict], config: dic
     schedule = [x for x in schedule if x["end"] > now]
     _LOGGER.info("schedule: %s", schedule)
     write_schedule(hass, schedule)
+
+
+def _day(start_of_day: dt.datetime, nr_of_charge_hours: float) -> dict:
+    """Return plan_day's config for the local day from start_of_day, in UTC.
+
+    The end is a day later on the wall clock, so 23 or 25 h when DST changes.
+    """
+    return {
+        "start_of_day": dt_utils.as_utc(start_of_day),
+        "end_of_day": dt_utils.as_utc(start_of_day + dt.timedelta(days=1)),
+        "nr_of_charge_hours": nr_of_charge_hours,
+    }
 
 
 async def planner(hass: HomeAssistant, *args, **kwargs):
@@ -115,14 +127,12 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
         second=0,
         microsecond=0,
     )
-    config = {
-        "start_of_day": start_of_day,
-        "nr_of_charge_hours": nr_of_charge_hours,
-    }
+    config = _day(start_of_day, nr_of_charge_hours)
     today_data = [
         {
-            "start": parse_datetime(x["start"], zone),
-            "end": parse_datetime(x["end"], zone),
+            # UTC: in local time the hour repeated when DST ends sorts into its copy
+            "start": parse_datetime(x["start"], dt.UTC),
+            "end": parse_datetime(x["end"], dt.UTC),
             "value": x["value"],
         }
         for x in [*yesterday, *today]
@@ -145,14 +155,11 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
             )
         )
 
-        config = {
-            "start_of_day": start_of_day,
-            "nr_of_charge_hours": nr_of_charge_hours,
-        }
+        config = _day(start_of_day, nr_of_charge_hours)
         tomorrow_data = [
             {
-                "start": parse_datetime(x["start"], zone),
-                "end": parse_datetime(x["end"], zone),
+                "start": parse_datetime(x["start"], dt.UTC),
+                "end": parse_datetime(x["end"], dt.UTC),
                 "value": x["value"],
             }
             for x in [*today, *tomorrow]

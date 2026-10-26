@@ -96,7 +96,8 @@ def _action(
 
 def _current(kwh: float, until: dt.datetime, now: dt.datetime, battery, limit):
     """Return the battery current in A that moves `kwh` by `until`, at most `limit`."""
-    hours = max((until - now).total_seconds() / 3600, 1 / 60)
+    # Timestamps: local times in the hour repeated when DST ends subtract by wall clock
+    hours = max((until.timestamp() - now.timestamp()) / 3600, 1 / 60)
     if kwh <= 0 or battery.voltage <= 0:
         return 0
     return min(math.ceil(kwh / hours * 1000 / battery.voltage), int(limit))
@@ -186,5 +187,6 @@ def resolve(
         mode=SLOT_MODES.get(slot.state),
         soc=round(slot.soc),
         current_a=int(current.get(slot.state, 0)),
-        until=slot.end,
+        # Slot times are kept in UTC; published in local time like the plan's
+        until=slot.end.astimezone(now.tzinfo) if slot.end else None,
     )

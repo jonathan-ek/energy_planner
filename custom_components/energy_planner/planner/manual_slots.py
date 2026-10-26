@@ -1,3 +1,4 @@
+import datetime as dt
 import logging
 
 from homeassistant.core import HomeAssistant
@@ -50,10 +51,9 @@ async def shift_slots_back(hass: HomeAssistant, start_index: int, steps: int = 1
 
 
 def slot_start(hass: HomeAssistant, index: int):
-    """Return the start of a slot in local time, None if unused or out of range."""
+    """Return the start of a slot in UTC, None if unused or out of range."""
     return parse_datetime(
-        hass.data[DOMAIN]["values"].get(f"slot_{index}_date_time_start"),
-        dt_utils.DEFAULT_TIME_ZONE,
+        hass.data[DOMAIN]["values"].get(f"slot_{index}_date_time_start"), dt.UTC
     )
 
 
@@ -61,8 +61,9 @@ async def add_manual_slots(hass: HomeAssistant):
     """Add manual slots."""
     _LOGGER.info("Adding slot")
     for s in hass.data[DOMAIN]["manual_slots"]:
-        start = parse_datetime(s["start"], dt_utils.DEFAULT_TIME_ZONE)
-        end = parse_datetime(s["end"], dt_utils.DEFAULT_TIME_ZONE)
+        # UTC, like the slots (write_schedule)
+        start = parse_datetime(s["start"], dt.UTC)
+        end = parse_datetime(s["end"], dt.UTC)
         if start >= end:
             continue
         if end <= dt_utils.now():

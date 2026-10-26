@@ -104,7 +104,11 @@ async def reset(hass: HomeAssistant):
 
 
 def write_schedule(hass: HomeAssistant, schedule: list[dict]):
-    """Write schedule to the first free slots, followed by a terminating off slot."""
+    """Write schedule to the first free slots, followed by a terminating off slot.
+
+    Slot times are kept in UTC: local times in one zone compare by wall clock, so the
+    hour repeated when DST ends would sort and match its own copy.
+    """
     values = hass.data[DOMAIN]["values"]
     index = 1
     while index <= SLOT_COUNT and values[f"slot_{index}_state"] != "off":
@@ -119,24 +123,29 @@ def write_schedule(hass: HomeAssistant, schedule: list[dict]):
         )
         schedule = schedule[:free_slots]
     for i, slot in enumerate(schedule):
-        values[f"slot_{index + i}_date_time_start"] = slot["start"]
+        values[f"slot_{index + i}_date_time_start"] = dt_utils.as_utc(slot["start"])
         values[f"slot_{index + i}_state"] = slot["state"]
         values[f"slot_{index + i}_soc"] = slot["soc"]
         values[f"slot_{index + i}_active"] = True
     if len(schedule) > 0:
-        values[f"slot_{index + len(schedule)}_date_time_start"] = schedule[-1]["end"]
+        values[f"slot_{index + len(schedule)}_date_time_start"] = dt_utils.as_utc(
+            schedule[-1]["end"]
+        )
         values[f"slot_{index + len(schedule)}_state"] = "off"
         values[f"slot_{index + len(schedule)}_active"] = False
 
 
 def parse_datetime(val, zone=None):
-    """Parse datetime."""
+    """Parse a datetime, converted to `zone` if given.
+
+    A time without an offset is in HA's time zone.
+    """
     if zone is None:
         return dt_utils.parse_datetime(val) if type(val) is str else val
     tmp = dt.datetime.fromisoformat(val) if type(val) is str else val
     if tmp is None:
         return None
-    return tmp.astimezone(zone)
+    return dt_utils.as_utc(tmp).astimezone(zone)
 
 
 async def update_entities(hass: HomeAssistant, values=True, config=False):

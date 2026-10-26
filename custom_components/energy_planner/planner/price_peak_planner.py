@@ -1,3 +1,4 @@
+import datetime as dt
 import logging
 
 
@@ -462,8 +463,9 @@ async def planner(hass: HomeAssistant, *args, **kwargs):
 
     data = [
         {
-            "start": parse_datetime(x["start"], zone),
-            "end": parse_datetime(x["end"], zone),
+            # UTC: in local time the hour repeated when DST ends sorts into its copy
+            "start": parse_datetime(x["start"], dt.UTC),
+            "end": parse_datetime(x["end"], dt.UTC),
             "value": x["value"],
         }
         for x in days
