@@ -30,7 +30,7 @@ from .const import (
 )
 from .migrate import migrate_config, migrate_values, remove_entities
 from .planner import manual, settings
-from .planner.plan import quarter_start
+from .planner.timeline import quarter_start
 from .planner.ev import is_plugged as ev_is_plugged
 from .planner.fuse_guard import config_entities, update_guard
 from .planner import (

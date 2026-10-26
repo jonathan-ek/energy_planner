@@ -5,40 +5,27 @@ optimizer's result and stores it in `hass.data[DOMAIN]["plan"]`; the resolvers
 (battery_action.py, ev.py, heat_pump.py) ask it what to do at a moment, and
 `to_attributes` gives the plan sensor its attributes.
 
-Per-quarter series are tuples parallel to `starts`, each quarter 15 minutes from its
-start. A run is the stretch of equal values in a series from now on: the battery's
-mode, the heat pump on/off, the car charging or not. A plan is stale once it became
-available (`finished`) more than `STALE_AFTER` ago; the devices then fall back.
+Per-quarter series are tuples parallel to the plan's `timeline` (timeline.py, the
+quarters as UTC instants). A run is the stretch of equal values in a series from now on:
+the battery's mode, the heat pump on/off, the car charging or not. A plan is stale once
+it became available (`finished`) more than `STALE_AFTER` ago; the devices then fall
+back.
 
-Times are compared and added in UTC: aware datetimes in one zone compare by wall
-clock, so the hour repeated when daylight saving time ends would look unsorted.
+Moments are looked up in the timeline, so the hour repeated when daylight saving time
+ends works; `Run.until` is local time, for display.
 """
 
-from bisect import bisect_right
 from collections.abc import Callable, Sequence
 import dataclasses
 import datetime as dt
 import functools
 from typing import Any
 
-QUARTER = dt.timedelta(minutes=15)
+from .timeline import Timeline
+
 # Older plans are not followed
 STALE_AFTER = dt.timedelta(minutes=30)
 VAT = 1.25
-
-
-def quarter_start(moment: dt.datetime) -> dt.datetime:
-    """Return the start of the quarter containing `moment`, in UTC.
-
-    The key of the price dicts (battery_plan._prices), so lookups use this too.
-    """
-    utc = moment.astimezone(dt.UTC)
-    return utc.replace(minute=utc.minute - utc.minute % 15, second=0, microsecond=0)
-
-
-def quarter_end(start: dt.datetime) -> dt.datetime:
-    """Return the end of the quarter from `start`, also over a DST change."""
-    return (start.astimezone(dt.UTC) + QUARTER).astimezone(start.tzinfo)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -48,7 +35,7 @@ class Run:
     value: Any
     index: int
     last: int
-    until: dt.datetime  # the end of the last quarter
+    until: dt.datetime  # the end of the last quarter, local time
 
 
 @dataclasses.dataclass(frozen=True)
@@ -69,7 +56,7 @@ class Plan:
 
     updated: dt.datetime  # the moment it was planned for
     finished: dt.datetime  # when it became available
-    starts: tuple[dt.datetime, ...]
+    timeline: Timeline
     modes: tuple[str, ...]
     soc_start: float  # % when it was planned (`updated`)
     soc: tuple[float, ...]  # % at the end of each quarter
@@ -99,27 +86,9 @@ class Plan:
     manual: tuple[str | None, ...] = ()
     manual_soc: tuple[float | None, ...] = ()
 
-    @property
-    def start(self) -> dt.datetime:
-        """Return the start of the first quarter."""
-        return self.starts[0]
-
-    @property
-    def end(self) -> dt.datetime:
-        """Return the end of the last quarter."""
-        return quarter_end(self.starts[-1])
-
-    @functools.cached_property
-    def _timestamps(self) -> tuple[float, ...]:
-        return tuple(s.timestamp() for s in self.starts)
-
     def index_at(self, moment: dt.datetime) -> int | None:
         """Return the quarter containing `moment`, None outside the plan."""
-        time = moment.timestamp()
-        index = bisect_right(self._timestamps, time) - 1
-        if index < 0 or time >= self._timestamps[index] + QUARTER.total_seconds():
-            return None
-        return index
+        return self.timeline.index_at(moment)
 
     def value_at(self, moment: dt.datetime, values: Sequence[Any]) -> Any:
         """Return the value of a series of this plan at `moment`, None outside it."""
@@ -137,7 +106,7 @@ class Plan:
         last = index
         while last + 1 < len(values) and values[last + 1] == values[index]:
             last += 1
-        return Run(values[index], index, last, quarter_end(self.starts[last]))
+        return Run(values[index], index, last, self.timeline.local_end(last))
 
     def is_stale(self, now: dt.datetime) -> bool:
         """Return whether the plan is too old to follow."""
@@ -153,11 +122,11 @@ class Plan:
         if index is None:
             return None
         time = moment.timestamp()
-        end = self._timestamps[index] + QUARTER.total_seconds()
+        end = self.timeline.quarter_end(index).timestamp()
         if index == 0:
             begin, before = self.updated.timestamp(), self.soc_start
         else:
-            begin, before = self._timestamps[index], self.soc[index - 1]
+            begin, before = self.timeline.starts[index].timestamp(), self.soc[index - 1]
         if time <= begin or end <= begin:
             return before
         return before + (self.soc[index] - before) * (time - begin) / (end - begin)
@@ -172,7 +141,7 @@ class Plan:
         return {
             "updated": self.updated.isoformat(),
             "finished": self.finished.isoformat(),
-            "starts": [s.isoformat() for s in self.starts],
+            "starts": self.timeline.isoformat(),
             "modes": list(self.modes),
             "soc_start": self.soc_start,
             "soc": list(self.soc),

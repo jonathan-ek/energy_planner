@@ -13,7 +13,8 @@ from homeassistant.util import dt as dt_utils
 
 from ..const import DOMAIN
 from . import heat_pump, settings
-from .plan import QUARTER, Plan, quarter_start
+from .plan import Plan
+from .timeline import QUARTER, quarter_start
 from .utils import get_tariff
 
 

@@ -412,6 +412,24 @@ def test_forced_sell_may_go_below_the_reserve():
     assert plan.modes[0] == "sell"
 
 
+def test_the_repeated_hour_is_two_power_charge_hours():
+    """Test that the two 02:xx hours when DST ends are not one 8 kWh hour."""
+    utc = dt.datetime(2026, 10, 25, 0, tzinfo=dt.UTC)  # 02:00 CEST
+    starts = [(utc + dt.timedelta(minutes=15 * i)).astimezone(TZ) for i in range(8)]
+    hourly = opt._hourly(starts, [1.0] * 8)
+    assert sorted(hourly.values()) == [4.0, 4.0]
+
+
+def test_month_share_counts_real_hours():
+    """Test that October has 745 hours (DST ends), so a full plan covers it all."""
+    first = dt.datetime(2026, 10, 1, tzinfo=TZ)
+    utc = first.astimezone(dt.UTC)
+    starts = [
+        (utc + dt.timedelta(minutes=15 * i)).astimezone(TZ) for i in range(745 * 4)
+    ]
+    assert opt._month_share(starts[:4], first) == pytest.approx(1 / 745)
+
+
 def test_month_share():
     """Test the share of the month's remaining hours a plan covers."""
     assert opt._month_share(STARTS, STARTS[0]) == pytest.approx(24 / (19 * 24))

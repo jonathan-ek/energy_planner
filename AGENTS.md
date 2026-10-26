@@ -35,7 +35,8 @@ are defined in `GLOSSARY.md`. Decisions: `docs/adr/`.
 | `dynamic_planner.py` | The forecast glue: `async_update_forecast` reads recorder hourly statistics and the Forecast.Solar estimates, runs `forecast.py` and stores the result in `hass.data[DOMAIN]["forecast"]` |
 | `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `discard_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
 | `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores a `plan.Plan` in `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `car_action` |
-| `plan.py` | Pure: `Plan`, the battery plan as one object (per-quarter series parallel to `starts`, canonical units: spot SEK/MWh excl. VAT, SOC %, kW), `index_at`, `value_at` (a series' value at a moment), `run_at` (a `Run` of equal values from now, with `until`), `is_stale` (`STALE_AFTER` 30 min from `finished`, when the plan became available; `updated` is the moment it was planned for), `soc_at` (in the first quarter from `soc_start`, the SOC when planned), `start` / `end` (times compared and added in UTC, so the hour repeated when DST ends works; `quarter_start` / `quarter_end`, the price dicts' UTC keys), `to_attributes` (what the plan sensor publishes). `follow` (the run now, or why not: no plan, plan is old, plan does not cover now) and `action` (the keys every action has: `state`, `source`, `until`, `reason`, `plan_updated`) for the resolvers |
+| `timeline.py` | Pure: time kept as UTC instants. `Timeline` (consecutive quarters: `between`, `of`, `index_at`, `quarter_end`, `local` / `local_end` / `local_hour` / `local_date` / `isoformat` for calendar logic and display), `quarter_start` (the price dicts' key), `hour_start` (the key of hourly sums), `at_local` (a local date and wall-clock time as an instant). Its tests are the DST suite |
+| `plan.py` | Pure: `Plan`, the battery plan as one object (per-quarter series parallel to its `timeline`, canonical units: spot SEK/MWh excl. VAT, SOC %, kW), `index_at`, `value_at` (a series' value at a moment), `run_at` (a `Run` of equal values from now, with `until`), `is_stale` (`STALE_AFTER` 30 min from `finished`, when the plan became available; `updated` is the moment it was planned for), `soc_at` (in the first quarter from `soc_start`, the SOC when planned), `starts` / `start` / `end` (local, for display), `to_attributes` (what the plan sensor publishes). `follow` (the run now, or why not: no plan, plan is old, plan does not cover now) and `action` (the keys every action has: `state`, `source`, `until`, `reason`, `plan_updated`) for the resolvers |
 | `battery_action.py` | Pure: `resolve` turns the manual slot covering now and the plan into the action now (action state, source, SOC, current, import target, until), `ACTION_STATES` (mode → action state) |
 | `manual.py` | Pure: `ManualSlot` (an action state over whole quarters, UTC, optional target SOC), `make` (rounds out to quarters), `covering`, `current` (drops ended ones), `target` (defaults and limits), `forced` (mode and target per quarter for the optimizer), `STATE_MODES` (action state → mode) |
 | `heat_pump.py` | Pure heat pump economy: COP curve per outdoor temperature (`COP_CURVES`), district heating price per month (`DISTRICT_HEATING_PRESETS`), `evaluate` compares a kWh of heat from both, `action` (on/off now from a `Plan` or the economy now). See "Heat pump" |
@@ -730,12 +731,14 @@ make format         # ruff format
 ## Known quirks and pitfalls
 
 - `add_slot` input without an offset is in HA's configured time zone.
-- Compare and sort instants, never local times in one zone: Python compares those
-  by wall clock and ignores `fold`, so the hour repeated when DST ends sorts into
-  its copy, and adding a timedelta keeps the wall clock. So manual slot times are
-  UTC; the plan's and
-  the forecast's starts are local and compared by timestamp (`plan.py`). Local time
-  is only for calendar logic (day windows, hour of day) and display.
+- Compare, sort, add to and key by instants, never local times in one zone: Python
+  compares and hashes those by wall clock and ignores `fold`, so the hour repeated
+  when DST ends sorts into (and in a dict merges with) its copy, and adding a
+  timedelta keeps the wall clock. Use `timeline.py`: the plan's quarters, manual
+  slots, price keys (`quarter_start`) and hourly sums (`hour_start`, the import
+  history and the optimizer's power charge hours) are UTC. The forecast's starts are
+  still local ISO strings until it moves onto a `Timeline`. Local time is only for
+  calendar logic (day windows, hour of day) and display.
 - Dates and times in `config` and `manual_slots` are always objects in memory
   (`parse_stored_data` and `_load_manual_slots` convert them on load), so do not add
   string checks. The `nordpool_values` price cache is the exception and still holds

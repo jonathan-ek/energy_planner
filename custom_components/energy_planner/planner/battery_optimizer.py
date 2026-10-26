@@ -71,6 +71,7 @@ import math
 import numpy as np
 
 from .tariff import PowerCharge, Tariff, charged_peak, import_limit
+from .timeline import hour_start
 
 QUARTER_HOURS = 0.25
 MODES = ("self_use", "hold", "sell_excess", "discard_excess", "charge", "sell")
@@ -566,10 +567,13 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
 
 
 def _hourly(starts: Sequence[dt.datetime], kwh: Sequence[float]):
-    """Sum quarter energies per local hour start: the hourly mean power in kW."""
+    """Sum quarter energies per hour start (UTC): the hourly mean power in kW.
+
+    In UTC, so the two hours when DST ends are not summed as one.
+    """
     hourly: dict[dt.datetime, float] = {}
     for start, energy in zip(starts, kwh, strict=True):
-        hour = start.replace(minute=0, second=0, microsecond=0)
+        hour = hour_start(start)
         hourly[hour] = hourly.get(hour, 0.0) + energy
     return hourly
 
@@ -583,7 +587,11 @@ def _month_share(starts: Sequence[dt.datetime], first: dt.datetime) -> float:
     covered = sum(
         QUARTER_HOURS for s in starts if (s.year, s.month) == (first.year, first.month)
     )
-    remaining = (month_end - first).total_seconds() / 3600
+    # In UTC: a difference of local times in one zone is by wall clock, an hour off
+    # in the months DST changes
+    remaining = (
+        month_end.astimezone(dt.UTC) - first.astimezone(dt.UTC)
+    ).total_seconds() / 3600
     return min(1.0, covered / remaining) if remaining > 0 else 1.0
 
 
@@ -640,18 +648,20 @@ def optimize(
 ) -> Plan:
     """Return the cheapest plan.
 
-    `starts` are local quarter starts; `prices` spot SEK/MWh excl. VAT; `load` and
-    `pv` kWh per quarter; `history` the hourly mean grid import (kW, keyed by local
-    hour start) so far this month, which sets the peaks already paid for; `forced`
-    a mode per quarter that must be used (None: free), `forced_soc` its target SOC
-    (kWh: a forced `charge` charges up to it and then holds, a forced `sell` sells
-    down to it and then runs self-use; None: none); `current_mode` the mode the
-    battery runs now, so a recalculated plan only changes it when it pays; `exempt`
-    kWh per quarter of the load that the import limit does not apply to (the heat
-    pump); `probe_kwh` the extra load per quarter that `Plan.marginal` prices;
+    `starts` are local quarter starts; `prices` spot SEK/MWh excl. VAT; `load` and `pv`
+    kWh per quarter; `history` the hourly mean grid import (kW, keyed by hour start in
+    UTC, so the two hours when DST ends stay apart) so far this month, which sets the
+    peaks already paid for; `forced` a mode per quarter that must be used (None: free),
+    `forced_soc` its target SOC (kWh: a forced `charge` charges up to it and then holds,
+    a forced `sell` sells down to it and then runs self-use; None: none); `current_mode`
+    the mode the battery runs now, so a recalculated plan only changes it when it pays;
+    `exempt` kWh per quarter of the load that the import limit does not apply to (the
+    heat pump); `probe_kwh` the extra load per quarter that `Plan.marginal` prices;
     `vehicle` a car to charge in the same plan (see `Vehicle` and `_optimize`).
     """
-    history = dict(history or {})
+    # Keyed by the hour in UTC (see _hourly); local time for the tariff's periods
+    history = {hour_start(h): kw for h, kw in (history or {}).items()}
+    tz = starts[0].tzinfo if starts else dt.UTC
     limit = limit or Limit()
     net = np.array(load, dtype=float) - np.array(pv, dtype=float)
     buy = np.array(
@@ -704,6 +714,12 @@ def optimize(
         tuple(forced_soc) if forced_soc else (),
     )
 
+    # Each hour's local start, for the tariff's periods; once, not per level tried
+    local_of = {
+        hour: hour.astimezone(tz)
+        for hour in (*history, *(hour_start(start) for start in starts))
+    }
+
     # The power charges in the horizon, per month, and the peak already reached
     charges: dict[str, tuple[int, PowerCharge, float]] = {}
     shares: dict[str, float] = {}
@@ -714,11 +730,12 @@ def optimize(
             if charge.period.contains(start):
                 key = _charge_key(index, start)
                 if key not in charges:
-                    month = {
-                        h: kw
+                    month = [
+                        (local_of[h], kw)
                         for h, kw in history.items()
-                        if (h.year, h.month) == (start.year, start.month)
-                    }
+                        if (local_of[h].year, local_of[h].month)
+                        == (start.year, start.month)
+                    ]
                     charges[key] = (index, charge, charged_peak(charge, month))
                     shares[key] = _month_share(starts, start)
                 keys.append(key)
@@ -780,9 +797,11 @@ def optimize(
         power = amortized = 0.0
         peaks = {}
         for key, (index, charge, before) in charges.items():
-            month = {
-                h: kw for h, kw in combined.items() if _charge_key(index, h) == key
-            }
+            month = [
+                (local_of[h], kw)
+                for h, kw in combined.items()
+                if _charge_key(index, local_of[h]) == key
+            ]
             after = charged_peak(charge, month)
             peaks[key] = (before, after)
             power += charge.kr_per_kw * (after - before)

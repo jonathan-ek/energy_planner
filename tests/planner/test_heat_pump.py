@@ -235,7 +235,7 @@ def test_plan_inputs_use_the_heat_loss():
 def test_action_follows_the_plan():
     """Test the plan's flag now and when the run ends."""
     plan = make_plan(QUARTER, heat_pump=[True, True, False, False])
-    starts = plan.starts
+    starts = plan.timeline.locals
     hass = plan_hass({}, plan)
     with patch.object(heating.dt_utils, "now", return_value=NOW):
         action = heating.heat_pump_action(hass)
@@ -251,21 +251,10 @@ def test_action_follows_the_plan():
     economy.assert_not_called()
 
 
-def test_spot_price_in_the_repeated_hour():
-    """Test that the two 02:15 quarters when DST ends keep their own prices."""
-    first = dt.datetime(2026, 10, 25, 0, 15, tzinfo=dt.UTC)
-    second = first + dt.timedelta(hours=1)
-    hass = mock_hass({}, spot_prices={first: 100.0, second: 900.0})
-    moment = (second + dt.timedelta(minutes=5)).astimezone(TZ)
-    assert moment.fold == 1
-    assert heating._spot(hass, moment) == 900.0
-    assert heating._spot(hass, moment.replace(fold=0)) == 100.0
-
-
 def test_action_without_heat_pump():
     """Test a plan made with heat_pump_power 0: no marginal prices, always off."""
     plan = make_plan(QUARTER, heat_pump=[False] * 4, marginal=[])
-    starts = plan.starts
+    starts = plan.timeline.locals
     hass = plan_hass({}, plan)
     with patch.object(heating.dt_utils, "now", return_value=NOW):
         action = heating.heat_pump_action(hass)

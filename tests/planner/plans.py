@@ -3,7 +3,8 @@
 from collections.abc import Sequence
 import datetime as dt
 
-from custom_components.energy_planner.planner.plan import QUARTER, EvPlan, Plan
+from custom_components.energy_planner.planner.plan import EvPlan, Plan
+from custom_components.energy_planner.planner.timeline import QUARTER, Timeline
 
 
 def make_plan(
@@ -40,9 +41,9 @@ def make_plan(
     return Plan(
         updated=updated,
         finished=finished or updated,
-        starts=tuple(
-            (start.astimezone(dt.UTC) + QUARTER * i).astimezone(start.tzinfo)
-            for i in range(n)
+        # Added in UTC: a local time plus a timedelta keeps the wall clock
+        timeline=Timeline.between(
+            start, start.astimezone(dt.UTC) + QUARTER * n, start.tzinfo or dt.UTC
         ),
         modes=tuple(modes or ["self_use"] * n),
         soc_start=soc_start,

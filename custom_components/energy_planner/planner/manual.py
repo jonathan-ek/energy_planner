@@ -16,7 +16,7 @@ import dataclasses
 import datetime as dt
 from typing import Any
 
-from .plan import QUARTER, quarter_start
+from .timeline import QUARTER, quarter_start
 
 # Action state -> battery plan mode
 STATE_MODES = {

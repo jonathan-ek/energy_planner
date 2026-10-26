@@ -84,15 +84,15 @@ class Tariff:
         """Return the compensation in öre/kWh for energy sold at `moment`."""
         return _sum_rates(self.sell_compensation, moment)
 
-    def power_cost(self, hourly_kw: Mapping[dt.datetime, float]) -> float:
+    def power_cost(self, hourly_kw: Iterable[tuple[dt.datetime, float]]) -> float:
         """Return the power charges in kr for hourly mean grid import.
 
-        `hourly_kw` maps local hour starts to the mean import in kW. Each month in it
-        is charged separately.
+        `hourly_kw`: pairs of a local hour start and the mean import in kW (see
+        `charged_peak`). Each month in it is charged separately.
         """
-        months: dict[tuple[int, int], dict[dt.datetime, float]] = {}
-        for hour, kw in hourly_kw.items():
-            months.setdefault((hour.year, hour.month), {})[hour] = kw
+        months: dict[tuple[int, int], list[tuple[dt.datetime, float]]] = {}
+        for hour, kw in hourly_kw:
+            months.setdefault((hour.year, hour.month), []).append((hour, kw))
         return sum(
             charge.kr_per_kw * charged_peak(charge, month)
             for charge in self.power_charges
@@ -113,23 +113,25 @@ def _sum_rates(rates: Iterable[Rate], moment: dt.datetime) -> float:
     return sum(rate.ore_per_kwh for rate in rates if rate.period.contains(moment))
 
 
-def charged_peak(charge: PowerCharge, hourly_kw: Mapping[dt.datetime, float]) -> float:
+def charged_peak(
+    charge: PowerCharge, hourly_kw: Iterable[tuple[dt.datetime, float]]
+) -> float:
     """Return the power in kW that `charge` is billed for, within one month.
 
-    The mean of the `charge.peaks` highest hourly values in the charge's period, or
-    of the daily maximums if `one_per_day`. With fewer values than peaks, the missing
-    ones count as zero (the month is not over yet).
+    `hourly_kw`: pairs of a local hour start and the mean import in kW (pairs, not a
+    dict, keep the two hours when DST ends apart: local times in one zone hash
+    alike there). The mean of the `charge.peaks` highest hourly values in the
+    charge's period, or of the daily maximums if `one_per_day`. With fewer values
+    than peaks, the missing ones count as zero (the month is not over yet).
     """
-    values = {
-        hour: kw for hour, kw in hourly_kw.items() if charge.period.contains(hour)
-    }
+    values = [(hour, kw) for hour, kw in hourly_kw if charge.period.contains(hour)]
     if charge.one_per_day:
         daily: dict[dt.date, float] = {}
-        for hour, kw in values.items():
+        for hour, kw in values:
             daily[hour.date()] = max(daily.get(hour.date(), 0.0), kw)
         candidates = list(daily.values())
     else:
-        candidates = list(values.values())
+        candidates = [kw for _, kw in values]
     highest = sorted(candidates, reverse=True)[: charge.peaks]
     return sum(highest) / charge.peaks
 

@@ -66,12 +66,16 @@ class TestTekniskaVerken:
     def test_power_cost_day_and_night_peaks(self):
         """Test one day and one night peak per month, winter prices."""
         hourly = {at(1, 5, 18): 8.0, at(1, 6, 12): 2.0, at(1, 7, 2): 5.0}
-        assert TEKNISKA_VERKEN.power_cost(hourly) == pytest.approx(8 * 45 + 5 * 12)
+        assert TEKNISKA_VERKEN.power_cost(hourly.items()) == pytest.approx(
+            8 * 45 + 5 * 12
+        )
 
     def test_power_cost_per_month(self):
         """Test that each month is billed on its own peaks."""
         hourly = {at(3, 31, 12): 4.0, at(4, 1, 12): 4.0}
-        assert TEKNISKA_VERKEN.power_cost(hourly) == pytest.approx(4 * 45 + 4 * 23)
+        assert TEKNISKA_VERKEN.power_cost(hourly.items()) == pytest.approx(
+            4 * 45 + 4 * 23
+        )
 
 
 PEAKS = {at(1, 5, 8): 6.0, at(1, 5, 9): 5.0, at(1, 6, 8): 3.0, at(1, 7, 8): 1.0}
@@ -83,22 +87,22 @@ class TestChargedPeak:
     def test_mean_of_highest_hours(self):
         """Test the mean of the three highest hours."""
         charge = tariff.PowerCharge(10.0, peaks=3)
-        assert tariff.charged_peak(charge, PEAKS) == pytest.approx(14 / 3)
+        assert tariff.charged_peak(charge, PEAKS.items()) == pytest.approx(14 / 3)
 
     def test_one_peak_per_day(self):
         """Test that two peaks the same day count once."""
         charge = tariff.PowerCharge(10.0, peaks=3, one_per_day=True)
-        assert tariff.charged_peak(charge, PEAKS) == pytest.approx(10 / 3)
+        assert tariff.charged_peak(charge, PEAKS.items()) == pytest.approx(10 / 3)
 
     def test_missing_peaks_count_as_zero(self):
         """Test early in the month, with fewer days than peaks."""
         charge = tariff.PowerCharge(10.0, peaks=3, one_per_day=True)
-        assert tariff.charged_peak(charge, {at(1, 1, 8): 3.0}) == pytest.approx(1.0)
+        assert tariff.charged_peak(charge, [(at(1, 1, 8), 3.0)]) == pytest.approx(1.0)
 
     def test_outside_the_period_is_free(self):
         """Test that hours outside the charge's period are ignored."""
         charge = tariff.PowerCharge(10.0, tariff.Period(start_hour=7, end_hour=20))
-        assert tariff.charged_peak(charge, {at(1, 5, 20): 9.0}) == 0.0
+        assert tariff.charged_peak(charge, [(at(1, 5, 20), 9.0)]) == 0.0
 
 
 class TestParsing:
@@ -108,7 +112,7 @@ class TestParsing:
         """Test that an empty tariff costs nothing."""
         empty = tariff.tariff_from_dict({})
         assert empty.buy_fee(at(1, 5, 12)) == 0.0
-        assert empty.power_cost({at(1, 5, 12): 5.0}) == 0.0
+        assert empty.power_cost([(at(1, 5, 12), 5.0)]) == 0.0
 
     @pytest.mark.parametrize(
         "data",
@@ -133,7 +137,7 @@ def test_eon():
     eon = tariff.tariff_from_dict(tariff.EON_20A)
     assert eon.buy_fee(at(1, 5, 12)) == pytest.approx(77.3)
     assert eon.sell_fee(at(1, 5, 12)) == pytest.approx(10.0)
-    assert eon.power_cost({at(1, 5, 12): 9.0}) == 0.0
+    assert eon.power_cost([(at(1, 5, 12), 9.0)]) == 0.0
 
 
 def test_import_limit():

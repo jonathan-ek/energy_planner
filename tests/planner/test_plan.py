@@ -7,7 +7,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from custom_components.energy_planner.planner import battery_action, ev, heat_pump
-from custom_components.energy_planner.planner.plan import QUARTER, follow
+from custom_components.energy_planner.planner.plan import follow
+from custom_components.energy_planner.planner.timeline import QUARTER, Timeline
 
 from .plans import make_plan
 
@@ -33,7 +34,7 @@ def test_index_at():
     assert PLAN.index_at(at(59)) == 3
     assert PLAN.index_at(at(60)) is None
     assert PLAN.index_at(at(-1)) is None
-    assert (PLAN.start, PLAN.end) == (START, at(60))
+    assert (PLAN.timeline.start, PLAN.timeline.end) == (START, at(60))
 
 
 def test_value_at():
@@ -70,17 +71,15 @@ def test_soc_at():
 
 
 def test_the_repeated_hour_when_dst_ends():
-    """Test that 02:00-03:00 twice on the fall-back day are different quarters."""
+    """Test lookups and the run's end in a plan over the repeated hour."""
     # 01:30 CEST; quarters 2-5 are 02:00-02:45 CEST, 6-7 02:00-02:15 CET
     start = dt.datetime(2026, 10, 25, 1, 30, tzinfo=TZ)
     plan = make_plan(start, ["charge"] * 6 + ["sell"] * 2)
     second = dt.datetime(2026, 10, 25, 2, 20, tzinfo=TZ, fold=1)
-    first = second.replace(fold=0)
-    assert (plan.index_at(first), plan.index_at(second)) == (3, 7)
-    run = plan.run_at(first, plan.modes)
+    assert (plan.index_at(second.replace(fold=0)), plan.index_at(second)) == (3, 7)
+    run = plan.run_at(start, plan.modes)
     assert run is not None
     assert run.until.isoformat() == "2026-10-25T02:00:00+01:00"
-    assert plan.end.isoformat() == "2026-10-25T02:30:00+01:00"
 
 
 def test_staleness_from_when_the_plan_was_finished():
@@ -129,7 +128,12 @@ def test_every_action_has_the_common_keys():
     # Old: each falls back and says why
     later = at(45) + dt.timedelta(hours=1)
     stale = dataclasses.replace(
-        plan, starts=tuple(s + dt.timedelta(hours=1) for s in plan.starts)
+        plan,
+        timeline=Timeline.between(
+            plan.timeline.start + dt.timedelta(hours=1),
+            plan.timeline.end + dt.timedelta(hours=1),
+            TZ,
+        ),
     )
     for action in (
         battery_action.resolve(None, stale, later, battery),

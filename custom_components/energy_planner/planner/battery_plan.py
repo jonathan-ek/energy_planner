@@ -37,7 +37,8 @@ from .forecast import quarter_starts
 from .heat_pump import schedule
 from .heating import plan_inputs
 from .nordpool_utils import fetch_nordpool_data
-from .plan import EvPlan, Plan, quarter_start
+from .plan import EvPlan, Plan
+from .timeline import Timeline, quarter_start
 from .price_estimate import (
     MIN_HOURS,
     WIND_FIT_DAYS,
@@ -71,7 +72,10 @@ ENERGY_CHARTS_URL = "https://api.energy-charts.info/price"
 
 
 async def _hourly_import(hass: HomeAssistant, statistic_id: str, start, end):
-    """Grid import per local hour start in kWh (= the hourly mean kW)."""
+    """Grid import per hour start (UTC) in kWh (= the hourly mean kW).
+
+    UTC keys: local ones would make the two hours when DST ends one.
+    """
     stats = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
         hass,
@@ -83,9 +87,7 @@ async def _hourly_import(hass: HomeAssistant, statistic_id: str, start, end):
         {"change"},
     )
     return {
-        dt_utils.as_local(dt.datetime.fromtimestamp(row["start"], dt.UTC)): row[
-            "change"
-        ]
+        dt.datetime.fromtimestamp(row["start"], dt.UTC): row["change"]
         for row in stats.get(statistic_id, [])
         if row.get("change") is not None
     }
@@ -648,7 +650,7 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["plan"] = Plan(
         updated=now,
         finished=dt_utils.now(),
-        starts=tuple(plan.starts),
+        timeline=Timeline.of(plan.starts),
         modes=tuple(plan.modes),
         soc_start=round(battery.soc_kwh / capacity * 100, 1),
         soc=tuple(round(kwh / capacity * 100, 1) for kwh in plan.soc),
