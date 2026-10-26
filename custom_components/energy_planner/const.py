@@ -9,9 +9,6 @@ FORECAST_SENSORS = "forecast_sensors"
 
 VERSION_STORAGE = "1"
 
-# Number of slots in the schedule, numbered 1..SLOT_COUNT
-SLOT_COUNT = 49
-
 # Tariff options besides the presets in planner/tariff.py: the flat network_cost /
 # network_compensation settings, or a custom tariff entered as YAML
 TARIFF_FLAT = "flat"

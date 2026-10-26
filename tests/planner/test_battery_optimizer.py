@@ -337,6 +337,81 @@ def test_forced_modes_are_used():
     assert plan.soc[18 * 4 - 1] - plan.soc[19 * 4 - 1] == pytest.approx(10.0)
 
 
+def test_forced_charge_stops_at_its_target():
+    """Test that a manual charge to 12 kWh then holds, even where selling pays."""
+    forced = [None] * 96
+    forced[0:16] = ["charge"] * 16
+    target = [None] * 96
+    target[0:16] = [12.0] * 16
+    prices = [100.0] * 16 + [3000.0] * 80
+    plan = opt.optimize(
+        STARTS,
+        prices,
+        LOAD,
+        NO_PV,
+        battery(),
+        NO_FEES,
+        forced=forced,
+        forced_soc=target,
+    )
+    assert hours(plan, 0, 4) == {"charge"}
+    assert max(plan.soc[0:16]) == pytest.approx(12.0)
+    # At the target the battery is kept, the load comes from the grid
+    assert plan.soc[15] == pytest.approx(12.0)
+
+
+def test_forced_sell_stops_at_its_target_then_self_use():
+    """Test that a manual sell to 10 kWh then covers the load from the battery."""
+    forced = [None] * 96
+    forced[0:16] = ["sell"] * 16
+    target = [None] * 96
+    target[0:16] = [10.0] * 16
+    plan = opt.optimize(
+        STARTS,
+        [500.0] * 96,
+        LOAD,
+        NO_PV,
+        battery(soc_kwh=15.0),
+        NO_FEES,
+        forced=forced,
+        forced_soc=target,
+    )
+    # 15 -> 10 kWh at 10 kW less the 1 kW load: two quarters, then self-use
+    assert plan.modes[0:2] == ["sell", "sell"]
+    assert plan.soc[1] == pytest.approx(10.0)
+    assert set(plan.modes[2:16]) == {"self_use"}
+    assert plan.soc[15] == pytest.approx(10.0 - 14 * 0.25)
+
+
+def test_forced_sell_may_go_below_the_reserve():
+    """Test that a manual sell's target below the reserve is sold down to."""
+    forced = [None] * 96
+    forced[0:8] = ["sell"] * 8
+    target = [None] * 96
+    target[0:8] = [3.0] * 8
+    reserve = opt.Battery(
+        min_kwh=2.0,
+        max_kwh=20.0,
+        soc_kwh=10.0,
+        max_grid_charge_kw=10.0,
+        max_power_kw=10.0,
+        efficiency=1.0,
+        reserve_kwh=6.0,
+    )
+    plan = opt.optimize(
+        STARTS,
+        [500.0] * 96,
+        [0.0] * 96,
+        NO_PV,
+        reserve,
+        NO_FEES,
+        forced=forced,
+        forced_soc=target,
+    )
+    assert min(plan.soc[0:8]) == pytest.approx(3.0)
+    assert plan.modes[0] == "sell"
+
+
 def test_month_share():
     """Test the share of the month's remaining hours a plan covers."""
     assert opt._month_share(STARTS, STARTS[0]) == pytest.approx(24 / (19 * 24))

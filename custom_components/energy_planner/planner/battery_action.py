@@ -1,23 +1,22 @@
-"""What the battery should do now: the current slot, or the battery plan.
+"""What the battery should do now: a manual slot, or the battery plan.
 
-Pure functions, no Home Assistant imports. `resolve` combines the current slot (slot
-1) and the battery plan into one action for the inverter script
-(`sensor.energy_planner_battery_action`):
+Pure functions, no Home Assistant imports. `resolve` combines the manual slot
+covering now (manual.py) and the battery plan into one action for the inverter
+script (`sensor.energy_planner_battery_action`):
 
-- An active slot with a real state (a manual slot) wins: source `slot`.
-- An active `auto` slot follows the battery plan: source `plan`. If the plan is
+- A manual slot wins: source `manual`, also without a plan.
+- With the planner on, the battery follows the plan: source `plan`. If the plan is
   missing, stale (plan.py) or does not cover now, the battery falls back to
   self-use: source `fallback`.
-- Otherwise (no slot, `off`, disabled) self-use: source `none`. With the planner
-  switched off the glue (battery_plan.current_action) hands over no `auto` slot.
+- With the planner off, self-use: source `none`.
 
 The plan keeps the battery above the reserve SOC. When the battery is at or below it
 anyway (more load than forecast), the plan's `self_use`, `sell_excess` and `hold` turn
 into `hold` with the power charge level as import target: the battery then only
 shaves peaks that would raise the power charge, down to the shutdown SOC.
 
-The state is always a slot state the inverter scripts know (`charge`, `discharge`,
-`sell`, `sell-excess`, `pause`, `discard-excess`).
+The state is always an action state the inverter scripts know (`charge`,
+`discharge`, `sell`, `sell-excess`, `pause`, `discard-excess`).
 """
 
 import dataclasses
@@ -25,10 +24,11 @@ import datetime as dt
 import math
 from typing import Any
 
+from .manual import STATE_MODES, ManualSlot, SocLimits, target
 from .plan import Plan, action, follow
 
-# Battery plan mode -> slot state
-SLOT_STATES = {
+# Battery plan mode -> action state
+ACTION_STATES = {
     "self_use": "discharge",
     "hold": "pause",
     "sell_excess": "sell-excess",
@@ -36,26 +36,6 @@ SLOT_STATES = {
     "charge": "charge",
     "sell": "sell",
 }
-# Slot state -> battery plan mode, for planning around manual slots
-SLOT_MODES = {
-    "charge": "charge",
-    "discharge": "self_use",
-    "sell": "sell",
-    "sell-excess": "sell_excess",
-    "pause": "hold",
-    "discard-excess": "discard_excess",
-}
-
-
-@dataclasses.dataclass(frozen=True)
-class Slot:
-    """The current slot (slot 1); `end` is the next slot's start."""
-
-    state: str
-    active: bool
-    start: dt.datetime | None
-    end: dt.datetime | None
-    soc: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,6 +88,9 @@ def plan_action(
 ) -> dict[str, Any]:
     """Return the battery plan's action now, or a self-use fallback."""
     run, reason = follow(plan, now, lambda p: p.modes)
+    if run is not None and plan is not None and plan.value_at(now, plan.manual):
+        # Planned for a manual slot that has been removed since; not to follow
+        run, reason = None, "manual slot removed"
     if run is None or plan is None:
         return _action("discharge", "fallback", plan=plan, reason=reason)
     index = run.index
@@ -156,7 +139,7 @@ def plan_action(
         # What the plan expects to keep (less if it shaves peaks)
         extra["soc"] = round(target_soc)
     return _action(
-        SLOT_STATES[mode],
+        ACTION_STATES[mode],
         "plan",
         mode=mode,
         import_target_kw=target_kw,
@@ -167,30 +150,35 @@ def plan_action(
 
 
 def resolve(
-    slot: Slot | None,
+    manual: ManualSlot | None,
     plan: Plan | None,
     now: dt.datetime,
     battery: BatteryState,
+    enabled: bool = True,
 ) -> dict[str, Any]:
-    """Return the action now from the current slot and the battery plan."""
-    running = (
-        slot is not None
-        and slot.active
-        and slot.start is not None
-        and slot.start <= now
-        and slot.state != "off"
-    )
-    if not running or slot is None:
-        return _action("discharge", "none")
-    if slot.state == "auto":
-        return plan_action(plan, now, battery)
-    current = {"charge": battery.max_charge_a, "sell": battery.max_discharge_a}
-    return _action(
-        slot.state,
-        "slot",
-        mode=SLOT_MODES.get(slot.state),
-        soc=round(slot.soc),
-        current_a=int(current.get(slot.state, 0)),
-        # Slot times are kept in UTC; published in local time like the plan's
-        until=slot.end.astimezone(now.tzinfo) if slot.end else None,
-    )
+    """Return the action now from the manual slot covering now and the plan.
+
+    A manual slot is followed as it is, so it runs without a plan too: `charge`
+    and `sell` at the highest current to their target SOC (the inverter scripts
+    stop there), `pause` keeps up to the max SOC, `sell-excess` exports down to the
+    reserve.
+    """
+    if manual is not None:
+        limits = SocLimits(battery.min_soc, battery.max_soc, battery.reserve_soc)
+        soc = {
+            "pause": battery.max_soc,
+            "sell-excess": max(battery.min_soc, battery.reserve_soc),
+        }.get(manual.state, target(manual, limits))
+        current = {"charge": battery.max_charge_a, "sell": battery.max_discharge_a}
+        return _action(
+            manual.state,
+            "manual",
+            mode=STATE_MODES[manual.state],
+            soc=None if soc is None else round(soc),
+            current_a=int(current.get(manual.state, 0)),
+            # Kept in UTC; published in local time like the plan's times
+            until=manual.end.astimezone(now.tzinfo),
+        )
+    if not enabled:
+        return _action("discharge", "none", reason="planner off")
+    return plan_action(plan, now, battery)

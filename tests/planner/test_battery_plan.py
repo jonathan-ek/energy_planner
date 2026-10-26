@@ -12,7 +12,7 @@ import aiohttp
 import pytest
 
 from custom_components.energy_planner.const import DOMAIN, PLAN_SENSORS
-from custom_components.energy_planner.planner import price_estimate, settings
+from custom_components.energy_planner.planner import manual, price_estimate, settings
 
 battery_plan = importlib.import_module(
     "custom_components.energy_planner.planner.battery_plan"
@@ -155,23 +155,19 @@ async def test_manual_slot_is_planned_around(mock_hass):
     """Test that a manual sell slot forces the plan's mode in its quarters."""
     start = dt.datetime(2026, 1, 14, 18, tzinfo=TZ)
     mock_hass.data[DOMAIN]["manual_slots"] = [
-        {
-            "start": start,
-            "end": start + dt.timedelta(hours=1),
-            "state": "sell",
-            "soc": 20,
-        }
+        manual.make(start, start + dt.timedelta(hours=1), "sell", 30)
     ]
-    plan = await run(mock_hass)
-    modes = dict(zip(plan["starts"], plan["modes"], strict=True))
-    hour = [modes[(start + dt.timedelta(minutes=15 * i)).isoformat()] for i in range(4)]
-    assert hour == ["sell"] * 4
-    # Manual slots run while the planner is off too, so the plan keeps them
-    mock_hass.data[DOMAIN]["config"]["enabled"] = False
-    plan = await run(mock_hass)
-    modes = dict(zip(plan["starts"], plan["modes"], strict=True))
-    hour = [modes[(start + dt.timedelta(minutes=15 * i)).isoformat()] for i in range(4)]
-    assert hour == ["sell"] * 4
+    for enabled in (True, False):
+        # Manual slots run while the planner is off too, so the plan keeps them
+        mock_hass.data[DOMAIN]["config"]["enabled"] = enabled
+        plan = await run(mock_hass)
+        first = plan["starts"].index(start.isoformat())
+        assert plan["modes"][first] == "sell"
+        assert plan["manual"][first : first + 4] == ["sell"] * 4
+        assert plan["manual_soc"][first : first + 4] == [30.0] * 4
+        assert plan["manual"][first + 4] is None
+        # Sold down to the target, not below it while the slot runs
+        assert min(plan["soc"][first : first + 4]) >= 30.0 - 1.0
 
 
 async def test_running_mode_is_passed_on(mock_hass):
@@ -243,25 +239,32 @@ async def test_a_request_while_the_lock_changes_hands_is_run(mock_hass):
     assert len(calls) == 1
 
 
-async def test_current_action_follows_an_auto_slot(mock_hass):
-    """Test the action sensor's value for an auto slot."""
+async def test_current_action_follows_the_plan_or_a_manual_slot(mock_hass):
+    """Test the action sensor's value: the plan, off, and a manual slot."""
     await run(mock_hass)
-    mock_hass.data[DOMAIN]["values"] = {
-        "slot_1_date_time_start": NOW - dt.timedelta(hours=1),
-        "slot_1_state": "auto",
-        "slot_1_active": True,
-        "slot_1_soc": 50,
-        "slot_2_date_time_start": NOW + dt.timedelta(days=1),
-    }
     with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
         result = battery_plan.current_action(mock_hass)
     assert result["source"] == "plan"
     assert result["mode"] == mock_hass.data[DOMAIN]["plan"].modes[0]
-    # With the planner off the auto slot is not followed
+    # With the planner off the plan is not followed
     mock_hass.data[DOMAIN]["config"]["enabled"] = False
     with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
         result = battery_plan.current_action(mock_hass)
     assert (result["state"], result["source"]) == ("discharge", "none")
+    # A manual slot runs while off and without a plan, to its target
+    mock_hass.data[DOMAIN]["plan"] = None
+    mock_hass.data[DOMAIN]["manual_slots"] = [
+        manual.make(NOW, NOW + dt.timedelta(hours=1), "charge", 70)
+    ]
+    with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
+        result = battery_plan.current_action(mock_hass)
+    assert (result["state"], result["source"], result["soc"]) == (
+        "charge",
+        "manual",
+        70,
+    )
+    # Rounded out to whole quarters: 22:45 to 00:00
+    assert result["until"] == (NOW + dt.timedelta(minutes=70)).isoformat()
 
 
 @pytest.mark.parametrize(("temperature", "heats"), [(0.0, True), (20.0, False)])
@@ -709,17 +712,6 @@ async def test_prices_in_the_repeated_hour(mock_hass):
     assert sorted(prices.values()) == [float(i) for i in range(8)]
     # Both 02:xx hours are local hour 2: the hourly mean takes all eight
     assert battery_plan._hourly(prices)[dt.date(2026, 10, 25)] == {2: 3.5}
-
-
-def test_forced_slot_in_the_repeated_hour(mock_hass):
-    """Test that a manual slot in the first 02:xx is not forced into the second."""
-    utc = dt.datetime(2026, 10, 25, 0, 0, tzinfo=dt.UTC)  # 02:00 CEST
-    starts = [(utc + dt.timedelta(minutes=15 * i)).astimezone(TZ) for i in range(8)]
-    mock_hass.data[DOMAIN]["manual_slots"] = [
-        {"start": starts[0], "end": starts[2], "state": "charge", "soc": 90}
-    ]
-    forced = battery_plan._forced(mock_hass, starts)
-    assert forced == ["charge", "charge"] + [None] * 6
 
 
 async def test_prices_without_an_offset_are_local(mock_hass):

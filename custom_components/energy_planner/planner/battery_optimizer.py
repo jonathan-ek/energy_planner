@@ -10,11 +10,11 @@ the tariff and the battery, choose per quarter one of the modes the inverter can
 - `charge`: the battery charges from PV and the grid, keeping the grid import at or
   below the import target.
 - `sell_excess`: the PV surplus is exported instead of stored; the battery only
-  covers the load when PV does not (the slot state `sell-excess`). Exporting surplus
+  covers the load when PV does not (the action state `sell-excess`). Exporting surplus
   now and storing later surplus avoids the battery losses of `sell`. With a full
   battery `self_use` exports the surplus too, and wins the tie.
 - `discard_excess`: like `self_use`, but PV surplus the battery cannot take is
-  curtailed instead of exported (the slot state `discard-excess`, the inverter's
+  curtailed instead of exported (the action state `discard-excess`, the inverter's
   feed-in limit). Pays when the export price (spot plus the network compensation)
   is negative.
 - `sell`: the battery discharges at full power, the surplus is exported.
@@ -75,6 +75,8 @@ from .tariff import PowerCharge, Tariff, charged_peak, import_limit
 QUARTER_HOURS = 0.25
 MODES = ("self_use", "hold", "sell_excess", "discard_excess", "charge", "sell")
 SOC_STEPS = 101
+# kWh: a battery this close to a forced sell's target has reached it
+SOC_TOLERANCE = 1e-6
 TARGET_STEP_KW = 0.5
 # The target search first tries levels this far apart, then TARGET_STEP_KW around
 # the best (see `_candidate_levels`)
@@ -205,6 +207,14 @@ class _Inputs:
     vehicle: Vehicle | None = None  # a car to charge, None: no car
     ev_end_price: float = 0.0  # SEK per kWh the car still needs after the horizon
     fuse_kwh: float = math.inf  # the main fuse, kWh per quarter, inf if none
+    # A forced `charge` charges up to it, a forced `sell` sells down to it (kWh);
+    # empty or None: no target
+    forced_soc: Sequence[float | None] = ()
+
+
+def _forced_soc(inputs: _Inputs, index: int) -> float | None:
+    """Return the quarter's forced target SOC (kWh), None without one."""
+    return inputs.forced_soc[index] if inputs.forced_soc else None
 
 
 def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh, extra=0.0):
@@ -218,14 +228,23 @@ def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh, extra=0.0):
     power = battery.max_power_kw * QUARTER_HOURS
     available = np.maximum(soc - battery.floor_kwh, 0.0) * eta  # deliverable kWh
     room = np.maximum(battery.max_kwh - soc, 0.0) / eta  # kWh it can take in
+    forced_soc = _forced_soc(inputs, index)
     surplus = max(-net, 0.0)
     demand = max(net, 0.0)
 
     if mode == "sell":
+        if forced_soc is not None:
+            # A manual sell may go below the reserve, down to its own target
+            floor = max(battery.min_kwh, forced_soc)
+            available = np.maximum(soc - floor, 0.0) * eta
         out = np.minimum(available, power)
         grid = net - out
         return soc - out / eta, np.maximum(grid, 0.0), np.maximum(-grid, 0.0)
     if mode == "charge":
+        if forced_soc is not None:
+            # At the target it neither charges nor discharges, like the inverter's
+            # time-of-use charge window at its cut-off SOC
+            room = np.maximum(min(battery.max_kwh, forced_soc) - soc, 0.0) / eta
         grid_room = min(battery.max_grid_charge_kw * QUARTER_HOURS, target_kwh - demand)
         stored = np.minimum(np.minimum(room, power), surplus + max(grid_room, 0.0))
         grid = demand - surplus + stored
@@ -273,9 +292,30 @@ def _wear(battery: Battery, soc, next_soc):
 
 
 def _allowed(inputs: _Inputs, index: int) -> list[int]:
-    """Return the indexes in MODES the quarter may use (one if it is forced)."""
+    """Return the indexes in MODES the quarter may use (one if it is forced).
+
+    A forced `sell` with a target SOC may also use `self_use`, once the battery is
+    down to the target (`_valid`): the inverter scripts run self-use then.
+    """
     forced = inputs.forced[index]
-    return [MODES.index(forced)] if forced else list(range(len(MODES)))
+    if not forced:
+        return list(range(len(MODES)))
+    if forced == "sell" and _forced_soc(inputs, index) is not None:
+        return [MODES.index("sell"), MODES.index("self_use")]
+    return [MODES.index(forced)]
+
+
+def _valid(inputs: _Inputs, index: int, mode: int, soc) -> np.ndarray | bool:
+    """Return whether a mode may run at each soc.
+
+    In a forced `sell` with a target SOC: `sell` above the target, `self_use` at or
+    below it (see `_allowed`).
+    """
+    target = _forced_soc(inputs, index)
+    if inputs.forced[index] != "sell" or target is None:
+        return True
+    reached = soc <= target + SOC_TOLERANCE
+    return reached if MODES[mode] == "self_use" else np.logical_not(reached)
 
 
 def _ev_levels(inputs: _Inputs) -> np.ndarray:
@@ -440,6 +480,7 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
                 cost = _quarter_cost(
                     inputs, index, imp, exp, caps[index], ev_kwh
                 ) + _wear(battery, grid, soc)
+                cost = np.where(_valid(inputs, index, mode, grid), cost, np.inf)
                 if car > 1:
                     future = _shifted(
                         _at_soc(following[mode], grid, soc), ev_kwh, levels
@@ -475,6 +516,8 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
             + future
             + switch[previous, mode]
         )
+        if not np.all(_valid(inputs, index, mode, soc)):
+            cost = math.inf
         return cost, next_soc, imp, exp
 
     for index in range(count):
@@ -504,6 +547,7 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
             c[1]
             for c in candidates
             if c[2] == ev_kwh
+            and c[0] < math.inf
             and all(
                 abs(float(x[0]) - float(y[0])) < 1e-9
                 for x, y in ((c[3], soc), (c[4], imp), (c[5], exp))
@@ -589,6 +633,7 @@ def optimize(
     history: Mapping[dt.datetime, float] | None = None,
     forced: Sequence[str | None] | None = None,
     current_mode: str | None = None,
+    forced_soc: Sequence[float | None] | None = None,
     exempt: Sequence[float] | None = None,
     probe_kwh: float = 0.0,
     vehicle: Vehicle | None = None,
@@ -598,7 +643,9 @@ def optimize(
     `starts` are local quarter starts; `prices` spot SEK/MWh excl. VAT; `load` and
     `pv` kWh per quarter; `history` the hourly mean grid import (kW, keyed by local
     hour start) so far this month, which sets the peaks already paid for; `forced`
-    a mode per quarter that must be used (None: free); `current_mode` the mode the
+    a mode per quarter that must be used (None: free), `forced_soc` its target SOC
+    (kWh: a forced `charge` charges up to it and then holds, a forced `sell` sells
+    down to it and then runs self-use; None: none); `current_mode` the mode the
     battery runs now, so a recalculated plan only changes it when it pays; `exempt`
     kWh per quarter of the load that the import limit does not apply to (the heat
     pump); `probe_kwh` the extra load per quarter that `Plan.marginal` prices;
@@ -654,6 +701,7 @@ def optimize(
         # the horizon's last day
         float(np.min(buy[-END_WINDOW:])) if len(buy) else 0.0,
         limit.fuse_kw * QUARTER_HOURS if limit.fuse_kw > 0 else math.inf,
+        tuple(forced_soc) if forced_soc else (),
     )
 
     # The power charges in the horizon, per month, and the peak already reached

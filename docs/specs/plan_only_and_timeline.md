@@ -169,3 +169,17 @@ Findings from the code reviews between the steps that were not fixed, and why.
 - Step 1: `examples/energi_dashboard.yaml` (the owner's dashboard copy, untracked and
   not part of these commits) still lists the removed entities. Update it with the
   owner's dashboard when the houses are upgraded.
+- Step 2: the battery action is rewritten every minute, so a manual slot starts or
+  ends up to a minute late (as the slots did). A timer at the next slot boundary
+  would fix it.
+- Step 2: `remove_manual_slot` with a time without an offset in the hour repeated
+  when DST ends always means the first 02:xx; the `manual_slots` attribute's times
+  have offsets and work.
+- Step 2: a manual `charge` charges at the highest current without an import limit
+  (as the slots did), but the plan models a forced `charge` at its import target, so
+  the plan can expect slower charging than happens. The next plans correct the SOC.
+- Step 2: `examples/battery/solis_dispatch_test.yaml` and
+  `solis_dispatch_mode_test.yaml` turn `automation.update_battery_action` off and
+  on. That is the HA automation id in the houses that still have it; check it when
+  the houses are upgraded.
+- Step 2: `examples/energi_dashboard.yaml` (untracked) also has the slot card.

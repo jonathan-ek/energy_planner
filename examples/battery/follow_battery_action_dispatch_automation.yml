@@ -1,8 +1,7 @@
 # Runs follow_battery_action.py with DISPATCH = True, copied to
 # config/python_scripts/follow_battery_action_dispatch.py, so the plain script and
-# its automation (follow_battery_action_automation.yml or the older
-# update_battery_action) stay as a fallback: turn this automation off and the old one
-# on, and the dispatch failsafe ends within DISPATCH_FAILSAFE (3) minutes. Only one of
+# its automation (follow_battery_action_automation.yml) stay as a fallback: turn
+# this automation off and the plain one on, and the dispatch failsafe ends within DISPATCH_FAILSAFE (3) minutes. Only one of
 # them may be on. See docs/solis_remote_dispatch_2026_10.md.
 alias: Follow battery action (dispatch)
 description: >-

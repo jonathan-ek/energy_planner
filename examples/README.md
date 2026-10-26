@@ -1,7 +1,7 @@
 # Examples
 
 Home Assistant scripts, automations and cards that consume what the integration
-publishes. The integration only produces the schedule and the actions as entities;
+publishes. The integration only produces the plan and the actions as entities;
 these apply them to the devices. Entity ids are the owner's (Solis, Zaptec,
 MELCloud), so check them before copying. `python_script`s go in
 `config/python_scripts/` (needs `python_script:` in `configuration.yaml`).
@@ -15,7 +15,6 @@ MELCloud), so check them before copying. `python_script`s go in
 | `follow_battery_action_dispatch_automation.yml` | Runs the `DISPATCH = True` copy (`follow_battery_action_dispatch.py`); the plain one stays as the fallback |
 | `solis_dispatch_test.yaml` | Two HA scripts that test Remote Dispatch step by step (grid import, charge, the import limit, the failsafe) and log every 30 s; results in `docs/solis_remote_dispatch_2026_10.md` |
 | `solis_dispatch_mode_test.yaml` | Tests for the modes that still use time-of-use and peak shaving: `script.solis_dispatch_sun_test` (in sunshine: self-consumption, feed-in priority, the SOC window's end, an export limit of 0, charging with PV) and `script.solis_dispatch_hold_test` (without PV: hold as a grid import target without grid charging, `battery_hold` with an import limit, discharging at the window's end) |
-| `update_battery_action.py`, `update_battery_action_automation.yml` | The older script, rewrites every setting from slot 1; replaced by `follow_battery_action.py` |
 
 ## `ev/`
 
@@ -39,6 +38,8 @@ MELCloud), so check them before copying. `python_script`s go in
 
 | File | What it does |
 | --- | --- |
-| `schedule_card.yml` | Lovelace card with the 49 slots (generated) |
-| `generate_schedule_card.py` | Writes `schedule_card.yml` (run it in this folder) |
-| `helpers.yml` | Lovelace card with the battery and planner settings |
+| `helpers.yml` | Lovelace card with the battery and planner settings and the manual slot form |
+
+The manual slots are listed in the `manual_slots` attribute of
+`sensor.energy_planner_battery_plan` (start, end, state, target SOC), and marked per
+quarter in its `manual` and `manual_soc` attributes.

@@ -1,12 +1,10 @@
 import logging
 import datetime as dt
-from zoneinfo import ZoneInfo
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
-    callback,
     Event,
     EventStateChangedData,
 )
@@ -29,20 +27,16 @@ from .const import (
     SWITCH_ENTITIES,
     SELECT_ENTITIES,
     TIME_ENTITIES,
-    SLOT_COUNT,
 )
-from .migrate import migrate_config, remove_entities
-from .planner import settings
+from .migrate import migrate_config, migrate_values, remove_entities
+from .planner import manual, settings
+from .planner.plan import quarter_start
 from .planner.ev import is_plugged as ev_is_plugged
 from .planner.fuse_guard import config_entities, update_guard
 from .planner import (
     async_request_plan,
     async_update_forecast,
     write_plan_sensors,
-    dynamic_planner,
-    add_manual_slots,
-    clear_passed_slots,
-    update_entities,
 )
 from .store import async_save_to_store, async_load_from_store
 
@@ -63,17 +57,19 @@ PLATFORMS = [
     Platform.SWITCH,
     Platform.TIME,
 ]
-# Nord Pool publishes the prices for the next day in Stockholm time
-NORDPOOL_TIME_ZONE = ZoneInfo("Europe/Stockholm")
-NORDPOOL_UPDATE_HOUR = 15
 
 
 async def async_setup_data_structure(hass: HomeAssistant):
     """Set up the data structure."""
 
     async def save():
-        for data_store in ["values", "config", "manual_slots"]:
+        for data_store in ["values", "config"]:
             await async_save_to_store(hass, data_store, hass.data[DOMAIN][data_store])
+        await async_save_to_store(
+            hass,
+            "manual_slots",
+            [slot.to_stored() for slot in hass.data[DOMAIN]["manual_slots"]],
+        )
 
     hass.data[DOMAIN] = {
         "values": {},
@@ -88,60 +84,99 @@ async def async_setup_data_structure(hass: HomeAssistant):
     }
     hass.data[DOMAIN]["values"] = await async_load_from_store(hass, "values")
     hass.data[DOMAIN]["config"] = await async_load_from_store(hass, "config")
-    original = dict(hass.data[DOMAIN]["config"])
-    # A removed planner's slots are replaced once Home Assistant has started
-    hass.data[DOMAIN]["replan_migrated"] = migrate_config(hass.data[DOMAIN]["config"])
-    hass.data[DOMAIN]["manual_slots"] = (
-        await async_load_from_store(hass, "manual_slots") or []
-    )
+    migrated = migrate_config(hass.data[DOMAIN]["config"])
+    migrated = migrate_values(hass.data[DOMAIN]["values"]) or migrated
+    stored_slots = await async_load_from_store(hass, "manual_slots") or []
     parse_stored_data(hass)
-    if hass.data[DOMAIN]["config"] != original:
-        await async_save_to_store(hass, "config", hass.data[DOMAIN]["config"])
+    hass.data[DOMAIN]["manual_slots"] = _load_manual_slots(stored_slots)
+    if migrated or len(hass.data[DOMAIN]["manual_slots"]) != len(stored_slots):
+        await save()
 
 
-def _parse_utc(value: str) -> dt.datetime | None:
-    """Parse a stored time to UTC, like the planners write the slots."""
-    parsed = dt_utils.parse_datetime(value)
-    return dt_utils.as_utc(parsed) if parsed is not None else None
+def _load_manual_slots(stored: list) -> list[manual.ManualSlot]:
+    """Return the stored manual slots that have not ended, in whole quarters.
+
+    A time without an offset is in HA's time zone. Invalid ones are dropped.
+    """
+    slots = []
+    for item in stored:
+        try:
+            slots.append(
+                manual.from_stored(
+                    {
+                        **item,
+                        "start": dt_utils.as_utc(_parse(item["start"])),
+                        "end": dt_utils.as_utc(_parse(item["end"])),
+                    }
+                )
+            )
+        except KeyError, TypeError, ValueError:
+            _LOGGER.warning("Dropping an invalid manual slot: %s", item)
+    return manual.current(slots, dt_utils.now())
+
+
+def _parse(value) -> dt.datetime:
+    """Return a stored time as a datetime (ISO strings in the store)."""
+    parsed = dt_utils.parse_datetime(value) if isinstance(value, str) else value
+    if not isinstance(parsed, dt.datetime):
+        raise ValueError(f"Not a time: {value!r}")
+    return parsed
 
 
 def parse_stored_data(hass: HomeAssistant):
     """Convert dates and times, which are stored as strings, back to objects."""
-    values = hass.data[DOMAIN]["values"]
-    for i in range(1, SLOT_COUNT + 1):
-        key = f"slot_{i}_date_time_start"
-        if type(values.get(key)) is str:
-            values[key] = _parse_utc(values[key])
     config = hass.data[DOMAIN]["config"]
     if type(config.get("ev_ready_time")) is str:
         config["ev_ready_time"] = dt.time.fromisoformat(config["ev_ready_time"])
     if type(config.get("ev_departure")) is str:
         config["ev_departure"] = dt_utils.parse_datetime(config["ev_departure"])
-    for slot in hass.data[DOMAIN]["manual_slots"]:
-        for key in ["start", "end"]:
-            if type(slot.get(key)) is str:
-                slot[key] = _parse_utc(slot[key])
 
 
-async def run_planner(hass: HomeAssistant) -> None:
-    """Run the planner: one `auto` slot, also while it is turned off.
+async def _manual_slots_changed(hass: HomeAssistant, reason: str) -> None:
+    """Store the manual slots, show them at once and plan around them."""
+    await hass.data[DOMAIN]["save"]()
+    write_plan_sensors(hass)
+    await async_request_plan(hass, reason)
 
-    Off only stops the battery from following the `auto` slot
-    (battery_plan.current_action), so turning it on takes effect at once.
+
+async def add_manual_slot(hass: HomeAssistant, data: dict) -> manual.ManualSlot:
+    """Add a manual slot over whole quarters (the times are rounded outwards).
+
+    A time without an offset is in HA's time zone. Raises ValueError for invalid data.
     """
-    await dynamic_planner(hass)
+    start = dt_utils.as_utc(dt.datetime.fromisoformat(str(data["start"])))
+    end = dt_utils.as_utc(dt.datetime.fromisoformat(str(data["end"])))
+    soc = data.get("soc")
+    slot = manual.make(start, end, data.get("state", ""), soc)
+    if (slot.start, slot.end) != (start, end):
+        _LOGGER.info(
+            "Manual slot rounded to whole quarters: %s - %s", slot.start, slot.end
+        )
+    if slot.end <= dt_utils.now():
+        raise ValueError("The slot has already ended")
+    hass.data[DOMAIN]["manual_slots"].append(slot)
+    await _manual_slots_changed(hass, "manual slot added")
+    return slot
+
+
+async def remove_manual_slot(hass: HomeAssistant, start: str) -> None:
+    """Remove the manual slots starting in the quarter of `start`.
+
+    Raises ValueError if none does.
+    """
+    first = quarter_start(dt_utils.as_utc(dt.datetime.fromisoformat(str(start))))
+    slots = hass.data[DOMAIN]["manual_slots"]
+    kept = [slot for slot in slots if slot.start != first]
+    if len(kept) == len(slots):
+        raise ValueError(f"No manual slot starts at {start}")
+    hass.data[DOMAIN]["manual_slots"] = kept
+    await _manual_slots_changed(hass, "manual slot removed")
 
 
 async def clear_manual_slots(hass: HomeAssistant) -> None:
-    """Drop the manual slots and rebuild the schedule without them.
-
-    The manual slots are also written into the schedule, so emptying the list alone
-    would leave them running there.
-    """
+    """Drop all manual slots."""
     hass.data[DOMAIN]["manual_slots"] = []
-    await run_planner(hass)
-    await hass.data[DOMAIN]["save"]()
-    await async_request_plan(hass, "manual slots cleared")
+    await _manual_slots_changed(hass, "manual slots cleared")
 
 
 async def async_setup(hass: HomeAssistant, config):
@@ -149,49 +184,21 @@ async def async_setup(hass: HomeAssistant, config):
     if DOMAIN not in hass.data:
         await async_setup_data_structure(hass)
 
-    @callback
     async def add_slot_service(call: ServiceCall) -> None:
-        """Service to add a slot."""
+        """Service to add a manual slot."""
         try:
-            # UTC like the slots; a time without an offset is in HA's time zone
-            start_datetime = dt_utils.as_utc(
-                dt.datetime.fromisoformat(call.data["start"])
-            )
-            end_datetime = dt_utils.as_utc(dt.datetime.fromisoformat(call.data["end"]))
-            state = call.data.get("state")
-            soc = call.data.get("soc")
-            if start_datetime > end_datetime:
-                raise ValueError("Start must be before end")
-            if state not in [
-                "charge",
-                "discharge",
-                "sell",
-                "sell-excess",
-                "discard-excess",
-                "pause",
-                "off",
-            ]:
-                raise ValueError("Invalid state")
-        except Exception as e:
+            await add_manual_slot(hass, dict(call.data))
+        except (KeyError, TypeError, ValueError) as e:
             _LOGGER.error("Error adding slot: %s", e)
-            raise ServiceValidationError("Invalid data") from e
-        hass.data[DOMAIN]["manual_slots"].append(
-            {"start": start_datetime, "end": end_datetime, "state": state, "soc": soc}
-        )
-        await add_manual_slots(hass)
-        await update_entities(hass)
-        await hass.data[DOMAIN]["save"]()
-        await async_request_plan(hass, "manual slot added")
-        _LOGGER.info("Received data: %s", call.data)
+            raise ServiceValidationError(f"Invalid slot: {e}") from e
 
-    @callback
-    async def run_planner_service(call: ServiceCall) -> None:
-        """Service to run the planner."""
-        _LOGGER.info("Running planner: %s", config)
-        _LOGGER.info("Received planning data: %s", call.data)
-        await run_planner(hass)
+    async def remove_manual_slot_service(call: ServiceCall) -> None:
+        """Service to remove a manual slot."""
+        try:
+            await remove_manual_slot(hass, call.data["start"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ServiceValidationError(str(e)) from e
 
-    @callback
     async def clear_manual_slots_service(call: ServiceCall) -> None:
         """Service to clear the manual slots."""
         await clear_manual_slots(hass)
@@ -210,7 +217,9 @@ async def async_setup(hass: HomeAssistant, config):
     hass.services.async_register(
         DOMAIN, "update_battery_plan", update_battery_plan_service
     )
-    hass.services.async_register(DOMAIN, "run_planner", run_planner_service)
+    hass.services.async_register(
+        DOMAIN, "remove_manual_slot", remove_manual_slot_service
+    )
     hass.services.async_register(
         DOMAIN, "clear_manual_slots", clear_manual_slots_service
     )
@@ -242,23 +251,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     entry.async_on_unload(entry.add_update_listener(options_updated))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    async def update_schedule(now: dt.datetime):
-        # Checked every hour to follow daylight saving changes
-        if now.astimezone(NORDPOOL_TIME_ZONE).hour != NORDPOOL_UPDATE_HOUR:
-            return
-        await run_planner(hass)
-
-    entry.async_on_unload(
-        async_track_utc_time_change(hass, update_schedule, minute=31, second=15)
-    )
-
-    async def check_schedule(now: dt.datetime):
-        await clear_passed_slots(hass)
-        # The action follows slot 1 and the plan's current quarter
+    async def write_actions(now: dt.datetime):
+        # The actions follow the plan's current quarter and the manual slots
         write_plan_sensors(hass)
 
     entry.async_on_unload(
-        async_track_time_interval(hass, check_schedule, dt.timedelta(minutes=1))
+        async_track_time_interval(hass, write_actions, dt.timedelta(minutes=1))
     )
 
     async def update_forecast(*_):
@@ -276,13 +274,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         async_track_utc_time_change(hass, update_forecast, minute=5, second=0)
     )
     entry.async_on_unload(async_at_started(hass, update_forecast))
-
-    async def replace_migrated_slots(*_):
-        if hass.data[DOMAIN].pop("replan_migrated", False):
-            _LOGGER.info("Replacing the slots of a removed planner")
-            await run_planner(hass)
-
-    entry.async_on_unload(async_at_started(hass, replace_migrated_slots))
 
     async def forecast_setting_changed(event: Event[EventStateChangedData]):
         old, new = event.data["old_state"], event.data["new_state"]
@@ -408,18 +399,12 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
         )
     )
 
-    async def slot_changed(event: Event[EventStateChangedData]):
+    async def enabled_changed(event: Event[EventStateChangedData]):
         write_plan_sensors(hass)
 
     entry.async_on_unload(
         async_track_state_change_event(
-            hass,
-            [
-                f"select.{DOMAIN}_slot_1_state",
-                f"switch.{DOMAIN}_slot_1_active",
-                f"switch.{DOMAIN}_enabled",
-            ],
-            slot_changed,
+            hass, f"switch.{DOMAIN}_enabled", enabled_changed
         )
     )
 

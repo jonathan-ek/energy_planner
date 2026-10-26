@@ -12,6 +12,7 @@ from .plans import make_plan
 action = importlib.import_module(
     "custom_components.energy_planner.planner.battery_action"
 )
+manual = importlib.import_module("custom_components.energy_planner.planner.manual")
 
 TZ = ZoneInfo("Europe/Stockholm")
 NOW = dt.datetime(2026, 10, 7, 22, 5, tzinfo=TZ)
@@ -40,11 +41,6 @@ def plan(modes, soc, targets=None, updated=START, peak_levels=None):
     )
 
 
-def auto(start=START, end=None):
-    """Return an active auto slot."""
-    return action.Slot("auto", True, start, end, 50)
-
-
 def test_charge_follows_the_plan():
     """Test the target SOC, the current for the run and its end."""
     charge = plan(
@@ -52,7 +48,7 @@ def test_charge_follows_the_plan():
         [52.5, 55.0, 57.5, 57.0],
         [4.0, 4.0, 4.0, None],
     )
-    result = action.resolve(auto(), charge, NOW, BATTERY)
+    result = action.resolve(None, charge, NOW, BATTERY)
     assert result["state"] == "charge"
     assert result["source"] == "plan"
     assert result["soc"] == 58
@@ -65,7 +61,7 @@ def test_charge_follows_the_plan():
 def test_sell_current_is_limited():
     """Test that selling never asks for more than the max discharge current."""
     sell = plan(["sell", "self_use"], [20.0, 20.0])
-    result = action.resolve(auto(), sell, NOW, BATTERY)
+    result = action.resolve(None, sell, NOW, BATTERY)
     assert result["state"] == "sell"
     assert result["soc"] == 20
     assert result["current_a"] == 18
@@ -81,8 +77,8 @@ def test_sell_current_is_limited():
     ],
 )
 def test_other_modes(mode, state, soc):
-    """Test the slot state and SOC of the modes without a current."""
-    result = action.resolve(auto(), plan([mode], [50.0]), NOW, BATTERY)
+    """Test the action state and SOC of the modes without a current."""
+    result = action.resolve(None, plan([mode], [50.0]), NOW, BATTERY)
     assert (result["state"], result["soc"], result["current_a"]) == (state, soc, 0)
 
 
@@ -93,7 +89,7 @@ RESERVE = dataclasses.replace(BATTERY, soc=20.0, reserve_soc=20.0)
 def test_reserve_only_shaves_peaks(mode):
     """Test that at the reserve the battery holds and shaves to the power charge."""
     planned = plan([mode], [20.0], [1.0], peak_levels=[3.5])
-    result = action.resolve(auto(), planned, NOW, RESERVE)
+    result = action.resolve(None, planned, NOW, RESERVE)
     assert (result["state"], result["mode"], result["soc"]) == ("pause", "hold", 20)
     assert result["import_target_kw"] == 3.5
     assert result["reserve"]
@@ -102,7 +98,7 @@ def test_reserve_only_shaves_peaks(mode):
 def test_reserve_without_power_charge_keeps_the_battery():
     """Test that without a power charge the reserve is just kept."""
     planned = plan(["self_use"], [20.0], peak_levels=[None])
-    result = action.resolve(auto(), planned, NOW, RESERVE)
+    result = action.resolve(None, planned, NOW, RESERVE)
     assert (result["state"], result["import_target_kw"]) == ("pause", None)
 
 
@@ -110,9 +106,9 @@ def test_above_the_reserve_the_plan_is_followed():
     """Test that self-use runs while the battery is above the reserve."""
     above = dataclasses.replace(RESERVE, soc=21.0)
     planned = plan(["self_use"], [20.0], peak_levels=[3.5])
-    result = action.resolve(auto(), planned, NOW, above)
+    result = action.resolve(None, planned, NOW, above)
     assert result["state"] == "discharge"
-    sell_excess = action.resolve(auto(), plan(["sell_excess"], [50.0]), NOW, above)
+    sell_excess = action.resolve(None, plan(["sell_excess"], [50.0]), NOW, above)
     assert sell_excess["soc"] == 20
 
 
@@ -120,50 +116,83 @@ def test_missing_soc_is_not_an_empty_battery():
     """Test that without a SOC reading the plan's expected SOC is used."""
     unknown = dataclasses.replace(RESERVE, soc=None)
     planned = plan(["self_use"], [40.0], peak_levels=[3.5])
-    result = action.resolve(auto(), planned, NOW, unknown)
+    result = action.resolve(None, planned, NOW, unknown)
     assert result["state"] == "discharge"
     assert "reserve" not in result
     # Expected at 22:05: 50 -> 60 % a third through the quarter, 53.3 %; the
     # 6.7 % left is 1.33 kWh in 10 minutes: 8 kW, 16 A at 500 V
     charge = plan(["charge"], [60.0], [4.0])
-    result = action.resolve(auto(), charge, NOW, unknown)
+    result = action.resolve(None, charge, NOW, unknown)
     assert (result["soc"], result["current_a"]) == (60, 16)
 
 
 def test_old_plan_falls_back_to_self_use():
     """Test that a plan not updated for over half an hour is not followed."""
     old = plan(["charge"], [60.0], updated=START - dt.timedelta(hours=1))
-    result = action.resolve(auto(), old, NOW, BATTERY)
+    result = action.resolve(None, old, NOW, BATTERY)
     assert (result["state"], result["source"]) == ("discharge", "fallback")
 
 
 def test_plan_not_covering_now():
     """Test the fallback when the plan has ended."""
     later = NOW + dt.timedelta(hours=3)
-    result = action.resolve(auto(), plan(["charge"], [60.0]), later, BATTERY)
+    result = action.resolve(None, plan(["charge"], [60.0]), later, BATTERY)
     assert (result["state"], result["source"]) == ("discharge", "fallback")
 
 
 def test_manual_slot_wins():
-    """Test that a slot with a real state overrides the plan."""
-    slot = action.Slot("charge", True, START, STARTS[4], 80)
+    """Test that a manual slot overrides the plan, at its target and highest current."""
+    slot = manual.ManualSlot(START, STARTS[4], "charge", 80)
     result = action.resolve(slot, plan(["sell"], [20.0]), NOW, BATTERY)
     assert result["state"] == "charge"
-    assert result["source"] == "slot"
+    assert result["source"] == "manual"
     assert (result["soc"], result["current_a"]) == (80, 20)
     assert result["until"] == STARTS[4].isoformat()
 
 
 @pytest.mark.parametrize(
-    "slot",
+    ("state", "soc", "expected"),
     [
-        None,
-        action.Slot("off", True, START, None, 50),
-        action.Slot("auto", False, START, None, 50),
-        action.Slot("auto", True, NOW + dt.timedelta(minutes=5), None, 50),
+        ("charge", None, 90),  # the max SOC
+        ("sell", None, 20),  # the reserve
+        ("sell", 5, 15),  # not below the shutdown SOC
+        ("pause", 40, 90),  # keeps up to the max SOC
+        ("sell-excess", None, 20),  # exports down to the reserve
+        ("discharge", 40, None),
     ],
 )
-def test_no_slot_is_self_use(slot):
-    """Test that without a running slot the battery is in self-use."""
-    result = action.resolve(slot, plan(["charge"], [60.0]), NOW, BATTERY)
+def test_manual_slot_soc(state, soc, expected):
+    """Test the action's SOC for each manual state, without a plan."""
+    battery = dataclasses.replace(BATTERY, reserve_soc=20.0)
+    slot = manual.ManualSlot(START, STARTS[4], state, soc)
+    result = action.resolve(slot, None, NOW, battery, enabled=False)
+    assert (result["state"], result["source"], result["soc"]) == (
+        state,
+        "manual",
+        expected,
+    )
+
+
+def test_quarter_of_a_removed_manual_slot_is_not_followed():
+    """Test that a plan made around a slot since removed is not followed there."""
+    planned = dataclasses.replace(
+        plan(["sell", "self_use"], [40.0, 40.0]), manual=("sell", None)
+    )
+    result = action.resolve(None, planned, NOW, BATTERY)
+    assert (result["source"], result["reason"]) == ("fallback", "manual slot removed")
+
+
+def test_planner_off_is_self_use():
+    """Test that with the planner off the plan is not followed."""
+    result = action.resolve(None, plan(["charge"], [60.0]), NOW, BATTERY, enabled=False)
     assert (result["state"], result["source"]) == ("discharge", "none")
+
+
+def test_battery_current_in_the_repeated_hour():
+    """Test the time left to the end of a run across the repeated hour."""
+    battery = action.BatteryState(50.0, 500.0, 10.0, 20.0, 90.0, 100.0, 100.0)
+    # 02:20 CEST to 02:00 CET is 40 min, though the wall clock goes back
+    now = dt.datetime(2026, 10, 25, 2, 20, tzinfo=TZ)
+    until = dt.datetime(2026, 10, 25, 2, 0, tzinfo=TZ, fold=1)
+    # 2 kWh in 40 min at 500 V: 6 A
+    assert action._current(2.0, until, now, battery, 100) == 6

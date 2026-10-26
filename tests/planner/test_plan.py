@@ -116,9 +116,8 @@ def test_every_action_has_the_common_keys():
     """Test that the battery, car and heat pump actions share their core keys."""
     plan = make_plan(START, ev_power_kw=[0.0] * 4, heat_pump=[True] * 4)
     battery = battery_action.BatteryState(50.0, 500.0, 20.0, 15.0, 90.0, 20.0, 18.0)
-    slot = battery_action.Slot("auto", True, START, None, 50)
     actions = [
-        battery_action.resolve(slot, plan, at(5), battery),
+        battery_action.resolve(None, plan, at(5), battery),
         ev.ev_action(plan, at(5), plugged=True),
         heat_pump.action(plan, at(5), dict, 5.0, 15.0),
     ]
@@ -133,7 +132,7 @@ def test_every_action_has_the_common_keys():
         plan, starts=tuple(s + dt.timedelta(hours=1) for s in plan.starts)
     )
     for action in (
-        battery_action.resolve(slot, stale, later, battery),
+        battery_action.resolve(None, stale, later, battery),
         ev.ev_action(stale, later, plugged=True),
     ):
         assert (action["source"], action["reason"]) == ("fallback", "plan is old")

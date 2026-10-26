@@ -1,23 +1,25 @@
 add_slot:
-  name: Add Slot
-  description: Add new slot, will overwrite part of or whole existing slots if they overlap
+  name: Add manual slot
+  description: >-
+    Override the battery plan with an action state from start to end. The times are
+    rounded out to whole quarters. Where manual slots overlap, the last added wins.
   fields:
     start:
-      name: Start datetime
-      description: Start datetime of the slot
+      name: Start
+      description: Start of the slot (rounded down to the quarter)
       selector:
         datetime:
       required: true
     end:
-      name: End datetime
-      description: End datetime of the slot
+      name: End
+      description: End of the slot (rounded up to the quarter)
       selector:
         datetime:
       required: true
     state:
       name: State
-      description: State of the slot, one of 'charge', 'discharge', 'pause', 'sell', 'sell-excess', 'discard-excess', 'off'
-      example: "discharge"
+      description: One of 'charge', 'discharge', 'pause', 'sell', 'sell-excess', 'discard-excess'
+      example: "charge"
       required: true
       selector:
         select:
@@ -28,10 +30,11 @@ add_slot:
             - "sell-excess"
             - "discard-excess"
             - "pause"
-            - "off"
     soc:
-      name: SOC
-      description: SOC for the slots
+      name: Target SOC
+      description: >-
+        For 'charge': charge up to it, then hold (default the max SOC). For 'sell':
+        sell down to it, then self-use (default the reserve SOC). Ignored otherwise.
       selector:
         number:
           min: 0
@@ -39,13 +42,21 @@ add_slot:
           step: 1
           unit_of_measurement: '%'
           mode: slider
-run_planner:
-  name: Run Planner
-  description: Run the planner to calculate the schedule
+
+remove_manual_slot:
+  name: Remove manual slot
+  description: Remove the manual slots that start in the quarter of the given time
+  fields:
+    start:
+      name: Start
+      description: Start of the slot to remove
+      selector:
+        datetime:
+      required: true
 
 clear_manual_slots:
-  name: Clear Manual slots
-  description: Clear the manual slots from the schedule
+  name: Clear manual slots
+  description: Remove all manual slots
 
 update_forecast:
   name: Update forecast

@@ -5,7 +5,7 @@ from homeassistant.components.datetime import DateTimeEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.util import dt as dt_utils
 
-from .const import DOMAIN, SLOT_COUNT, DATE_TIME_ENTITIES
+from .const import DOMAIN, DATE_TIME_ENTITIES
 from .planner import settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -15,19 +15,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     """Set up the datetime platform."""
     _LOGGER.info("Setting up datetime platform")
     datetimes = [
-        EnergyPlannerDateTimeEntity(
-            hass,
-            {
-                "id": f"slot_{i}_date_time_start",
-                "name": f"Slot {i} start",
-                "enabled": True,
-                # "day/month HH:MM": the older slot scripts read it
-                # (examples/battery/update_battery_action.py)
-                "short_state": True,
-            },
-        )
-        for i in range(1, SLOT_COUNT + 1)
-    ] + [
         EnergyPlannerDateTimeEntity(
             hass,
             {
@@ -75,7 +62,6 @@ class EnergyPlannerDateTimeEntity(DateTimeEntity):
         self._attr_icon = entity_definition.get("icon", None)
         self._attr_native_step = entity_definition.get("step", 1.0)
         self._attr_should_poll = False
-        self.short_state = entity_definition.get("short_state", False)
         self._attr_entity_registry_enabled_default = entity_definition.get(
             "enabled", False
         )
@@ -101,19 +87,10 @@ class EnergyPlannerDateTimeEntity(DateTimeEntity):
 
     async def async_set_value(self, value: datetime.datetime) -> None:
         """Update the current value."""
-        # UTC like the planners' slot times; HA passes them in its own time zone
+        # Kept in UTC (an instant, so the hour repeated when DST ends is not
+        # ambiguous); HA passes it in its own time zone
         value = dt_utils.as_utc(value)
         self._attr_native_value = value
         self._hass.data[DOMAIN][self.data_store][self.id] = value
         await self._hass.data[DOMAIN]["save"]()
         self.schedule_update_ha_state()
-
-    def _stringify_state(self, available: bool) -> str:
-        """Return the state as a string."""
-        if not self.short_state:
-            # ISO, which the frontend needs to show and edit it
-            return super()._stringify_state(available)
-        if self._attr_native_value is None:
-            return "unknown"
-        val = dt_utils.as_local(self._attr_native_value)
-        return f"{val.day}/{val.month} {val.strftime('%H:%M')}"

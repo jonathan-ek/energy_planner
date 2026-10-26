@@ -14,15 +14,6 @@ from homeassistant.util import dt as dt_utils
 
 from . import ev as ev_need
 from . import forecast, heat_pump, heating, settings
-from .battery_plan import async_request_plan
-from .manual_slots import add_manual_slots
-from .utils import (
-    reset,
-    restore_disable_state,
-    store_disable_state,
-    update_entities,
-    write_schedule,
-)
 from ..const import DOMAIN, FORECAST_SENSORS
 
 _LOGGER = logging.getLogger(__name__)
@@ -597,35 +588,3 @@ async def async_update_forecast(hass: HomeAssistant):
     )
     for sensor in hass.data[DOMAIN].get(FORECAST_SENSORS, []):
         sensor.async_write_ha_state()
-
-
-async def planner(hass: HomeAssistant, *args, **kwargs):
-    """Follow the battery plan: one `auto` slot from now to the plan's end.
-
-    The plan is recalculated every quarter, so it is not written to the slots; the
-    `auto` slot makes sensor.energy_planner_battery_action follow it. Manual slots are
-    laid over it.
-    """
-    await async_update_forecast(hass)
-    requested = dt_utils.now()
-    # Wait for a calculation already running, and the one after it
-    await async_request_plan(hass, "dynamic planner", wait=True)
-    plan = hass.data[DOMAIN].get("plan")
-    # Timestamps: local times in the hour repeated when DST ends compare equal
-    if plan is None or plan.end.timestamp() <= dt_utils.now().timestamp():
-        _LOGGER.warning("No battery plan, the dynamic planner writes no schedule")
-        return
-    # Planned for a moment after the request, so on the new forecast. An older one
-    # still writes the auto slot, which follows later plans
-    if plan.updated < requested:
-        _LOGGER.warning(
-            "No new battery plan, the auto slot ends where the last one does"
-        )
-    start, end = plan.start, plan.end
-    await store_disable_state(hass)
-    await reset(hass)
-    write_schedule(hass, [{"start": start, "end": end, "state": "auto", "soc": 50}])
-    await add_manual_slots(hass)
-    await restore_disable_state(hass)
-    await update_entities(hass)
-    await hass.data[DOMAIN]["save"]()

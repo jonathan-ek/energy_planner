@@ -1,10 +1,9 @@
 # Description: python_script that makes a Solis inverter follow
-#              sensor.energy_planner_battery_action (a manual slot, a planner slot or,
-#              for an `auto` slot, the battery plan).
+#              sensor.energy_planner_battery_action (a manual slot or the battery
+#              plan).
 #
-# Unlike update_battery_action.py it only writes a setting when the inverter has a
-# different value, so running it every minute does not wear the inverter's memory or
-# flood Modbus. It uses time-of-use slot 6 for charging and discharging, so slot 1
+# It only writes a setting when the inverter has a different value, so running it
+# every minute does not wear the inverter's memory or flood Modbus. It uses time-of-use slot 6 for charging and discharging, so slot 1
 # stays free for the "Peak +/-" automations.
 #
 # The time windows start at 00:00 and end when the action ends (or 23:59), so they

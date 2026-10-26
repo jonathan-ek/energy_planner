@@ -25,11 +25,7 @@ input_select:
       - "sell"
       - "sell-excess"
       - "discard-excess"
-      - "off"
 input_button:
-  energy_planner_extras_run:
-    name: Run Planner
-    icon: mdi:play
   energy_planner_extras_add_slot:
     name: Add Slot
     icon: mdi:plus
@@ -38,14 +34,6 @@ input_button:
     icon: mdi:minus
 
 automation:
-  - alias: "Energy Planner Run"
-    triggers:
-      - trigger: state
-        entity_id:
-          - input_button.energy_planner_extras_run
-    action:
-      - service: energy_planner.run_planner
-
   - alias: "Energy Planner Clear Manual Slots"
     triggers:
       - trigger: state
@@ -60,9 +48,18 @@ automation:
         entity_id:
           - input_button.energy_planner_extras_add_slot
     action:
-      - service: energy_planner.add_slot
-        data_template:
-          start: "{{ states('input_datetime.energy_planner_extras_start') }}"
-          end: "{{ states('input_datetime.energy_planner_extras_end') }}"
+      # The SOC is a target only for charge and sell; without it they charge to the
+      # max SOC or sell down to the reserve
+      - variables:
           state: "{{ states('input_select.energy_planner_extras_state') }}"
-          soc: "{{ states('input_number.energy_planner_extras_soc') }}"
+          slot:
+            start: "{{ states('input_datetime.energy_planner_extras_start') }}"
+            end: "{{ states('input_datetime.energy_planner_extras_end') }}"
+            state: "{{ state }}"
+      - service: energy_planner.add_slot
+        data: >-
+          {% if state in ['charge', 'sell'] %}
+            {{ dict(slot, soc=states('input_number.energy_planner_extras_soc') | float) }}
+          {% else %}
+            {{ slot }}
+          {% endif %}

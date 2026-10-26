@@ -10,7 +10,7 @@ from homeassistant.const import UnitOfElectricCurrent, UnitOfEnergy
 from homeassistant.util import dt as dt_utils
 
 from .const import DOMAIN, FORECAST_SENSORS, FUSE_GUARD_SENSOR, PLAN_SENSORS
-from .planner.battery_plan import car_action, current_action
+from .planner.battery_plan import car_action, current_action, manual_slot_attributes
 from .planner.heating import heat_pump_action, heat_pump_economy
 
 _LOGGER = logging.getLogger(__name__)
@@ -73,9 +73,9 @@ HEAT_PUMP_SENSORS = {
 
 # key: (name, icon, resolve(hass) -> action). Each action has `state`, `source`,
 # `until`, `reason` and `plan_updated` (planner/plan.py), and its own keys:
-# - battery_action: what the inverter should do now, a slot state: slot 1, or the
-#   battery plan for an `auto` slot, with the target SOC, current and import target
-#   (planner/battery_action.py)
+# - battery_action: what the inverter should do now, an action state: the manual
+#   slot covering now, or the battery plan, with the target SOC, current and import
+#   target (planner/battery_action.py)
 # - heat_pump_action: `on`/`off` from the battery plan, or from the saving now when
 #   the plan is old (planner/heat_pump.py)
 # - ev_action: `charge`/`wait` from the battery plan, `charge` without a fresh plan so
@@ -182,7 +182,10 @@ class EnergyPlannerPlanSensor(SensorEntity):
             "temperature",
             "heat_pump_cop",
             "heat_pump_power",
+            "manual",
+            "manual_soc",
             "ev",
+            "manual_slots",
         }
     )
 
@@ -200,9 +203,12 @@ class EnergyPlannerPlanSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        """Return the plan."""
+        """Return the plan, and the manual slots (also without a plan)."""
         plan = self._hass.data[DOMAIN].get("plan")
-        return plan.to_attributes() if plan is not None else None
+        return {
+            **(plan.to_attributes() if plan is not None else {}),
+            "manual_slots": manual_slot_attributes(self._hass),
+        }
 
 
 class EnergyPlannerActionSensor(SensorEntity):

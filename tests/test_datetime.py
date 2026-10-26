@@ -28,27 +28,15 @@ def test_departure_state_is_iso():
     assert entity._stringify_state(True) == "unknown"
 
 
-def test_slot_state_is_short():
-    """The older slot scripts read "day/month HH:MM", in local time."""
-    entity = _entity(
-        {"id": "slot_1_date_time_start", "name": "Slot 1 start", "short_state": True}
-    )
-    default = dt_utils.get_default_time_zone()
-    dt_utils.set_default_time_zone(ZoneInfo("Europe/Stockholm"))
-    try:
-        # Slot times are kept in UTC
-        assert entity._stringify_state(True) == "15/10 22:00"
-    finally:
-        dt_utils.set_default_time_zone(default)
-
-
 async def test_set_value_is_kept_in_utc():
-    """HA passes a set time in its own time zone; the slots keep UTC."""
-    entity = _entity({"id": "slot_1_date_time_start", "name": "Slot 1 start"})
+    """HA passes a set time in its own time zone; the departure is kept in UTC."""
+    entity = _entity(
+        {"id": "ev_departure", "name": "Car departure", "data_store": "config"}
+    )
     entity._hass.data[DOMAIN]["save"] = AsyncMock()
     entity.schedule_update_ha_state = MagicMock()
     local = datetime.datetime(2026, 10, 25, 2, 30, tzinfo=ZoneInfo("Europe/Stockholm"))
     await entity.async_set_value(local.replace(fold=1))
-    stored = entity._hass.data[DOMAIN]["values"]["slot_1_date_time_start"]
+    stored = entity._hass.data[DOMAIN]["config"]["ev_departure"]
     assert stored.tzinfo == dt_utils.UTC
     assert stored.isoformat() == "2026-10-25T01:30:00+00:00"

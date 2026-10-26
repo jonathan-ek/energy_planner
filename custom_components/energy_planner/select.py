@@ -3,7 +3,7 @@ import logging
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 
-from .const import DOMAIN, SLOT_COUNT, SELECT_ENTITIES
+from .const import DOMAIN, SELECT_ENTITIES
 from .planner import settings
 from .planner.forecast import LOAD_MODELS, PV_CALIBRATIONS
 
@@ -14,43 +14,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     """Set up the select platform."""
     _LOGGER.info("Setting up datetime platform")
     selects = [
-        *[
-            EnergyPlannerSelectEntity(
-                hass,
-                {
-                    "id": f"slot_{i}_state",
-                    # Charge = charge with grid (C, SOC, x A)
-                    #   Fallback: pause
-                    # Discharge = (self-use) use sun to charge or let
-                    # battery discharge to house (-, -)
-                    #   Fallback: -
-                    # Sell = sell to grid (D, SOC, x A)
-                    #   Fallback: discharge
-                    # Sell excess = sell to grid when house need is met (D, min, 0 A)
-                    #   Fallback: -
-                    # Discard excess = Disable export (-, -, -)
-                    #   Fallback: -
-                    # Pause = save battery for later use (C, max, 0 A)
-                    #   Fallback: -
-                    # Auto = follow the battery plan, see
-                    #   sensor.energy_planner_battery_action
-                    "options": [
-                        "auto",
-                        "charge",
-                        "discharge",
-                        "sell",
-                        "sell-excess",
-                        "discard-excess",
-                        "pause",
-                        "off",
-                    ],
-                    "default": "off",
-                    "name": f"Slot {i} state",
-                    "enabled": True,
-                },
-            )
-            for i in range(1, SLOT_COUNT + 1)
-        ],
         EnergyPlannerSelectEntity(
             hass,
             {

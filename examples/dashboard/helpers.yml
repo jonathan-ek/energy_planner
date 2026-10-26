@@ -41,6 +41,5 @@ cards:
     title: Manuella Slots
   - type: entities
     entities:
-      - entity: input_button.energy_planner_extras_run
       - entity: input_button.energy_planner_extras_clear_manual_slots
     title: Actions

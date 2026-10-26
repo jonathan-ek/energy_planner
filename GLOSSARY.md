@@ -10,21 +10,19 @@ run, from spot prices, forecasts and grid tariffs, and tells the devices what to
 **Plan**:
 The battery optimizer's result for every quarter from now to the end of the known
 prices: a mode, SOC, import target and the car's and heat pump's power per quarter.
-Recalculated often and never written to the slots.
+Recalculated often. The only plan; there is no separate schedule.
 _Avoid_: battery plan dict, schedule
-
-**Schedule**:
-The fixed list of slots the planners write and the user can edit.
-_Avoid_: plan
-
-**Slot**:
-One entry in the schedule: a start, a slot state and a target SOC, lasting until the
-next slot starts.
 
 **Mode**:
 What the battery does in one quarter of the plan (`self_use`, `hold`, `sell_excess`,
 `discard_excess`, `charge`, `sell`).
-_Avoid_: slot state (the schedule's name for the same thing)
+_Avoid_: action state (the devices' name for the same thing)
+
+**Manual slot**:
+A user's override of the plan over whole quarters: an action state, and for `charge`
+and `sell` a target SOC (charge up to it, then hold; sell down to it, then self-use).
+Forced into the plan, and followed even when there is no plan.
+_Avoid_: slot, schedule entry
 
 **Run**:
 A stretch of consecutive quarters in the plan with the same value for one device, such
@@ -38,9 +36,15 @@ they would do without the planner.
 ### Acting
 
 **Action**:
-What one device should do now (battery, car or heat pump), with its source (slot, plan,
-fallback) and until when.
+What one device should do now (battery, car or heat pump), with its source (manual,
+plan, fallback, none) and until when.
 _Avoid_: command, decision
+
+**Action state**:
+The battery action's state, the names the inverter scripts know: `charge`,
+`discharge` (self-use), `sell`, `sell-excess`, `discard-excess`, `pause` (hold). Each
+is one mode.
+_Avoid_: slot state
 
 **Fallback**:
 The action a device gets when there is no fresh plan covering now.

@@ -22,7 +22,8 @@ from homeassistant.util import dt as dt_utils
 
 from ..const import DOMAIN, PLAN_SENSORS
 from ..store import async_load_from_store, async_save_to_store
-from .battery_action import SLOT_MODES, BatteryState, Slot, resolve
+from . import manual
+from .battery_action import BatteryState, resolve
 from . import ev, settings
 from .battery_optimizer import (
     QUARTER_HOURS,
@@ -428,39 +429,43 @@ def _vehicle(hass: HomeAssistant, starts) -> tuple[Vehicle, EvPlan] | tuple[None
     )
 
 
-def _forced(hass: HomeAssistant, starts) -> list[str | None]:
-    """Return the mode of the manual slot covering each quarter (None: no slot).
+def manual_slot_attributes(hass: HomeAssistant) -> list[dict]:
+    """Return the manual slots as the plan sensor publishes them.
 
-    Also while the planner is off: manual slots still run then.
+    Local times like the plan's, and the target SOC they run to (None: no target).
     """
-    forced: list[str | None] = []
-    for start in starts:
-        mode = None
-        for slot in hass.data[DOMAIN].get("manual_slots", []):
-            # Timestamps: local times in the hour repeated when DST ends compare equal
-            if slot["start"].timestamp() <= start.timestamp() < slot["end"].timestamp():
-                mode = SLOT_MODES.get(slot["state"], mode)
-        forced.append(mode)
-    return forced
+    limits = _soc_limits(hass.data[DOMAIN]["config"])
+    return [
+        {
+            "start": dt_utils.as_local(slot.start).isoformat(),
+            "end": dt_utils.as_local(slot.end).isoformat(),
+            "state": slot.state,
+            "soc": manual.target(slot, limits),
+        }
+        for slot in hass.data[DOMAIN].get("manual_slots", [])
+    ]
+
+
+def _soc_limits(config) -> manual.SocLimits:
+    """Return the battery's SOC settings that manual slot targets are limited to."""
+    battery = settings.battery(config)
+    return manual.SocLimits(battery.shutdown_soc, battery.max_soc, battery.reserve_soc)
+
+
+async def _prune_manual_slots(hass: HomeAssistant, now: dt.datetime) -> None:
+    """Drop the manual slots that have ended, and store the rest."""
+    slots = hass.data[DOMAIN].get("manual_slots", [])
+    kept = manual.current(slots, now)
+    if len(kept) != len(slots):
+        hass.data[DOMAIN]["manual_slots"] = kept
+        await hass.data[DOMAIN]["save"]()
 
 
 def current_action(hass: HomeAssistant) -> dict:
-    """Return the action now, from slot 1 and the battery plan."""
-    config = settings.battery(hass.data[DOMAIN]["config"])
-    values = hass.data[DOMAIN]["values"]
-    slot = None
-    # Off: an auto slot is not followed, so the battery runs self-use
-    enabled = settings.get(hass.data[DOMAIN]["config"], "enabled")
-    if values.get("slot_1_date_time_start") is not None and (
-        enabled or values.get("slot_1_state") != "auto"
-    ):
-        slot = Slot(
-            state=values.get("slot_1_state", "off"),
-            active=bool(values.get("slot_1_active")),
-            start=values.get("slot_1_date_time_start"),
-            end=values.get("slot_2_date_time_start"),
-            soc=float(values.get("slot_1_soc") or 0),
-        )
+    """Return the action now, from the manual slots and the battery plan."""
+    data = hass.data[DOMAIN]
+    config = settings.battery(data["config"])
+    now = dt_utils.now()
     battery = BatteryState(
         soc=settings.reading(hass, config.soc_sensor),
         voltage=settings.reading(hass, config.voltage_sensor) or 0.0,
@@ -471,7 +476,13 @@ def current_action(hass: HomeAssistant) -> dict:
         max_discharge_a=config.max_discharge_a,
         reserve_soc=config.reserve_soc,
     )
-    return resolve(slot, hass.data[DOMAIN].get("plan"), dt_utils.now(), battery)
+    return resolve(
+        manual.running(data.get("manual_slots", []), now),
+        data.get("plan"),
+        now,
+        battery,
+        enabled=settings.get(data["config"], "enabled"),
+    )
 
 
 def car_action(hass: HomeAssistant, now: dt.datetime | None = None) -> dict:
@@ -534,6 +545,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     await _record_prices(hass, prices)
     # The published prices, also without a plan: the heat pump sensors (heating.py)
     hass.data[DOMAIN]["spot_prices"] = prices
+    # Also when the plan can not be made
+    await _prune_manual_slots(hass, dt_utils.now())
     forecast = hass.data[DOMAIN].get("forecast")
     battery = _battery(hass)
     if not forecast or battery is None or battery.max_kwh <= battery.min_kwh:
@@ -579,6 +592,11 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         fuse_power(settings.number(config, "main_fuse")),
     )
     vehicle, car = _vehicle(hass, starts)
+    capacity = settings.battery(config).capacity_kwh
+    # Manual slots, planned around; also while the planner is off, as they still run
+    forced, forced_soc = manual.forced(
+        hass.data[DOMAIN].get("manual_slots", []), starts, _soc_limits(config)
+    )
     # The mode the last plan has now, so the optimizer only switches when it pays
     last_plan: Plan | None = hass.data[DOMAIN].get("plan")
     month_start = dt_utils.start_of_local_day(now.date().replace(day=1))
@@ -596,7 +614,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         tariff=tariff,
         limit=limit,
         history=history,
-        forced=_forced(hass, starts),
+        forced=forced,
+        forced_soc=[None if t is None else t / 100 * capacity for t in forced_soc],
         current_mode=last_plan.value_at(now, last_plan.modes) if last_plan else None,
         vehicle=vehicle,
     )
@@ -626,7 +645,6 @@ async def async_update_plan(hass: HomeAssistant) -> None:
             )
         )
 
-    capacity = settings.battery(config).capacity_kwh
     hass.data[DOMAIN]["plan"] = Plan(
         updated=now,
         finished=dt_utils.now(),
@@ -669,6 +687,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
             }
             for key, (before, after) in plan.peaks.items()
         ),
+        manual=tuple(forced),
+        manual_soc=tuple(forced_soc),
     )
     _LOGGER.info(
         "Battery plan until %s: %s now, energy %.2f SEK, wear %.2f SEK, "

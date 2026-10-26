@@ -3,7 +3,7 @@ import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 
-from .const import DOMAIN, SLOT_COUNT, SWITCH_ENTITIES
+from .const import DOMAIN, SWITCH_ENTITIES
 from .planner import settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -12,18 +12,7 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     """Set up the switch platform."""
     _LOGGER.info("Setting up datetime platform")
-    switches = [
-        EnergyPlannerSwitchEntity(
-            hass,
-            {
-                "id": f"slot_{i}_active",
-                "default": False,
-                "name": f"Slot {i} active",
-                "enabled": True,
-            },
-        )
-        for i in range(1, SLOT_COUNT + 1)
-    ]
+    switches = []
     switches.append(
         EnergyPlannerSwitchEntity(
             hass,

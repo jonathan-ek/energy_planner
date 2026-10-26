@@ -93,6 +93,11 @@ class Plan:
     limit_excess_kwh: float
     fuse_excess_kwh: float
     peaks: tuple[dict[str, Any], ...]
+    # The manual slots forced into the plan: the mode and its target SOC % per
+    # quarter, None where none covers it. Separate from `modes` and `soc`, which are
+    # what the plan does and expects
+    manual: tuple[str | None, ...] = ()
+    manual_soc: tuple[float | None, ...] = ()
 
     @property
     def start(self) -> dt.datetime:
@@ -185,6 +190,9 @@ class Plan:
             "temperature": list(self.temperature),
             "heat_pump_cop": list(self.heat_pump_cop),
             "heat_pump_power": list(self.heat_pump_kw),
+            # Forced by a manual slot: the mode and target SOC (None: free)
+            "manual": list(self.manual),
+            "manual_soc": list(self.manual_soc),
             # The car while plugged in: charging power per quarter (kW), the need and
             # what the plan can not deliver by the ready time (None: not planned)
             "ev": None

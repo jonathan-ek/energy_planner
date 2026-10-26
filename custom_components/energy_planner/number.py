@@ -15,7 +15,7 @@ from homeassistant.components.sensor.const import (
     SensorStateClass,
 )
 
-from .const import DOMAIN, SLOT_COUNT, NUMBER_ENTITIES
+from .const import DOMAIN, NUMBER_ENTITIES
 from .planner import settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -25,23 +25,6 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
     """Set up the number platform."""
     _LOGGER.info("Setting up number platform")
     numbers = [
-        *[
-            EnergyPlannerNumberEntity(
-                hass,
-                {
-                    "id": f"slot_{i}_soc",
-                    "name": f"Slot {i} soc",
-                    "default": 50,
-                    "min_val": 0,
-                    "max_val": 100,
-                    "step": 1,
-                    "unit_of_measurement": PERCENTAGE,
-                    "enabled": True,
-                    "data_store": "values",
-                },
-            )
-            for i in range(1, SLOT_COUNT + 1)
-        ],
         EnergyPlannerNumberEntity(
             hass,
             {
