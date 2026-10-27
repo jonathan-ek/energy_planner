@@ -79,7 +79,7 @@ QUARTER = dt.datetime(2026, 10, 7, 21, 0, tzinfo=TZ)
 OLD_PLAN = make_plan(QUARTER, spot=[500.0], updated=QUARTER - dt.timedelta(hours=1))
 
 
-def mock_hass(states, plan=OLD_PLAN, spot_prices=None):
+def mock_hass(states, plan=OLD_PLAN, published=None):
     """Return a mock hass with the spot price now, a plan and sensor states."""
     hass = MagicMock()
     hass.states.get = lambda entity_id: (
@@ -91,7 +91,7 @@ def mock_hass(states, plan=OLD_PLAN, spot_prices=None):
             "config": {},
             "plan": plan,
             "prices": SpotPrices(
-                {QUARTER: 500.0} if spot_prices is None else spot_prices, {}
+                {QUARTER: 500.0} if published is None else published, {}
             ),
         }
     }
@@ -154,9 +154,9 @@ def test_schedule_removes_short_gaps_and_runs():
     assert on == [True] * 5 + [False] * 5 + [True]
 
 
-def plan_hass(states, plan=OLD_PLAN, spot_prices=None):
+def plan_hass(states, plan=OLD_PLAN, published=None):
     """Return a mock hass with heat pump settings, prices and a plan."""
-    hass = mock_hass(states, plan, spot_prices)
+    hass = mock_hass(states, plan, published)
     hass.data[DOMAIN]["config"] = {
         "heat_pump_power": 300,
         "heat_pump_margin": 5,
@@ -245,7 +245,7 @@ def test_action_falls_back_to_the_economy_now():
 
 def test_action_without_inputs_decides_nothing():
     """Test that missing prices give no decision, so the heat pump is left alone."""
-    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, spot_prices={})
+    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, published={})
     with patch.object(heating.dt_utils, "now", return_value=NOW):
         action = heating.heat_pump_action(hass)
     assert (action["state"], action["source"]) == (None, "none")

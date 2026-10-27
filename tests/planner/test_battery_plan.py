@@ -130,8 +130,8 @@ async def run(hass, history=None, price_history=None):
 async def test_plan_is_stored_and_published(mock_hass):
     """Test that the plan is stored, available from when it was made, and shown."""
     finished = NOW + dt.timedelta(seconds=3)
-    # The run starts at NOW and ends 3 s later
-    clock = MagicMock(side_effect=[NOW, finished])
+    # The prune, the prices and the plan at NOW, done 3 s later
+    clock = MagicMock(side_effect=[NOW, NOW, NOW, finished])
     with (
         patch.object(battery_plan.dt_utils, "now", clock),
         patch.object(spot, "_published", AsyncMock(return_value=prices())),

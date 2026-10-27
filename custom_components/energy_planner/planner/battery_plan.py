@@ -168,10 +168,12 @@ async def async_request_plan(hass: HomeAssistant, reason: str) -> None:
 
 async def async_update_plan(hass: HomeAssistant) -> None:
     """Optimize the battery from the current quarter to the last known price."""
+    # Both also when the plan can not be made
+    await _prune_manual_slots(hass, dt_utils.now())
+    # The heat pump sensors read the prices
+    spot = await async_update_prices(hass, dt_utils.now())
+    # After the prices, whose first estimate of the day can take a while
     now = dt_utils.now()
-    # Also when the plan can not be made: the heat pump sensors read the prices
-    await _prune_manual_slots(hass, now)
-    spot = await async_update_prices(hass, now)
     data = hass.data[DOMAIN]
     config = data["config"]
     forecast: Forecast | None = data.get("forecast")
