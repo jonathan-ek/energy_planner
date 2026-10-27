@@ -14,7 +14,8 @@ from homeassistant.util import dt as dt_utils
 from ..const import DOMAIN
 from . import heat_pump, settings
 from .plan import Plan
-from .timeline import QUARTER, quarter_start
+from .prices import spot_at
+from .timeline import QUARTER
 from .utils import get_tariff
 
 
@@ -52,14 +53,6 @@ def _power_kw(
     return heat_pump.power_kw(config.power_kw, loss, indoor, outdoor, cop_curve)
 
 
-def _spot(hass: HomeAssistant, now: dt.datetime) -> float | None:
-    """Return the published spot price now (SEK/MWh excl. VAT), also without a plan.
-
-    The prices are keyed in UTC, so the hour repeated when DST ends has its own.
-    """
-    return (hass.data[DOMAIN].get("spot_prices") or {}).get(quarter_start(now))
-
-
 def heat_pump_economy(hass: HomeAssistant) -> dict:
     """Return the heat pump economy now (see heat_pump.evaluate).
 
@@ -69,7 +62,7 @@ def heat_pump_economy(hass: HomeAssistant) -> dict:
     config = _settings(hass)
     district = heat_pump.district_heating_price(_seasons(config), now)
     cop_curve = _curve(config)
-    spot = _spot(hass, now)
+    spot = spot_at(hass, now)
     outdoor = settings.reading(hass, config.outdoor_sensor)
     if district is None or outdoor is None or spot is None or not cop_curve:
         return {"district_heating_price": district, "outdoor_temperature": outdoor}

@@ -34,7 +34,7 @@ are defined in `GLOSSARY.md`. Decisions: `docs/adr/`.
 | `__init__.py` | Re-exports `async_update_forecast` and the plan run's `async_request_plan`, `async_update_plan` and `write_plan_sensors` |
 | `forecast_update.py` | The forecast's HA glue: `async_update_forecast` fetches recorder hourly statistics, the heat pump's `heat` hours, the calendar, Open-Meteo (or Forecast.Solar's estimates) into a `forecast.ForecastInputs`, builds the `Forecast` and stores it in `hass.data[DOMAIN]["forecast"]` |
 | `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `discard_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
-| `battery_plan.py` | HA glue for the optimizer: `async_update_plan` reads the forecast, prices, battery settings and state and this month's hourly grid import, and stores a `plan.Plan` in `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `car_action` |
+| `battery_plan.py` | HA glue for the optimizer: `async_update_plan` updates the prices (`prices.async_update_prices`), reads the forecast, battery settings and state and this month's hourly grid import, and stores a `plan.Plan` in `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `car_action` |
 | `timeline.py` | Pure: time kept as UTC instants. `Timeline` (consecutive quarters: `between`, `of`, `index_at`, `quarter_end`, `local` / `local_end` / `local_hour` / `local_date` / `isoformat` for calendar logic and display), `quarter_start` (the price dicts' key), `hour_start` (the key of hourly sums), `at_local` (a local date and wall-clock time as an instant). Its tests are the DST suite |
 | `plan.py` | Pure: `Plan`, the battery plan as one object (per-quarter series parallel to its `timeline`, canonical units: spot SEK/MWh excl. VAT, SOC %, kW), `index_at`, `value_at` (a series' value at a moment), `run_at` (a `Run` of equal values from now, with `until`), `is_stale` (`STALE_AFTER` 30 min from `finished`, when the plan became available; `updated` is the moment it was planned for), `soc_at` (in the first quarter from `soc_start`, the SOC when planned), `starts` / `start` / `end` (local, for display), `to_attributes` (what the plan sensor publishes). `follow` (the run now, or why not: no plan, plan is old, plan does not cover now) and `action` (the keys every action has: `state`, `source`, `until`, `reason`, `plan_updated`) for the resolvers |
 | `battery_action.py` | Pure: `resolve` turns the manual slot covering now and the plan into the action now (action state, source, SOC, current, import target, until), `ACTION_STATES` (mode → action state) |
@@ -44,7 +44,8 @@ are defined in `GLOSSARY.md`. Decisions: `docs/adr/`.
 | `settings.py` | Every config store key with its one default (`SETTINGS`; the config entities take their defaults from it), `get` / `number`, typed groups in domain units (`battery`, `car`, `heat_pump`, `fuse`; `car` and `fuse` are None when not set up), `replans` (the plan triggers, `replan_entity_ids`) and `reading` (a sensor's float value, None if not configured, unavailable or old) |
 | `fuse.py` | Pure main fuse guard: `limits` splits the room on the busiest phase between the car charger and the battery's grid charging, `smooth` (hysteresis for the devices). See "Main fuse" |
 | `fuse_guard.py` | HA glue for `fuse.py`: live phase readings → `hass.data[DOMAIN]["fuse_guard"]` |
-| `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price now (`spot_prices`, also without a plan), the export now (from the plan, even an old one), the tariff |
+| `heating.py` | HA glue for `heat_pump.py`: outdoor temperature, the spot price now (`prices.spot_at`, also without a plan), the export now (from the plan, even an old one), the tariff |
+| `prices.py` | The prices' HA glue: `async_update_prices` (every plan run) fetches the published prices (`fetch_nordpool_data`), records each day's hourly prices, makes the estimate from the price history (recorder, Energy-Charts) and the wind forecast, and stores a `SpotPrices` (`published`, `estimated`) in `hass.data[DOMAIN]["prices"]`; `spot_at` (the published price at a moment), `nordpool_zone` (area and currency from the entity id). See "Battery plan" |
 | `price_estimate.py` | Pure: tomorrow's prices before they are published (same-type days + a learned correction per hour, Swedish holidays). See "Battery plan" |
 | `../comfort/schedule.py`, `../comfort/thermal.py` | WIP comfort control, not wired into HA yet. See "Comfort" |
 | `tariff.py` | Pure grid tariff model: `Tariff` with `buy_fee` / `sell_fee` (öre/kWh) and `power_cost` (kr), parsed from a dict by `tariff_from_dict`, presets in `TARIFF_PRESETS`, the household's `import_limit`. Format in the module docstring |
@@ -69,10 +70,12 @@ Everything lives in `hass.data["energy_planner"]`:
   which falls back to a flat tariff from `network_cost` / `network_compensation`.
 - `forecast` — the `forecast.Forecast` (see "Forecast"); `plan` — the `plan.Plan`
   (see "Battery plan"). Neither is stored; both are rebuilt after a restart.
-- `spot_prices` — the published spot prices per quarter (SEK/MWh excl. VAT, keyed by
-  the quarter's start in UTC, so the hour repeated when DST ends has its own), written
-  by every plan run before it can fail on a missing forecast or battery state; read by
-  the heat pump sensors.
+- `prices` — the `prices.SpotPrices`: the published and estimated spot prices per
+  quarter (SEK/MWh excl. VAT, keyed by the quarter's start in UTC, so the hour repeated
+  when DST ends has its own), written by every plan run before it can fail on a missing
+  forecast or battery state, the published ones before the estimate is made; read by
+  the heat pump sensors (`prices.spot_at`). `price_estimate` (the estimate's cache) and
+  `price_history` (the recorded prices) belong to `prices.py` too.
 
 ### Manual slots
 
@@ -243,7 +246,7 @@ with it off, self-use. An inverter script follows the action sensor
 - Horizon: the current quarter until the last quarter with both a price and a load
   forecast. Load = forecast profile + planned + reserve; PV = forecast.
 - The day after the published prices uses an estimate (`price_estimate.estimate`,
-  `_estimated_prices`): tomorrow until its prices are published (about 13:00), then
+  `prices._estimated_prices`): tomorrow until its prices are published (about 13:00), then
   the day after tomorrow (`ESTIMATE_MAX_LEAD`), so the plan always sees a day past the
   coming night and does not value the energy left at that night's cheapest price.
   Below "today" and "tomorrow" are the last published day and the estimated one. Per
@@ -672,8 +675,9 @@ Holidays are not detected.
 
 - Prices are 15-minute resolution. "Hours" settings are multiplied by 4 to get a
   quarter count.
-- Area and currency are parsed from the Nord Pool entity id by position:
-  `entity_id.split("_")[2]` and `[3]` (e.g. `sensor.nordpool_kwh_se3_sek_…`).
+- Area and currency are parsed from the Nord Pool entity id by position
+  (`prices.nordpool_zone`: parts 2 and 3 split at `_`, e.g.
+  `sensor.nordpool_kwh_se3_sek_…`).
 - Requires the `nordpool` custom integration for the `nordpool.hourly` service.
 - Nord Pool prices are SEK/MWh excluding VAT; the network settings are öre/kWh
   including VAT (`* 1.25` adds VAT, `* 10` converts öre/kWh to SEK/MWh).

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from custom_components.energy_planner.const import DOMAIN
+from custom_components.energy_planner.planner.prices import SpotPrices
 
 from .plans import make_plan
 
@@ -89,7 +90,9 @@ def mock_hass(states, plan=OLD_PLAN, spot_prices=None):
             "options": {"tariff_preset": "tekniska_verken_alternativ"},
             "config": {},
             "plan": plan,
-            "spot_prices": {QUARTER: 500.0} if spot_prices is None else spot_prices,
+            "prices": SpotPrices(
+                {QUARTER: 500.0} if spot_prices is None else spot_prices, {}
+            ),
         }
     }
     return hass
