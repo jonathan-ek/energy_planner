@@ -14,6 +14,7 @@ from custom_components.energy_planner.const import DOMAIN, PLAN_SENSORS
 from custom_components.energy_planner.planner import (
     forecast,
     manual,
+    planning,
     price_estimate,
     settings,
 )
@@ -126,36 +127,102 @@ async def run(hass, history=None, price_history=None):
     return plan.to_attributes() if plan is not None else None
 
 
-async def test_plan_from_the_current_quarter(mock_hass):
-    """Test the plan's horizon, the night charging and the published values."""
-    plan = await run(mock_hass)
-    starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
-    assert starts[0] == dt.datetime(2026, 1, 13, 22, 45, tzinfo=TZ)
-    assert starts[-1] == STARTS[-1]
-    modes = dict(zip(starts, plan["modes"], strict=True))
-    night = [m for s, m in modes.items() if s.date() == NOW.date() + dt.timedelta(1)]
-    assert "charge" in night[: 6 * 4]
-    assert "charge" not in night[6 * 4 : 23 * 4]
-    # 6 A at 536 V: 10.7 kW, so the peak is the planner's choice
-    assert max(plan["grid_import"]) < 10.7
-    # SOC at the end of each quarter: the first evening quarter uses the battery
-    assert 15 < plan["soc"][0] < 20
-    assert plan["wear_cost"] > 0
-    assert {p["month"] for p in plan["peaks"]} == {"2026-01"}
-    assert {tuple(p["hours"]) for p in plan["peaks"]} == {(6, 23), (23, 6)}
+async def test_plan_is_stored_and_published(mock_hass):
+    """Test that the plan is stored, available from when it was made, and shown."""
+    finished = NOW + dt.timedelta(seconds=3)
+    # The run starts at NOW and ends 3 s later
+    clock = MagicMock(side_effect=[NOW, finished])
+    with (
+        patch.object(battery_plan.dt_utils, "now", clock),
+        patch.object(spot, "_published", AsyncMock(return_value=prices())),
+        patch.object(battery_plan, "_hourly_import", AsyncMock(return_value={})),
+    ):
+        await battery_plan.async_update_plan(mock_hass)
+    stored = mock_hass.data[DOMAIN]["plan"]
+    assert stored.timeline.local(0) == dt.datetime(2026, 1, 13, 22, 45, tzinfo=TZ)
+    assert (stored.updated, stored.finished) == (NOW, finished)
     mock_hass.data[DOMAIN][PLAN_SENSORS][0].async_write_ha_state.assert_called_once()
 
 
-async def test_peak_already_reached_is_used(mock_hass):
-    """Test that this month's night peak sets the free import level."""
-    history = {dt.datetime(2026, 1, 2, 3, tzinfo=TZ): 6.0}
-    plan = await run(mock_hass, history)
-    night = next(p for p in plan["peaks"] if p["hours"] == [23, 6])
-    assert night["reached_kw"] == 6.0
-    assert night["planned_kw"] >= 6.0
-    # Only the day peak (no day hours yet this month) costs: 1 kW at 45 kr/kW
-    day = next(p for p in plan["peaks"] if p["hours"] == [6, 23])
-    assert plan["power_cost"] == pytest.approx(day["planned_kw"] * 45, abs=0.1)
+async def test_inputs_from_the_settings_and_sensors(mock_hass):
+    """Test what the plan is made from: settings, live readings and the last plan."""
+    STATES.update(
+        {
+            "sensor.charger_status": "connected_charging",
+            "sensor.charger_session": "4.0",
+            "sensor.car_soc": "60",
+            "sensor.gw1100a_outdoor_temperature": "3.5",
+        }
+    )
+    config = mock_hass.data[DOMAIN]["config"]
+    config.update(
+        {
+            "main_fuse": 20,
+            "ev_charger_status_sensor": "sensor.charger_status",
+            "ev_session_energy_sensor": "sensor.charger_session",
+            "ev_soc_sensor": "sensor.car_soc",
+        }
+    )
+    slot = manual.make(NOW, NOW + dt.timedelta(hours=1), "sell", 30)
+    mock_hass.data[DOMAIN]["manual_slots"] = [slot]
+    last = object()
+    mock_hass.data[DOMAIN]["plan"] = last
+    history = {dt.datetime(2026, 1, 2, 3, tzinfo=dt.UTC): 6.0}
+    build = MagicMock(return_value=None)
+    try:
+        with (
+            patch.object(planning, "build_plan", build),
+            patch.object(
+                battery_plan, "_hourly_import", AsyncMock(return_value=history)
+            ) as hourly,
+            patch.object(battery_plan.dt_utils, "now", return_value=NOW),
+            patch.object(spot, "_published", AsyncMock(return_value=prices())),
+        ):
+            await battery_plan.async_update_plan(mock_hass)
+    finally:
+        for key in (
+            "sensor.charger_status",
+            "sensor.charger_session",
+            "sensor.car_soc",
+            "sensor.gw1100a_outdoor_temperature",
+        ):
+            del STATES[key]
+    inputs = build.call_args.args[0]
+    assert (inputs.now, inputs.soc, inputs.voltage) == (NOW, 20.0, 536.0)
+    assert inputs.battery.capacity_kwh == 25.6
+    assert inputs.published == prices()
+    assert inputs.forecast is mock_hass.data[DOMAIN]["forecast"]
+    limit = inputs.limit
+    assert (limit.kw, limit.start_hour, limit.end_hour) == (1.0, 6, 23)
+    # 20 A on three phases
+    assert limit.fuse_kw == pytest.approx(13.8)
+    # This month's import, from the HAN meter by default
+    assert hourly.call_args.args[1:] == (
+        "sensor.matarstallning_aktiv_energi_uttag",
+        dt.datetime(2026, 1, 1, tzinfo=TZ),
+        NOW,
+    )
+    assert inputs.import_history == history
+    assert (inputs.manual_slots, inputs.last_plan) == ((slot,), last)
+    # The car without a charge limit sensor
+    assert inputs.car is not None
+    assert (inputs.car.soc, inputs.car.charge_limit, inputs.car.delivered_kwh) == (
+        60.0,
+        None,
+        4.0,
+    )
+    assert inputs.heat_pump.outdoor == 3.5
+    # Nothing to plan: the last plan stays
+    assert mock_hass.data[DOMAIN]["plan"] is last
+
+
+async def test_unplugged_car_is_not_planned(mock_hass):
+    """Test that a car that is set up but not plugged in is left out."""
+    mock_hass.data[DOMAIN]["config"]["ev_charger_status_sensor"] = "sensor.missing"
+    build = MagicMock(return_value=None)
+    with patch.object(planning, "build_plan", build):
+        await run(mock_hass)
+    assert build.call_args.args[0].car is None
 
 
 async def test_no_battery_state(mock_hass):
@@ -164,36 +231,6 @@ async def test_no_battery_state(mock_hass):
         assert await run(mock_hass) is None
     # The heat pump sensors read them also without a plan
     assert mock_hass.data[DOMAIN]["prices"].published == prices()
-
-
-async def test_manual_slot_is_planned_around(mock_hass):
-    """Test that a manual sell slot forces the plan's mode in its quarters."""
-    start = dt.datetime(2026, 1, 14, 18, tzinfo=TZ)
-    mock_hass.data[DOMAIN]["manual_slots"] = [
-        manual.make(start, start + dt.timedelta(hours=1), "sell", 30)
-    ]
-    for enabled in (True, False):
-        # Manual slots run while the planner is off too, so the plan keeps them
-        mock_hass.data[DOMAIN]["config"]["enabled"] = enabled
-        plan = await run(mock_hass)
-        first = plan["starts"].index(start.isoformat())
-        assert plan["modes"][first] == "sell"
-        assert plan["manual"][first : first + 4] == ["sell"] * 4
-        assert plan["manual_soc"][first : first + 4] == [30.0] * 4
-        assert plan["manual"][first + 4] is None
-        # Sold down to the target, not below it while the slot runs
-        assert min(plan["soc"][first : first + 4]) >= 30.0 - 1.0
-
-
-async def test_running_mode_is_passed_on(mock_hass):
-    """Test that the next calculation knows the mode running now."""
-    await run(mock_hass)
-    first = mock_hass.data[DOMAIN]["plan"].modes[0]
-    with patch.object(
-        battery_plan, "optimize", wraps=battery_plan.optimize
-    ) as optimize:
-        await run(mock_hass)
-    assert optimize.call_args.kwargs["current_mode"] == first
 
 
 async def test_requests_during_a_run_are_coalesced(mock_hass):
@@ -237,25 +274,6 @@ async def test_current_action_follows_the_plan_or_a_manual_slot(mock_hass):
     )
     # Rounded out to whole quarters: 22:45 to 00:00
     assert result["until"] == (NOW + dt.timedelta(minutes=70)).isoformat()
-
-
-@pytest.mark.parametrize(("temperature", "heats"), [(0.0, True), (20.0, False)])
-async def test_heat_pump_is_planned(mock_hass, temperature, heats):
-    """Test that the heat pump runs on cheap night electricity when heat is needed."""
-    mock_hass.data[DOMAIN]["config"].update(
-        {"heat_pump_power": 300, "heat_pump_margin": 5, "heat_pump_heating_limit": 15}
-    )
-    forecast_data(mock_hass, temperature=(temperature,) * 192)
-    plan = await run(mock_hass)
-    on = dict(zip(plan["starts"], plan["heat_pump"], strict=True))
-    night = dt.datetime(2026, 1, 14, 3, tzinfo=TZ).isoformat()
-    assert on[night] is heats
-    assert len(plan["marginal"]) == len(plan["starts"])
-    # At least 0.79 kr/kWh at night (200 SEK/MWh * 1.25 + 54 öre night fees); more,
-    # because the battery charges at the night import target and the load raises it
-    assert plan["marginal"][plan["starts"].index(night)] >= 79.0
-    # Its load is exempt from the 1 kW day limit
-    assert plan["limit_excess_kwh"] == 0.0
 
 
 async def test_tomorrow_is_estimated(mock_hass):
@@ -345,18 +363,6 @@ async def test_day_after_tomorrow_is_estimated(mock_hass):
     assert wind.call_args.args[1:] == (day, 1)
 
 
-async def test_plan_ends_where_the_pv_forecast_does(mock_hass):
-    """Test that quarters without a PV forecast (Forecast.Solar) end the plan."""
-    starts = three_days(mock_hass)
-    forecast_data(mock_hass, pv=(0.0,) * 192 + (None,) * 96)
-    mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = (
-        "sensor.nordpool_kwh_se3_sek"
-    )
-    plan = await run(mock_hass, price_history=sensor_history())
-    assert plan["starts"][-1] == starts[191].isoformat()
-    assert not any(plan["estimated"])
-
-
 async def test_no_estimate_without_history(mock_hass):
     """Test that without the sensor's history the plan ends with today's prices."""
     mock_hass.data[DOMAIN]["config"]["nordpool_entity_id"] = (
@@ -373,33 +379,6 @@ async def test_no_estimate_without_history(mock_hass):
     plan = mock_hass.data[DOMAIN]["plan"].to_attributes()
     assert not any(plan["estimated"])
     assert plan["starts"][-1] == STARTS[95].isoformat()
-
-
-async def test_plugged_car_charges_at_night(mock_hass):
-    """Test that a plugged-in car is charged in the cheap night before 06:30."""
-    STATES["sensor.charger_status"] = "connected_charging"
-    STATES["sensor.charger_session"] = "4.0"
-    try:
-        config = mock_hass.data[DOMAIN]["config"]
-        config["ev_charger_status_sensor"] = "sensor.charger_status"
-        config["ev_session_energy_sensor"] = "sensor.charger_session"
-        config["ev_ready_time"] = dt.time(6, 30)
-        forecast_data(mock_hass, ev_need_kwh=20.0)
-        plan = await run(mock_hass)
-    finally:
-        del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
-    car = plan["ev"]
-    # 20 kWh from the history, 4 already delivered this session
-    assert car["need_kwh"] == pytest.approx(16.0)
-    assert car["need_source"] == "history"
-    assert car["ready"] == dt.datetime(2026, 1, 14, 6, 30, tzinfo=TZ).isoformat()
-    assert car["planned_kwh"] == pytest.approx(16.0, abs=0.5)
-    assert car["missing_kwh"] == pytest.approx(0.0, abs=0.5)
-    starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
-    charging = [s for s, kw in zip(starts, car["power"], strict=True) if kw > 0]
-    # In the 00-06 cheap hours, at the charger's 11 kW
-    assert all(s.hour < 6 for s in charging)
-    assert {kw for kw in car["power"] if kw > 0} == {11.0}
 
 
 class RecordingConfig(dict):
@@ -440,82 +419,3 @@ async def test_plan_settings_replan(mock_hass):
         if settings.SETTINGS[key].platform and not settings.SETTINGS[key].replans
     }
     assert missing == set()
-
-
-async def test_car_from_soc(mock_hass):
-    """Test that the car's SOC and charge limit give the need when known."""
-    STATES.update(
-        {"sensor.charger_status": "connected_finished", "sensor.car_soc": "60"}
-    )
-    STATES["sensor.car_limit"] = "80"
-    try:
-        config = mock_hass.data[DOMAIN]["config"]
-        config["ev_charger_status_sensor"] = "sensor.charger_status"
-        config["ev_soc_sensor"] = "sensor.car_soc"
-        config["ev_charge_limit_sensor"] = "sensor.car_limit"
-        config["ev_battery_capacity"] = 45
-        plan = await run(mock_hass)
-    finally:
-        for key in ("sensor.charger_status", "sensor.car_soc", "sensor.car_limit"):
-            del STATES[key]
-    assert plan["ev"]["need_source"] == "soc"
-    assert plan["ev"]["need_kwh"] == pytest.approx(0.2 * 45 / 0.9)
-
-
-async def test_unplugged_car_is_not_planned(mock_hass):
-    """Test that without a plugged-in car the plan has no car."""
-    mock_hass.data[DOMAIN]["config"]["ev_charger_status_sensor"] = "sensor.missing"
-    plan = await run(mock_hass)
-    assert plan["ev"] is None
-
-
-async def test_car_past_its_history_need_is_not_planned(mock_hass):
-    """Test that a session past the history's need is left to charge as usual."""
-    STATES["sensor.charger_status"] = "connected_charging"
-    STATES["sensor.charger_session"] = "25.0"
-    try:
-        config = mock_hass.data[DOMAIN]["config"]
-        config["ev_charger_status_sensor"] = "sensor.charger_status"
-        config["ev_session_energy_sensor"] = "sensor.charger_session"
-        forecast_data(mock_hass, ev_need_kwh=20.0)
-        plan = await run(mock_hass)
-    finally:
-        del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
-    assert plan["ev"] is None
-
-
-async def test_car_trip_charges_full(mock_hass):
-    """Test that a departure before the working morning plans a full battery."""
-    STATES["sensor.charger_status"] = "connected_charging"
-    STATES["sensor.charger_session"] = "25.0"
-    departure = dt.datetime(2026, 1, 14, 4, 0, tzinfo=TZ)
-    try:
-        config = mock_hass.data[DOMAIN]["config"]
-        config["ev_charger_status_sensor"] = "sensor.charger_status"
-        config["ev_session_energy_sensor"] = "sensor.charger_session"
-        config["ev_battery_capacity"] = 45
-        config["ev_departure"] = departure
-        forecast_data(mock_hass, ev_need_kwh=20.0)
-        plan = await run(mock_hass)
-    finally:
-        del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
-        del config["ev_departure"]
-    car = plan["ev"]
-    # Past the history's 20 kWh, but a trip fills the battery: 45 / 0.9 - 25
-    assert car["need_source"] == "trip"
-    assert car["need_kwh"] == pytest.approx(25.0)
-    assert car["ready"] == departure.isoformat()
-    starts = [dt.datetime.fromisoformat(s) for s in plan["starts"]]
-    charging = [s for s, kw in zip(starts, car["power"], strict=True) if kw > 0]
-    assert charging
-    assert max(charging) < departure
-
-
-async def test_main_fuse_caps_the_import(mock_hass):
-    """Test that the main fuse setting caps the import targets."""
-    mock_hass.data[DOMAIN]["config"].update({"grid_import_limit": 0, "main_fuse": 10})
-    plan = await run(mock_hass)
-    fuse = 3 * 230 * 10 / 1000
-    assert all(t is not None and t <= fuse + 1e-9 for t in plan["targets"])
-    assert max(plan["grid_import"]) <= fuse + 0.01
-    assert plan["fuse_excess_kwh"] == 0.0

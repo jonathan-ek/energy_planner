@@ -1,12 +1,8 @@
 """HA glue for the heat pump (heat_pump.py).
 
-Its economy now, the inputs for the battery plan, and what it should do now
+Its economy now and what it should do now
 (`sensor.energy_planner_heat_pump_action`).
 """
-
-from collections.abc import Sequence
-import dataclasses
-import datetime as dt
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_utils
@@ -15,7 +11,6 @@ from ..const import DOMAIN
 from . import heat_pump, settings
 from .plan import Plan
 from .prices import spot_at
-from .timeline import QUARTER
 from .utils import get_tariff
 
 
@@ -84,55 +79,6 @@ def heat_pump_economy(hass: HomeAssistant) -> dict:
     result["spot"] = round(spot / 10, 1)
     result["power"] = round(power, 3)
     return result
-
-
-@dataclasses.dataclass(frozen=True)
-class PlanInputs:
-    """What the battery plan needs to plan the heat pump, per quarter."""
-
-    probe_kwh: float  # extra load per quarter to price, 0: not planned
-    draws: list[float]  # kWh the heat pump uses per quarter while heating
-    margin: float  # öre per kWh of heat
-    temperatures: list[float | None]
-    cops: list[float | None]
-    district: list[float | None]
-    heating: list[bool]
-
-
-def plan_inputs(
-    hass: HomeAssistant,
-    starts: Sequence[dt.datetime],
-    temperatures: Sequence[float | None],
-) -> PlanInputs:
-    """Return the heat pump inputs for the battery plan's quarters.
-
-    `temperatures` is the forecast per quarter; missing ones use the live outdoor
-    temperature.
-    """
-    config = _settings(hass)
-    live = settings.reading(hass, config.outdoor_sensor)
-    indoor = settings.reading(hass, config.indoor_sensor)
-    temps = [live if t is None else t for t in temperatures]
-    cop_curve = _curve(config)
-    seasons = _seasons(config)
-    limit = config.heating_limit_c
-    hours = QUARTER.total_seconds() / 3600
-    draws = [
-        _power_kw(hass, config, cop_curve, indoor, t) * hours if cop_curve else 0.0
-        for t in temps
-    ]
-    heating = [t is not None and t < limit for t in temps]
-    drawing = [kwh for kwh in draws if kwh > 0]
-    return PlanInputs(
-        # More load is priced at the mean draw
-        probe_kwh=sum(drawing) / len(drawing) if drawing else 0.0,
-        draws=draws,
-        margin=config.margin_ore_per_kwh,
-        temperatures=temps,
-        cops=[None if t is None else heat_pump.cop(cop_curve, t) for t in temps],
-        district=[heat_pump.district_heating_price(seasons, s) for s in starts],
-        heating=heating,
-    )
 
 
 def heat_pump_action(hass: HomeAssistant) -> dict:

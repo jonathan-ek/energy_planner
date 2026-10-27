@@ -84,7 +84,7 @@ async def async_update_prices(hass: HomeAssistant, now: dt.datetime) -> SpotPric
     sensors have the price now even if the estimate fails.
     """
     published = await _published(hass)
-    await _record_prices(hass, published)
+    await _record_prices(hass, published, now)
     hass.data[DOMAIN]["prices"] = SpotPrices(published, {})
     prices = SpotPrices(published, await _estimated_prices(hass, published, now))
     hass.data[DOMAIN]["prices"] = prices
@@ -203,7 +203,9 @@ async def _stored_prices(hass: HomeAssistant) -> dict[dt.date, dict[int, float]]
     return stored
 
 
-async def _record_prices(hass: HomeAssistant, prices: dict[dt.datetime, float]):
+async def _record_prices(
+    hass: HomeAssistant, prices: dict[dt.datetime, float], now: dt.datetime
+):
     """Store each complete day's hourly mean prices, for PRICE_HISTORY_DAYS."""
     stored = await _stored_prices(hass)
     changed = False
@@ -211,7 +213,7 @@ async def _record_prices(hass: HomeAssistant, prices: dict[dt.datetime, float]):
         if len(hours) >= MIN_HOURS and stored.get(day) != hours:
             stored[day] = hours
             changed = True
-    oldest = dt_utils.now().date() - dt.timedelta(days=PRICE_HISTORY_DAYS)
+    oldest = now.date() - dt.timedelta(days=PRICE_HISTORY_DAYS)
     for day in [day for day in stored if day < oldest]:
         del stored[day]
         changed = True

@@ -137,8 +137,7 @@ async def test_record_prices(mock_hass, no_network):
     mock_hass.data[DOMAIN][prices.PRICE_STORE] = {old: {0: 1.0}}
     quarters = {s: p for s, p in quarter_prices().items() if s.date() == NOW.date()}
     quarters[START + dt.timedelta(days=1)] = 50.0  # one quarter of tomorrow
-    with patch.object(prices.dt_utils, "now", return_value=NOW):
-        await prices._record_prices(mock_hass, quarters)
+    await prices._record_prices(mock_hass, quarters, NOW)
     stored = mock_hass.data[DOMAIN][prices.PRICE_STORE]
     assert set(stored) == {NOW.date()}
     assert stored[NOW.date()][3] == 200.0
@@ -147,8 +146,7 @@ async def test_record_prices(mock_hass, no_network):
     assert saved[NOW.date().isoformat()]["3"] == 200.0
     # Nothing new: not saved again
     no_network.reset_mock()
-    with patch.object(prices.dt_utils, "now", return_value=NOW):
-        await prices._record_prices(mock_hass, quarters)
+    await prices._record_prices(mock_hass, quarters, NOW)
     no_network.assert_not_called()
 
 

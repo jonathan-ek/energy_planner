@@ -34,9 +34,10 @@ are defined in `GLOSSARY.md`. Decisions: `docs/adr/`.
 | `__init__.py` | Re-exports `async_update_forecast` and the plan run's `async_request_plan`, `async_update_plan` and `write_plan_sensors` |
 | `forecast_update.py` | The forecast's HA glue: `async_update_forecast` fetches recorder hourly statistics, the heat pump's `heat` hours, the calendar, Open-Meteo (or Forecast.Solar's estimates) into a `forecast.ForecastInputs`, builds the `Forecast` and stores it in `hass.data[DOMAIN]["forecast"]` |
 | `battery_optimizer.py` | Pure battery optimizer (numpy): `optimize` picks a mode per quarter (`self_use`, `hold`, `sell_excess`, `discard_excess`, `charge`, `sell`) by dynamic programming over the SOC and searches the monthly power peak levels. See "Battery plan" |
-| `battery_plan.py` | HA glue for the optimizer: `async_update_plan` updates the prices (`prices.async_update_prices`), reads the forecast, battery settings and state and this month's hourly grid import, and stores a `plan.Plan` in `hass.data[DOMAIN]["plan"]`; `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `car_action` |
+| `battery_plan.py` | The plan run's HA glue: `async_update_plan` updates the prices (`prices.async_update_prices`), gathers a `planning.PlanInputs` (the forecast, battery settings and state, this month's hourly grid import, the car's and heat pump's readings, the manual slots, the last plan), runs `planning.build_plan` in the executor and stores the `plan.Plan` in `hass.data[DOMAIN]["plan"]` (`finished` set when it is done); `async_request_plan` (one run at a time, requests during a run give one more), `current_action`, `car_action` |
+| `planning.py` | Pure: `build_plan(PlanInputs) -> Plan | None` slices the horizon (current quarter while load, PV and a price are known), forces the manual slots, plans the car (`vehicle`) and the heat pump (`heat_pump_quarters`, two optimizer runs) and converts the result to the plan's units. `CarReadings`, `HeatPumpReadings`, `battery` (the optimizer's `Battery` from settings, SOC and voltage), `soc_limits` |
 | `timeline.py` | Pure: time kept as UTC instants. `Timeline` (consecutive quarters: `between`, `of`, `index_at`, `quarter_end`, `local` / `local_end` / `local_hour` / `local_date` / `isoformat` for calendar logic and display), `quarter_start` (the price dicts' key), `hour_start` (the key of hourly sums), `at_local` (a local date and wall-clock time as an instant). Its tests are the DST suite |
-| `plan.py` | Pure: `Plan`, the battery plan as one object (per-quarter series parallel to its `timeline`, canonical units: spot SEK/MWh excl. VAT, SOC %, kW), `index_at`, `value_at` (a series' value at a moment), `run_at` (a `Run` of equal values from now, with `until`), `is_stale` (`STALE_AFTER` 30 min from `finished`, when the plan became available; `updated` is the moment it was planned for), `soc_at` (in the first quarter from `soc_start`, the SOC when planned), `starts` / `start` / `end` (local, for display), `to_attributes` (what the plan sensor publishes). `follow` (the run now, or why not: no plan, plan is old, plan does not cover now) and `action` (the keys every action has: `state`, `source`, `until`, `reason`, `plan_updated`) for the resolvers |
+| `plan.py` | Pure: `Plan`, the battery plan as one object (per-quarter series parallel to its `timeline`, canonical units: spot SEK/MWh excl. VAT, SOC %, kW), `index_at`, `value_at` (a series' value at a moment), `run_at` (a `Run` of equal values from now, with `until`), `is_stale` (`STALE_AFTER` 30 min from `finished`, when the plan became available; `updated` is the moment it was planned for), `soc_at` (in the first quarter from `soc_start`, the SOC when planned), `to_attributes` (what the plan sensor publishes). `follow` (the run now, or why not: no plan, plan is old, plan does not cover now) and `action` (the keys every action has: `state`, `source`, `until`, `reason`, `plan_updated`) for the resolvers |
 | `battery_action.py` | Pure: `resolve` turns the manual slot covering now and the plan into the action now (action state, source, SOC, current, import target, until), `ACTION_STATES` (mode → action state) |
 | `manual.py` | Pure: `ManualSlot` (an action state over whole quarters, UTC, optional target SOC), `make` (rounds out to quarters), `covering`, `current` (drops ended ones), `target` (defaults and limits), `forced` (mode and target per quarter for the optimizer), `STATE_MODES` (action state → mode) |
 | `heat_pump.py` | Pure heat pump economy: COP curve per outdoor temperature (`COP_CURVES`), district heating price per month (`DISTRICT_HEATING_PRESETS`), `evaluate` compares a kWh of heat from both, `action` (on/off now from a `Plan` or the economy now). See "Heat pump" |
@@ -446,7 +447,7 @@ heat: district heating at the season's energy price against electricity / COP.
   heat pump has run every day for 35 days there are no days without it to compare
   with, and the setting is used again. Its power peak costs little (0.6 kW × 45 kr/kW
   in winter days) and it nearly always pays for it.
-- In the battery plan (`async_update_plan`): a first run prices the mean draw as more
+- In the battery plan (`planning.build_plan`): a first run prices the mean draw as more
   load per quarter (`Plan.marginal`, öre/kWh: buy price, lost export, or the battery
   energy it uses, plus power charges). `heat_pump.schedule` turns it on where the
   outdoor temperature (forecast, else live) is below `heat_pump_heating_limit` and
@@ -467,8 +468,8 @@ heat: district heating at the season's energy price against electricity / COP.
 
 ## Car
 
-While the car is plugged in, the battery plan plans it with the battery (`_vehicle` in
-`battery_plan.py`, `Vehicle` in the optimizer): its need by the next
+While the car is plugged in, the battery plan plans it with the battery (`planning.vehicle`,
+`Vehicle` in the optimizer): its need by the next
 `time.energy_planner_ev_ready_time` (default 06:30) on a working day
 (`price_estimate.is_offday`: weekends, holidays and the eves that price alike), or by
 `datetime.energy_planner_ev_departure` if that is earlier and still ahead (a trip; past
