@@ -226,11 +226,17 @@ async def test_unplugged_car_is_not_planned(mock_hass):
 
 
 async def test_no_battery_state(mock_hass):
-    """Test that a missing SOC sensor skips the plan, not the prices."""
-    with patch.dict(STATES, clear=True):
+    """Test that without a SOC the plan and the estimate are skipped, not the prices."""
+    estimate = AsyncMock(return_value={})
+    with (
+        patch.dict(STATES, clear=True),
+        patch.object(spot, "_estimated_prices", estimate),
+    ):
         assert await run(mock_hass) is None
     # The heat pump sensors read them also without a plan
     assert mock_hass.data[DOMAIN]["prices"].published == prices()
+    # No recorder history or network calls for a plan that can not be made
+    estimate.assert_not_called()
 
 
 async def test_requests_during_a_run_are_coalesced(mock_hass):

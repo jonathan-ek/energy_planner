@@ -77,15 +77,20 @@ def nordpool_zone(entity_id: str) -> tuple[str, str]:
     return parts[2].upper(), parts[3].upper()
 
 
-async def async_update_prices(hass: HomeAssistant, now: dt.datetime) -> SpotPrices:
+async def async_update_prices(
+    hass: HomeAssistant, now: dt.datetime, *, estimate: bool = True
+) -> SpotPrices:
     """Fetch the published prices, record them, estimate the next day and store all.
 
     The published prices are stored before the estimate is made, so the heat pump
-    sensors have the price now even if the estimate fails.
+    sensors have the price now even if the estimate fails. Without `estimate` (no
+    plan can be made) the recorder history and the network are left alone.
     """
     published = await _published(hass)
     await _record_prices(hass, published, now)
     hass.data[DOMAIN]["prices"] = SpotPrices(published, {})
+    if not estimate:
+        return hass.data[DOMAIN]["prices"]
     prices = SpotPrices(published, await _estimated_prices(hass, published, now))
     hass.data[DOMAIN]["prices"] = prices
     return prices

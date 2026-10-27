@@ -168,21 +168,22 @@ async def async_request_plan(hass: HomeAssistant, reason: str) -> None:
 
 async def async_update_plan(hass: HomeAssistant) -> None:
     """Optimize the battery from the current quarter to the last known price."""
-    # Both also when the plan can not be made
+    # Also when the plan can not be made
     await _prune_manual_slots(hass, dt_utils.now())
-    # The heat pump sensors read the prices
-    spot = await async_update_prices(hass, dt_utils.now())
-    # After the prices, whose first estimate of the day can take a while
-    now = dt_utils.now()
     data = hass.data[DOMAIN]
     config = data["config"]
     forecast: Forecast | None = data.get("forecast")
     battery = settings.battery(config)
     soc = settings.reading(hass, battery.soc_sensor)
     voltage = settings.reading(hass, battery.voltage_sensor)
-    if not forecast or soc is None or not voltage:
+    plannable = forecast is not None and soc is not None and bool(voltage)
+    # The published prices also without a plan: the heat pump sensors read them
+    spot = await async_update_prices(hass, dt_utils.now(), estimate=plannable)
+    if forecast is None or soc is None or not voltage:
         _LOGGER.info("No forecast or battery state, skipping the battery plan")
         return
+    # After the prices, whose first estimate of the day can take a while
+    now = dt_utils.now()
     month_start = dt_utils.start_of_local_day(now.date().replace(day=1))
     inputs = planning.PlanInputs(
         now=now,
