@@ -10,7 +10,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from custom_components.energy_planner.const import DOMAIN, PLAN_SENSORS
+from custom_components.energy_planner.const import (
+    DOMAIN,
+    NUMBER_ENTITIES,
+    PLAN_SENSORS,
+)
 from custom_components.energy_planner.planner import (
     forecast,
     manual,
@@ -223,6 +227,68 @@ async def test_unplugged_car_is_not_planned(mock_hass):
     with patch.object(planning, "build_plan", build):
         await run(mock_hass)
     assert build.call_args.args[0].car is None
+
+
+@pytest.fixture
+def car_hass(mock_hass):
+    """Return mock_hass with a plugged-in car that has delivered 6 kWh."""
+    STATES.update({"sensor.charger_status": "connected_charging"})
+    STATES.update({"sensor.charger_session": "6.0"})
+    mock_hass.data[DOMAIN]["config"].update(
+        {
+            "ev_charger_status_sensor": "sensor.charger_status",
+            "ev_session_energy_sensor": "sensor.charger_session",
+        }
+    )
+    entity = MagicMock(id="ev_soc")
+    mock_hass.data[DOMAIN]["save"] = AsyncMock()
+    mock_hass.data[DOMAIN][NUMBER_ENTITIES] = [entity]
+    try:
+        yield mock_hass
+    finally:
+        del STATES["sensor.charger_status"], STATES["sensor.charger_session"]
+
+
+async def test_entered_soc_with_the_session_energy(car_hass):
+    """Test that an entered SOC is stored with the session energy and planned."""
+    with patch.object(battery_plan, "async_request_plan", AsyncMock()) as request:
+        await battery_plan.async_set_ev_soc(car_hass, 40, charge_limit=80)
+        # The plan follows the entity's state change
+        request.assert_not_awaited()
+        await battery_plan.async_set_ev_soc(car_hass, 40)
+        # The same SOC again changes no state
+        request.assert_awaited_once()
+    config = car_hass.data[DOMAIN]["config"]
+    assert (config["ev_soc"], config["ev_soc_session_kwh"]) == (40.0, 6.0)
+    assert config["ev_charge_limit"] == 80.0
+    car_hass.data[DOMAIN]["save"].assert_awaited()
+    car_hass.data[DOMAIN][NUMBER_ENTITIES][0].update.assert_called()
+    car = battery_plan._car(car_hass)
+    assert car is not None
+    assert (car.entered_soc, car.entered_at_kwh, car.delivered_kwh) == (40.0, 6.0, 6.0)
+
+
+async def test_entered_soc_before_plugging_in(car_hass):
+    """Test that a SOC entered before plugging in counts the whole session."""
+    STATES["sensor.charger_status"] = "disconnected"
+    await battery_plan.async_set_ev_soc(car_hass, 30)
+    assert car_hass.data[DOMAIN]["config"]["ev_soc_session_kwh"] == 0.0
+
+
+@pytest.mark.parametrize("soc", [-1, 101])
+async def test_entered_soc_out_of_range(car_hass, soc):
+    """Test that a SOC outside 0-100 % is refused."""
+    with pytest.raises(ValueError, match="not a SOC"):
+        await battery_plan.async_set_ev_soc(car_hass, soc)
+    assert "ev_soc" not in car_hass.data[DOMAIN]["config"]
+
+
+async def test_unplugging_clears_the_entered_soc(car_hass):
+    """Test that the entered SOC ends with the session."""
+    await battery_plan.async_set_ev_soc(car_hass, 40)
+    await battery_plan.async_car_unplugged(car_hass)
+    config = car_hass.data[DOMAIN]["config"]
+    assert (config["ev_soc"], config["ev_soc_session_kwh"]) == (None, None)
 
 
 async def test_no_battery_state(mock_hass):

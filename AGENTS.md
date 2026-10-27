@@ -24,7 +24,7 @@ are defined in `GLOSSARY.md`. Decisions: `docs/adr/`.
 | `custom_components/energy_planner/migrate.py` | Moves stored settings of older versions to the current keys (`migrate_config`, on load) and removes the registry entries of entities that are gone (`remove_entities`, on setup) |
 | `tests/` | `planner/`: the planning modules and their HA glue; `comfort/`; at the top config flow, entities, services, triggers and the migration. `tests/README.md` says how they reach HA |
 | `examples/` | Scripts, automations and cards that consume the actions, by topic: `battery/` (the inverter scripts, incl. Remote Dispatch and its test), `ev/`, `heat_pump/`, `comfort/` (the heating test package), `dashboard/`; index in `examples/README.md` |
-| `energy_planner_extras.yaml`, `add_slot_form.yml` | HA package + card for the manual "add slot" form |
+| `energy_planner_extras.yaml`, `add_slot_form.yml` | HA package + card for the manual "add slot" form; the extras file also has the car SOC card (`ev_soc`, in a comment) |
 | `local_deploy.sh` | Copies the component into `~/projects/ha_demo/config` and restarts its docker compose |
 
 ### `planner/`
@@ -108,7 +108,7 @@ out to whole quarters, kept in UTC. Where they overlap, the last added wins.
   `hourly`), see "Forecast"
 - `time`: `ev_ready_time` (06:30)
 - `datetime`: `ev_departure` (a trip, see "Car")
-- `number`: `battery_efficiency` (%, round trip),
+- `number`: `ev_soc` and `ev_charge_limit` (see "Car"), `battery_efficiency` (%, round trip),
   `max_charge_current`, `max_discharge_current`, `battery_capacity` (Wh),
   `battery_shutdown_soc` (%, default 10), `battery_reserve_soc` (%, default 20: the plan does not
   discharge below it, see "Battery plan"), `battery_max_soc`, `network_cost` (öre/kWh incl. VAT paid on
@@ -139,7 +139,7 @@ out to whole quarters, kept in UTC. Where they overlap, the last added wins.
 
 - **Services:** `add_slot`, `remove_manual_slot` (by its start), `clear_manual_slots`
   (each stores the slots, rewrites the action sensors and requests a plan),
-  `update_forecast`, `update_battery_plan` (also the button
+  `set_ev_soc` (see "Car"), `update_forecast`, `update_battery_plan` (also the button
   `button.energy_planner_update_battery_plan`). The rule-based planners and the
   schedule of slots were removed (docs/adr/0001-one-planner-no-schedule.md);
   `migrate.py` cleans up their stored data and entities.
@@ -482,8 +482,16 @@ beats the end price. At
 but `disconnected`/`unavailable`/`unknown`/`off` means plugged in, so Zaptec's
 `connected_*`), `ev_session_energy_sensor` (kWh since plugged in),
 `ev_soc_sensor` / `ev_charge_limit_sensor` (%, with `ev_battery_capacity`, kWh).
+Numbers: `ev_charge_limit` (%, default 100, the target without a limit sensor) and
+`ev_soc` (%, the SOC entered for this session, also by the `set_ev_soc` service with
+an optional charge limit; stored with the session energy then in
+`ev_soc_session_kwh`, 0 when entered before plugging in, and cleared when the charger
+says unplugged, not when it is unavailable).
 
-- Need: (limit − SOC) × capacity / 0.9 when the car reports both; otherwise the
+- Need: (limit − SOC) × capacity / 0.9 when the car reports its SOC (the limit
+  sensor, else `ev_charge_limit`); otherwise the same from the entered `ev_soc` minus
+  the session energy delivered since it was entered (source `entered`; not planned
+  once that is used up); otherwise the
   largest ended charging night (noon to noon) in the 35 days of `forecast_ev_sensor`
   history (`ev_need_kwh` in the forecast) minus the session's energy; for a trip (the
   departure is the deadline) a full battery (`ev_battery_capacity` / 0.9, source
@@ -498,7 +506,7 @@ but `disconnected`/`unavailable`/`unknown`/`off` means plugged in, so Zaptec's
   full; the 90th percentile was 19 kWh where nights reach 33), so once the session
   has taken more than that, or without either, the car is not planned and the
   action falls back to charging. The plan publishes `ev` (None while unplugged): `power` per quarter (kW),
-  `need_kwh`, `need_source` (`soc`/`history`/`trip`), `ready` (the deadline, also past the
+  `need_kwh`, `need_source` (`soc`/`entered`/`history`/`trip`), `ready` (the deadline, also past the
 horizon), `planned_kwh`, `missing_kwh`.
   Plugging in or out and the car settings (incl. the departure) trigger a new plan.
 - `sensor.energy_planner_ev_action`: `charge`/`wait` from the plan (source `plan`,

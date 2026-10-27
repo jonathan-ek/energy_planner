@@ -16,7 +16,7 @@ from homeassistant.components.sensor.const import (
 )
 
 from .const import DOMAIN, NUMBER_ENTITIES
-from .planner import settings
+from .planner import async_set_ev_soc, settings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -338,6 +338,38 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
+                # What the car is charged to without a charge limit sensor
+                "id": "ev_charge_limit",
+                "name": "Car charge limit",
+                "min_val": 0,
+                "max_val": 100,
+                "step": 1,
+                "unit_of_measurement": PERCENTAGE,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                # The car's SOC entered for this session (without a SOC sensor),
+                # cleared when it is unplugged; stored with the session's energy
+                "id": "ev_soc",
+                "name": "Car SOC",
+                "min_val": 0,
+                "max_val": 100,
+                "step": 1,
+                "unit_of_measurement": PERCENTAGE,
+                "icon": "mdi:car-battery",
+                "mode": NumberMode.BOX,
+                "enabled": True,
+                "data_store": "config",
+                "set": async_set_ev_soc,
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
                 # The heat pump only runs when its heat is at least this much cheaper
                 # than district heating (öre per kWh of heat)
                 "id": "heat_pump_margin",
@@ -418,6 +450,8 @@ class EnergyPlannerNumberEntity(NumberEntity):
         self._attr_entity_registry_enabled_default = entity_definition.get(
             "enabled", False
         )
+        # Stores the value instead of writing it to the store (async, hass, value)
+        self._set = entity_definition.get("set")
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
@@ -440,6 +474,9 @@ class EnergyPlannerNumberEntity(NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the current value."""
+        if self._set is not None:
+            await self._set(self._hass, value)
+            return
         self._attr_native_value = value
         self._hass.data[DOMAIN][self.data_store][self.id] = value
         await self._hass.data[DOMAIN]["save"]()

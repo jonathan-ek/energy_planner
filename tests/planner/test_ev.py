@@ -30,6 +30,22 @@ def test_is_plugged(state, plugged):
     assert ev.is_plugged(state) == plugged
 
 
+@pytest.mark.parametrize(
+    ("state", "unplugged"),
+    [
+        ("disconnected", True),
+        ("off", True),
+        ("unavailable", False),
+        ("unknown", False),
+        (None, False),
+        ("connected_charging", False),
+    ],
+)
+def test_is_unplugged(state, unplugged):
+    """Test that only a charger that says so means the car was unplugged."""
+    assert ev.is_unplugged(state) == unplugged
+
+
 def test_charging_nights_run_noon_to_noon():
     """Test that evening and early morning charging count as one night."""
     day = dt.date(2026, 10, 5)

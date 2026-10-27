@@ -18,7 +18,7 @@ from homeassistant.components.recorder.statistics import statistics_during_perio
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_utils
 
-from ..const import DOMAIN, PLAN_SENSORS
+from ..const import DOMAIN, NUMBER_ENTITIES, PLAN_SENSORS
 from . import ev, manual, planning, settings
 from .battery_action import BatteryState, resolve
 from .battery_optimizer import Limit
@@ -61,7 +61,8 @@ def ev_plugged(hass: HomeAssistant) -> bool:
 
 def _car(hass: HomeAssistant) -> planning.CarReadings | None:
     """Return the plugged-in car's settings and readings, None if not planned."""
-    car = settings.car(hass.data[DOMAIN]["config"])
+    config = hass.data[DOMAIN]["config"]
+    car = settings.car(config)
     if car is None or not ev_plugged(hass):
         return None
     return planning.CarReadings(
@@ -69,7 +70,50 @@ def _car(hass: HomeAssistant) -> planning.CarReadings | None:
         soc=settings.reading(hass, car.soc_sensor),
         charge_limit=settings.reading(hass, car.charge_limit_sensor),
         delivered_kwh=settings.reading(hass, car.session_energy_sensor),
+        entered_soc=settings.get(config, "ev_soc"),
+        entered_at_kwh=settings.get(config, "ev_soc_session_kwh"),
     )
+
+
+async def _store_ev_settings(hass: HomeAssistant, values: dict) -> None:
+    """Store car settings and show them on their entities."""
+    hass.data[DOMAIN]["config"].update(values)
+    await hass.data[DOMAIN]["save"]()
+    for entity in hass.data[DOMAIN].get(NUMBER_ENTITIES, []):
+        if entity.id in values:
+            entity.update()
+
+
+async def async_set_ev_soc(
+    hass: HomeAssistant, soc: float, charge_limit: float | None = None
+) -> None:
+    """Enter the car's SOC (%) for this session, and optionally its charge limit.
+
+    Stored with the session's energy now, so what is delivered after it is taken
+    off the need (planning.vehicle); entered before plugging in, the session starts
+    at 0. The plan follows from the entities' state changes, and is requested here
+    when the same SOC is entered again. Raises ValueError outside 0-100 %.
+    """
+    for value in (soc, charge_limit):
+        if value is not None and not 0 <= value <= 100:
+            raise ValueError(f"{value} is not a SOC (0-100 %)")
+    config = hass.data[DOMAIN]["config"]
+    car = settings.car(config)
+    plugged = car is not None and ev_plugged(hass)
+    session = settings.reading(hass, car.session_energy_sensor) if plugged else None
+    unchanged = settings.get(config, "ev_soc") == soc
+    values = {"ev_soc": float(soc), "ev_soc_session_kwh": session or 0.0}
+    if charge_limit is not None:
+        values["ev_charge_limit"] = float(charge_limit)
+    await _store_ev_settings(hass, values)
+    if unchanged:
+        await async_request_plan(hass, f"car SOC {soc} % entered")
+
+
+async def async_car_unplugged(hass: HomeAssistant) -> None:
+    """Clear the SOC entered for the session that ended."""
+    if settings.get(hass.data[DOMAIN]["config"], "ev_soc") is not None:
+        await _store_ev_settings(hass, {"ev_soc": None, "ev_soc_session_kwh": None})
 
 
 def _heat_pump(hass: HomeAssistant) -> planning.HeatPumpReadings:

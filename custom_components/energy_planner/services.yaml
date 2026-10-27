@@ -65,3 +65,34 @@ update_forecast:
 update_battery_plan:
   name: Update battery plan
   description: Recalculate the battery plan from the current forecast, prices and battery state
+
+set_ev_soc:
+  name: Set car SOC
+  description: >-
+    Enter the car's state of charge for this charging session, so the plan knows
+    how much it needs (from the SOC to the charge limit). Used while the car does
+    not report its own SOC; cleared when the car is unplugged.
+  fields:
+    soc:
+      name: SOC
+      description: The car's state of charge now
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: '%'
+          mode: slider
+    charge_limit:
+      name: Charge limit
+      description: >-
+        Charge up to it (sets number.energy_planner_ev_charge_limit, kept for later
+        sessions). The car's charge limit sensor wins when one is configured.
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: '%'
+          mode: slider

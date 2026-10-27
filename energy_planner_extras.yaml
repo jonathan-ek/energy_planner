@@ -63,3 +63,29 @@ automation:
           {% else %}
             {{ slot }}
           {% endif %}
+
+# Card for the car's SOC (a package can not hold cards: paste it into a dashboard).
+# After plugging in a car that does not report its SOC, enter it here: the plan
+# charges from it up to the charge limit, by the ready time. It is cleared when the
+# car is unplugged. The service energy_planner.set_ev_soc does the same, e.g. from a
+# notification action.
+#
+# type: entities
+# title: Bilens laddning
+# entities:
+#   - entity: number.energy_planner_ev_soc
+#     name: Bilens SOC nu
+#   - entity: number.energy_planner_ev_charge_limit
+#     name: Ladda till
+#   - entity: sensor.energy_planner_ev_action
+#     name: Laddning nu
+#   - type: attribute
+#     entity: sensor.energy_planner_ev_action
+#     attribute: need_kwh
+#     name: Behov
+#     suffix: kWh
+#   - type: attribute
+#     entity: sensor.energy_planner_ev_action
+#     attribute: planned_kwh
+#     name: Planerat
+#     suffix: kWh

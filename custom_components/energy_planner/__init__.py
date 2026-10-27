@@ -32,9 +32,12 @@ from .migrate import migrate_config, migrate_values, remove_entities
 from .planner import manual, settings
 from .planner.timeline import quarter_start
 from .planner.ev import is_plugged as ev_is_plugged
+from .planner.ev import is_unplugged as ev_is_unplugged
 from .planner.fuse_guard import config_entities, update_guard
 from .planner import (
+    async_car_unplugged,
     async_request_plan,
+    async_set_ev_soc,
     async_update_forecast,
     write_plan_sensors,
 )
@@ -211,6 +214,15 @@ async def async_setup(hass: HomeAssistant, config):
         """Service to recalculate the battery plan."""
         await async_request_plan(hass, "service")
 
+    async def set_ev_soc_service(call: ServiceCall) -> None:
+        """Service to enter the car's SOC for this session."""
+        try:
+            await async_set_ev_soc(
+                hass, float(call.data["soc"]), call.data.get("charge_limit")
+            )
+        except (KeyError, TypeError, ValueError) as e:
+            raise ServiceValidationError(str(e)) from e
+
     # Register our service with Home Assistant.
     hass.services.async_register(DOMAIN, "add_slot", add_slot_service)
     hass.services.async_register(DOMAIN, "update_forecast", update_forecast_service)
@@ -223,6 +235,7 @@ async def async_setup(hass: HomeAssistant, config):
     hass.services.async_register(
         DOMAIN, "clear_manual_slots", clear_manual_slots_service
     )
+    hass.services.async_register(DOMAIN, "set_ev_soc", set_ev_soc_service)
 
     # Return boolean to indicate that initialization was successful.
     return True
@@ -363,8 +376,12 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     async def car_plugged(event: Event[EventStateChangedData]):
         old, new = event.data["old_state"], event.data["new_state"]
-        was = ev_is_plugged(old.state if old is not None else None)
-        now = ev_is_plugged(new.state if new is not None else None)
+        old_state = old.state if old is not None else None
+        new_state = new.state if new is not None else None
+        if old_state != new_state and ev_is_unplugged(new_state):
+            await async_car_unplugged(hass)
+        was = ev_is_plugged(old_state)
+        now = ev_is_plugged(new_state)
         if was != now:
             await async_request_plan(hass, "car plugged in" if now else "car unplugged")
 

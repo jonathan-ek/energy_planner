@@ -6,8 +6,11 @@ plan (battery_plan.py) plans it together with the battery
 `sensor.energy_planner_ev_action` says whether to charge now, and an automation
 makes the charger follow it (examples/ev/follow_ev_action_automation.yml).
 
-The need is (charge limit - SOC) x battery capacity when the car reports both (e.g.
-ESPHome Tesla BLE). Otherwise it is the largest recent charging night from the
+The need is (charge limit - SOC) x battery capacity when the car reports its SOC
+(e.g. ESPHome Tesla BLE; the limit from the car, else `ev_charge_limit`). Without
+it, from the SOC entered for the session (`number.energy_planner_ev_soc` or the
+`set_ev_soc` service, cleared when the car is unplugged) minus what the session has
+delivered since. Otherwise it is the largest recent charging night from the
 charger's power history, minus what this session has delivered: overestimating is
 cheap, as the car stops by itself when it is full and the rest of the planned
 quarters pass without charging. Underestimating is not (the plan would pause a car
@@ -30,6 +33,8 @@ from .timeline import Timeline, at_local
 # Charger states that mean no car (others, e.g. Zaptec's connected_requesting,
 # connected_charging, connected_finished, mean plugged in)
 UNPLUGGED_STATES = ("disconnected", "unavailable", "unknown", "off", "none", "")
+# Of those, the ones that only say the charger can not be reached
+UNKNOWN_STATES = ("unavailable", "unknown", "none", "")
 # A charging night runs from noon to noon, so evening and early morning charging
 # for the same morning count together
 NIGHT_START_HOUR = 12
@@ -45,6 +50,18 @@ CHARGE_EFFICIENCY = 0.9
 def is_plugged(state: str | None) -> bool:
     """Return whether the charger state means a car is plugged in."""
     return state is not None and state.lower() not in UNPLUGGED_STATES
+
+
+def is_unplugged(state: str | None) -> bool:
+    """Return whether the charger state says the car is not plugged in.
+
+    Not when the charger can not be reached: the car may still be plugged in.
+    """
+    return (
+        state is not None
+        and state.lower() in UNPLUGGED_STATES
+        and state.lower() not in UNKNOWN_STATES
+    )
 
 
 def charging_nights(

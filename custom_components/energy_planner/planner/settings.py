@@ -122,9 +122,16 @@ SETTINGS: dict[str, Setting] = {
         Setting("ev_charger_status_sensor", None),
         # kWh delivered since it was plugged in
         Setting("ev_session_energy_sensor", None),
-        # The car's SOC and charge limit (%), for the need when both are known
+        # The car's SOC and charge limit (%), for the need
         Setting("ev_soc_sensor", None),
         Setting("ev_charge_limit_sensor", None),
+        # % to charge to without a charge limit sensor
+        _number("ev_charge_limit", 100, replans=True),
+        # % entered for this session (without a SOC sensor), cleared when the car
+        # is unplugged; with the session energy when it was entered, so what was
+        # delivered since is taken off the need
+        Setting("ev_soc", None, "number", replans=True),
+        Setting("ev_soc_session_kwh", None),
     )
 }
 
@@ -194,6 +201,7 @@ class CarSettings:
     session_energy_sensor: str | None
     soc_sensor: str | None
     charge_limit_sensor: str | None
+    charge_limit: float  # % without a charge limit sensor
     battery_kwh: float
     charger_min_kw: float  # 0: only on/off at the highest
     charger_max_kw: float
@@ -211,6 +219,7 @@ def car(config: Mapping[str, Any]) -> CarSettings | None:
         session_energy_sensor=get(config, "ev_session_energy_sensor") or None,
         soc_sensor=get(config, "ev_soc_sensor") or None,
         charge_limit_sensor=get(config, "ev_charge_limit_sensor") or None,
+        charge_limit=number(config, "ev_charge_limit"),
         battery_kwh=number(config, "ev_battery_capacity"),
         charger_min_kw=number(config, "ev_charger_min_power") / 1000,
         charger_max_kw=number(config, "ev_charger_max_power") / 1000,

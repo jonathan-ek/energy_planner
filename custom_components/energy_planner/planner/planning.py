@@ -39,6 +39,9 @@ class CarReadings:
     soc: float | None  # %
     charge_limit: float | None  # %
     delivered_kwh: float | None  # this session
+    # The SOC (%) entered for this session, and the session's energy then
+    entered_soc: float | None = None
+    entered_at_kwh: float | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -148,13 +151,15 @@ def vehicle(
 
     The `EvPlan`'s charging is filled in from the optimizer's result.
 
-    Only while it is plugged in. The need is from the car's SOC and charge limit when
-    both are known. Otherwise it is the largest recent charging night
+    Only while it is plugged in. The need is from the car's SOC to its charge limit
+    (the limit sensor, else the `ev_charge_limit` setting) when the car reports its
+    SOC. Otherwise from the SOC entered for this session, minus what the session has
+    delivered since. Otherwise it is the largest recent charging night
     (`history_need_kwh`) minus what this session has delivered (see planner/ev.py),
     or for a trip (the departure comes before the next working morning) a full
     battery, as the car stops at its own charge limit. Without either, or once the
-    session has taken more than the history's need, the car is not planned and the
-    action falls back to charging, so a car that is not full is never paused.
+    session has taken more than the need, the car is not planned and the action
+    falls back to charging, so a car that is not full is never paused.
     """
     if car is None or not len(quarters):
         return None, None
@@ -163,9 +168,16 @@ def vehicle(
     ready = config.ready_time
     departure = config.departure
     target = ev.ready_time(quarters.local(0), ready, departure)
-    if car.soc is not None and car.charge_limit is not None:
-        need = ev.need_from_soc(car.soc, car.charge_limit, capacity)
+    limit = car.charge_limit if car.charge_limit is not None else config.charge_limit
+    if car.soc is not None:
+        need = ev.need_from_soc(car.soc, limit, capacity)
         source = "soc"
+    elif car.entered_soc is not None:
+        delivered = (car.delivered_kwh or 0.0) - (car.entered_at_kwh or 0.0)
+        need = ev.need_from_soc(car.entered_soc, limit, capacity) - max(delivered, 0)
+        source = "entered"
+        if need <= 0:
+            return None, None
     else:
         if target == departure:
             need = ev.need_from_soc(0, 100, capacity)

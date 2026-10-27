@@ -43,7 +43,7 @@ class EvPlan:
     """The car while it is plugged in."""
 
     need_kwh: float
-    need_source: str  # soc, history or trip
+    need_source: str  # soc, entered, history or trip
     ready: dt.datetime  # the deadline, also past the horizon
     power_kw: tuple[float, ...]  # per quarter
     planned_kwh: float

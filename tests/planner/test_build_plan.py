@@ -101,7 +101,14 @@ def plan(**changes):
     return result.to_attributes()
 
 
-def car(soc=None, charge_limit=None, delivered_kwh=None, **config):
+def car(
+    soc=None,
+    charge_limit=None,
+    delivered_kwh=None,
+    entered_soc=None,
+    entered_at_kwh=None,
+    **config,
+):
     """Return a plugged-in car's readings, ready at 06:30 by default."""
     car_settings = settings.car(
         {
@@ -111,7 +118,9 @@ def car(soc=None, charge_limit=None, delivered_kwh=None, **config):
         }
     )
     assert car_settings is not None
-    return planning.CarReadings(car_settings, soc, charge_limit, delivered_kwh)
+    return planning.CarReadings(
+        car_settings, soc, charge_limit, delivered_kwh, entered_soc, entered_at_kwh
+    )
 
 
 def test_plan_from_the_current_quarter():
@@ -291,6 +300,52 @@ def test_car_from_soc():
     result = plan(car=car(soc=60.0, charge_limit=80.0, ev_battery_capacity=45))
     assert result["ev"]["need_source"] == "soc"
     assert result["ev"]["need_kwh"] == pytest.approx(0.2 * 45 / 0.9)
+
+
+def test_car_from_soc_to_the_limit_setting():
+    """Test that without a charge limit sensor the car charges to the setting."""
+    result = plan(car=car(soc=60.0, ev_battery_capacity=45, ev_charge_limit=90))
+    assert result["ev"]["need_kwh"] == pytest.approx(0.3 * 45 / 0.9)
+
+
+def test_car_from_entered_soc():
+    """Test that an entered SOC gives the need, less what was delivered since."""
+    result = plan(
+        forecast=make_forecast(STARTS, ev_need_kwh=5.0),
+        car=car(
+            delivered_kwh=10.0,
+            entered_soc=40.0,
+            entered_at_kwh=4.0,
+            ev_battery_capacity=45,
+            ev_charge_limit=80,
+        ),
+    )
+    ev = result["ev"]
+    # 40 -> 80 % of 45 kWh at the plug, 6 kWh delivered since it was entered; the
+    # history's 5 kWh is not used
+    assert ev["need_source"] == "entered"
+    assert ev["need_kwh"] == pytest.approx(0.4 * 45 / 0.9 - 6.0)
+    assert ev["planned_kwh"] == pytest.approx(ev["need_kwh"], abs=0.5)
+
+
+def test_car_sensor_soc_wins_over_the_entered():
+    """Test that the car's own SOC is used before an entered one."""
+    result = plan(car=car(soc=70.0, entered_soc=40.0, ev_battery_capacity=45))
+    assert result["ev"]["need_source"] == "soc"
+    assert result["ev"]["need_kwh"] == pytest.approx(0.3 * 45 / 0.9)
+
+
+def test_car_charged_past_the_entered_soc_is_not_planned():
+    """Test that once the session has delivered the entered need, the car charges."""
+    result = plan(
+        car=car(
+            delivered_kwh=30.0,
+            entered_soc=80.0,
+            entered_at_kwh=0.0,
+            ev_battery_capacity=45,
+        )
+    )
+    assert result["ev"] is None
 
 
 def test_unplugged_car_is_not_planned():
