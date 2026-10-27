@@ -69,6 +69,8 @@ def mock_hass():
     forecast_update.dt_utils.set_default_time_zone(TZ)
     hass = MagicMock()
     hass.data = {DOMAIN: {"config": {"forecast_weekend_reserve": 4}}}
+    # The build runs in the executor
+    hass.async_add_executor_job = AsyncMock(side_effect=lambda job, *args: job(*args))
     yield hass
     forecast_update.dt_utils.set_default_time_zone(default)
 

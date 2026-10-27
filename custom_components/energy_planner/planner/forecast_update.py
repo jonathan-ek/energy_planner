@@ -298,32 +298,32 @@ async def async_update_forecast(hass: HomeAssistant) -> None:
         except (aiohttp.ClientError, TimeoutError, KeyError, ValueError) as err:
             _LOGGER.warning("Open-Meteo failed, using Forecast.Solar: %s", err)
 
-    result = forecast.build_forecast(
-        forecast.ForecastInputs(
-            now=now,
-            tz=dt_utils.get_default_time_zone(),
-            load=means.get(load_id, {}),
-            pv=means.get(pv_id, {}),
-            ev=means.get(ev_id, {}),
-            indoor=means.get(indoor_id, {}),
-            outdoor=means.get(outdoor_id, {}),
-            heating_shares=shares,
-            planned_loads=await _planned_loads(hass, calendar_id, yesterday_start, end),
-            away_periods=await _away_periods(hass, calendar_id, midnight, end),
-            open_meteo=open_meteo,
-            forecast_solar=[
-                (watts, means.get(entity, {}) if entity else {})
-                for watts, entity in sources
-            ],
-            load_model=settings.get(config, "forecast_load_model"),
-            pv_calibration=settings.get(config, "forecast_pv_calibration"),
-            weekend_reserve_kwh=settings.number(config, "forecast_weekend_reserve"),
-            reserve_start=int(settings.number(config, "forecast_reserve_start")),
-            reserve_end=int(settings.number(config, "forecast_reserve_end")),
-            heat_pump_power_kw=heat_pump_config.power_kw,
-            cop_curve=heating.curve(hass),
-        )
+    inputs = forecast.ForecastInputs(
+        now=now,
+        tz=dt_utils.get_default_time_zone(),
+        load=means.get(load_id, {}),
+        pv=means.get(pv_id, {}),
+        ev=means.get(ev_id, {}),
+        indoor=means.get(indoor_id, {}),
+        outdoor=means.get(outdoor_id, {}),
+        heating_shares=shares,
+        planned_loads=await _planned_loads(hass, calendar_id, yesterday_start, end),
+        away_periods=await _away_periods(hass, calendar_id, midnight, end),
+        open_meteo=open_meteo,
+        forecast_solar=[
+            (watts, means.get(entity, {}) if entity else {})
+            for watts, entity in sources
+        ],
+        load_model=settings.get(config, "forecast_load_model"),
+        pv_calibration=settings.get(config, "forecast_pv_calibration"),
+        weekend_reserve_kwh=settings.number(config, "forecast_weekend_reserve"),
+        reserve_start=int(settings.number(config, "forecast_reserve_start")),
+        reserve_end=int(settings.number(config, "forecast_reserve_end")),
+        heat_pump_power_kw=heat_pump_config.power_kw,
+        cop_curve=heating.curve(hass),
     )
+    # A few hundred thousand operations: off the event loop, like the optimizer
+    result = await hass.async_add_executor_job(forecast.build_forecast, inputs)
     hass.data[DOMAIN]["forecast"] = result
     details = result.details
     _LOGGER.info(

@@ -51,7 +51,8 @@ SETTINGS: dict[str, Setting] = {
         Setting("nordpool_entity_id", None),
         # The battery
         _number("battery_capacity", 25600, replans=True),  # Wh
-        _number("battery_shutdown_soc", 20, replans=True),
+        # Below the reserve, so the reserve is kept for peaks on a fresh install
+        _number("battery_shutdown_soc", 10, replans=True),
         # The battery plan does not discharge below it; the inverter may, down to
         # the shutdown SOC, to shave peaks from unexpected load
         _number("battery_reserve_soc", 20, replans=True),

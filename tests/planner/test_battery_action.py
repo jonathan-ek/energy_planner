@@ -182,6 +182,20 @@ def test_quarter_of_a_removed_manual_slot_is_not_followed():
     assert (result["source"], result["reason"]) == ("fallback", "manual slot removed")
 
 
+def test_charge_before_a_manual_slot_ends_where_it_starts():
+    """Test that the plan's charge is not spread into a following manual charge."""
+    planned = dataclasses.replace(
+        plan(["charge"] * 4, [55.0, 60.0, 75.0, 90.0], [4.0] * 4),
+        manual=(None, None, "charge", "charge"),
+    )
+    result = action.resolve(None, planned, NOW, BATTERY)
+    # Up to 60 % by 22:30 (two quarters), not 90 % by 23:00
+    assert result["until"] == STARTS[2].isoformat()
+    assert result["soc"] == 60
+    # 10 % of 20 kWh = 2 kWh in 25 minutes: 4.8 kW, 10 A at 500 V
+    assert result["current_a"] == 10
+
+
 def test_planner_off_is_self_use():
     """Test that with the planner off the plan is not followed."""
     result = action.resolve(None, plan(["charge"], [60.0]), NOW, BATTERY, enabled=False)

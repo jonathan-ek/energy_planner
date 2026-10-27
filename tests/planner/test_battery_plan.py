@@ -1,6 +1,5 @@
 """Tests for the battery plan glue."""
 
-import asyncio
 import dataclasses
 import datetime as dt
 import importlib
@@ -214,49 +213,6 @@ async def test_requests_during_a_run_are_coalesced(mock_hass):
     with patch.object(battery_plan, "async_update_plan", update):
         await battery_plan.async_request_plan(mock_hass, "first")
     assert len(calls) == 2
-
-
-async def test_a_waiting_request_returns_after_its_run(mock_hass):
-    """Test that a request with wait during a run returns after the extra run."""
-    calls = []
-    seen = []
-
-    async def update(hass):
-        calls.append(1)
-        if len(calls) == 1:
-            await asyncio.sleep(0)
-
-    async def waiter():
-        await asyncio.sleep(0)
-        await battery_plan.async_request_plan(mock_hass, "second", wait=True)
-        seen.append(len(calls))
-
-    with patch.object(battery_plan, "async_update_plan", update):
-        await asyncio.gather(
-            battery_plan.async_request_plan(mock_hass, "first"), waiter()
-        )
-    assert seen == [2]
-
-
-async def test_a_request_while_the_lock_changes_hands_is_run(mock_hass):
-    """Test that a waiting request runs one made after the holder's last check."""
-    calls = []
-
-    async def update(hass):
-        calls.append(1)
-
-    lock = mock_hass.data[DOMAIN].setdefault("plan_lock", asyncio.Lock())
-    await lock.acquire()
-    with patch.object(battery_plan, "async_update_plan", update):
-        waiter = asyncio.create_task(
-            battery_plan.async_request_plan(mock_hass, "dynamic", wait=True)
-        )
-        await asyncio.sleep(0)
-        # The holder has finished its loop; this one only leaves a pending reason
-        await battery_plan.async_request_plan(mock_hass, "late")
-        lock.release()
-        await waiter
-    assert len(calls) == 1
 
 
 async def test_current_action_follows_the_plan_or_a_manual_slot(mock_hass):

@@ -106,7 +106,7 @@ out to whole quarters, kept in UTC. Where they overlap, the last added wins.
 - `datetime`: `ev_departure` (a trip, see "Car")
 - `number`: `battery_efficiency` (%, round trip),
   `max_charge_current`, `max_discharge_current`, `battery_capacity` (Wh),
-  `battery_shutdown_soc`, `battery_reserve_soc` (%, default 20: the plan does not
+  `battery_shutdown_soc` (%, default 10), `battery_reserve_soc` (%, default 20: the plan does not
   discharge below it, see "Battery plan"), `battery_max_soc`, `network_cost` (öre/kWh incl. VAT paid on
   bought energy: transfer fee + energy tax, ~63 here), `network_compensation` (öre/kWh
   received when selling, ~5 here),

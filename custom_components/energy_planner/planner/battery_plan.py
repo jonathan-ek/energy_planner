@@ -1,9 +1,10 @@
 """Battery plan: runs the optimizer on the forecast, prices and tariff.
 
 The plan (a `plan.Plan`) is published in `hass.data[DOMAIN]["plan"]` (shown by
-`sensor.energy_planner_battery_plan`). It controls nothing by itself: an `auto` slot
-makes `sensor.energy_planner_battery_action` follow it (see battery_action.py), and
-an inverter script follows that sensor.
+`sensor.energy_planner_battery_plan`). It controls nothing by itself:
+`sensor.energy_planner_battery_action` follows it while
+`switch.energy_planner_enabled` is on, and manual slots override it (see
+battery_action.py); an inverter script follows that sensor.
 """
 
 import asyncio
@@ -509,25 +510,15 @@ def write_plan_sensors(hass: HomeAssistant) -> None:
         sensor.async_write_ha_state()
 
 
-async def async_request_plan(
-    hass: HomeAssistant, reason: str, *, wait: bool = False
-) -> None:
-    """Recalculate the plan now, or once more after a running calculation.
-
-    With `wait`, a request during a running calculation returns once the extra one
-    is done too.
-    """
+async def async_request_plan(hass: HomeAssistant, reason: str) -> None:
+    """Recalculate the plan now, or once more after a running calculation."""
     data = hass.data[DOMAIN]
     lock = data.setdefault("plan_lock", asyncio.Lock())
-    waited = lock.locked()
-    if waited:
+    if lock.locked():
+        # The running calculation runs it next
         data["plan_pending"] = reason
-        if not wait:
-            return
+        return
     async with lock:
-        if waited:
-            # The holder ran ours; one made while the lock changed hands is pending
-            reason = data.get("plan_pending")
         while reason:
             data["plan_pending"] = None
             _LOGGER.debug("Updating the battery plan: %s", reason)

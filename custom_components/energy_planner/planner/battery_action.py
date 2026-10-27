@@ -83,18 +83,28 @@ def _current(kwh: float, until: dt.datetime, now: dt.datetime, battery, limit):
     return min(math.ceil(kwh / hours * 1000 / battery.voltage), int(limit))
 
 
+def _modes_and_manual(plan: Plan) -> list[tuple[str, str | None]]:
+    """Return the plan's mode and forced manual mode per quarter."""
+    manual = plan.manual or (None,) * len(plan.modes)
+    return list(zip(plan.modes, manual, strict=True))
+
+
 def plan_action(
     plan: Plan | None, now: dt.datetime, battery: BatteryState
 ) -> dict[str, Any]:
-    """Return the battery plan's action now, or a self-use fallback."""
-    run, reason = follow(plan, now, lambda p: p.modes)
-    if run is not None and plan is not None and plan.value_at(now, plan.manual):
+    """Return the battery plan's action now, or a self-use fallback.
+
+    The run ends where a manual slot's quarters begin or end, even with the same
+    mode: its target and current are the plan's own up to there.
+    """
+    run, reason = follow(plan, now, _modes_and_manual)
+    if run is not None and run.value[1] is not None:
         # Planned for a manual slot that has been removed since; not to follow
         run, reason = None, "manual slot removed"
     if run is None or plan is None:
         return _action("discharge", "fallback", plan=plan, reason=reason)
     index = run.index
-    mode = run.value
+    mode = run.value[0]
     # Without a reading, the SOC the plan expects: 0 would look like an empty battery
     soc = battery.soc if battery.soc is not None else plan.soc_at(now)
     if soc is None:
