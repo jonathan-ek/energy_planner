@@ -93,9 +93,17 @@ def current(slots: Iterable[ManualSlot], now: dt.datetime) -> list[ManualSlot]:
     return [slot for slot in slots if slot.end > now.astimezone(dt.UTC)]
 
 
+def _covering_index(slots: Sequence[ManualSlot], moment: dt.datetime) -> int | None:
+    """Return the index of the slot that runs at `moment` (the last added)."""
+    return next(
+        (i for i in range(len(slots) - 1, -1, -1) if slots[i].covers(moment)), None
+    )
+
+
 def covering(slots: Sequence[ManualSlot], moment: dt.datetime) -> ManualSlot | None:
     """Return the slot that runs at `moment` (the last added), None if none does."""
-    return next((slot for slot in reversed(slots) if slot.covers(moment)), None)
+    index = _covering_index(slots, moment)
+    return None if index is None else slots[index]
 
 
 def running(slots: Sequence[ManualSlot], moment: dt.datetime) -> ManualSlot | None:
@@ -103,12 +111,14 @@ def running(slots: Sequence[ManualSlot], moment: dt.datetime) -> ManualSlot | No
 
     That is its end, or earlier where a slot added after it takes over.
     """
-    slot = covering(slots, moment)
-    if slot is None:
+    # By position: a slot added again equals the earlier copy
+    index = _covering_index(slots, moment)
+    if index is None:
         return None
+    slot = slots[index]
     now = moment.astimezone(dt.UTC)
     end = slot.end
-    for later in slots[slots.index(slot) + 1 :]:
+    for later in slots[index + 1 :]:
         if now < later.start < end:
             end = later.start
     return dataclasses.replace(slot, end=end)

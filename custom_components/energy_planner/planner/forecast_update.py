@@ -311,7 +311,9 @@ async def async_update_forecast(hass: HomeAssistant) -> None:
         away_periods=await _away_periods(hass, calendar_id, midnight, end),
         open_meteo=open_meteo,
         forecast_solar=[
-            (watts, means.get(entity, {}) if entity else {})
+            # A copy: Forecast.Solar's coordinator may replace it while the build
+            # runs in the executor
+            (dict(watts), means.get(entity, {}) if entity else {})
             for watts, entity in sources
         ],
         load_model=settings.get(config, "forecast_load_model"),

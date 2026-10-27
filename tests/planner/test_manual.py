@@ -82,6 +82,9 @@ def test_running_ends_where_a_later_slot_takes_over():
     assert manual.running([early, later], utc(20, 13)) == later
     assert end([early, later], utc(20, 13, 45)) == utc(20, 14)
     assert manual.running([later, early], utc(20, 12, 30)) == early
+    # The same slot added again runs from its new position, past the other one
+    again = manual.make(utc(20, 12), utc(20, 14), "charge")
+    assert end([early, later, again], utc(20, 12, 30)) == utc(20, 14)
 
 
 def test_forced_modes_and_targets():
