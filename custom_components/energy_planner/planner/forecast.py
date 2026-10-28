@@ -1,7 +1,7 @@
 """Consumption and PV forecast per quarter, without Home Assistant dependencies.
 
-Backtested on a year of data (see AGENTS.md): blending a 7-day hourly profile with
-a profile of the last same-type days (workday / weekend) gave the best day-ahead
+Backtested on a year of data (see docs/forecast.md): blending a 7-day hourly profile
+with a profile of the last same-type days (workday / weekend) gave the best day-ahead
 consumption forecast, and splitting the hour evenly into quarters is as good as any
 quarter profile. For houses heated with electricity the profile can be corrected for
 the outdoor temperature (temperature_load_quarters).

@@ -1,6 +1,6 @@
 # Turns the heat pump (climate.hallen) on and off from
 # sensor.energy_planner_heat_pump_action: on while its heat is cheaper than district
-# heating, given the battery plan (see AGENTS.md, "Heat pump").
+# heating, given the battery plan (see docs/heat-pump.md).
 #
 # Only switches between heat and off, so cooling or another mode set by hand is left
 # alone, and only writes when the mode differs. The plan has no runs or gaps shorter

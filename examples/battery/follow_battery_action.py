@@ -110,7 +110,7 @@ HOLD_IMPORT_MAX = 10000  # W
 SHAVE_MIN_POWER = 100  # W, the margin for peak shaving in a daylight hold
 BATTERY_VOLTAGE = "sensor.solis_s6_solis_battery_voltage"  # V
 # The lowest SOC `hold` lets the battery cover peaks down to (the plan's reserve may
-# be used then, see AGENTS.md "Battery plan")
+# be used then, see docs/battery-plan.md)
 SHUTDOWN_SOC = "number.energy_planner_battery_shutdown_soc"
 MAX_SOC = "number.energy_planner_battery_max_soc"  # `hold` stores PV up to it
 SUN = "sun.sun"  # `hold` in daylight, see below

@@ -1,5 +1,18 @@
 # Docs
 
+Topic docs (`AGENTS.md` points agents to them):
+
+- [Architecture: layout, data model and control flow](architecture.md)
+- [Forecast](forecast.md)
+- [Battery plan](battery-plan.md)
+- [Heat pump](heat-pump.md)
+- [Car](car.md)
+- [Main fuse](main-fuse.md)
+- [Comfort (work in progress)](comfort.md)
+- [The households and grid tariffs](households.md)
+
+Other:
+
 - `adr/`: architecture decisions; read them before proposing to undo one
   - [0001 One planner, and no schedule of slots](adr/0001-one-planner-no-schedule.md)
 - `specs/`: agreed designs for larger changes

@@ -28,7 +28,7 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
-                # Round trip: AC in to AC out, see AGENTS.md "Battery plan"
+                # Round trip: AC in to AC out, see docs/battery-plan.md
                 "id": "battery_efficiency",
                 "name": "Battery efficiency",
                 "min_val": 0,

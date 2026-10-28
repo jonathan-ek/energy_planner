@@ -92,8 +92,8 @@ move together).
   rooms around it).
 - So with this supply temperature a 3 °C setback takes about a day to recover:
   setbacks of more than about 1 °C do not pay unless the supply can be raised
-  (a relay on the RVA36's H1 input or a sensor emulator on B9, see AGENTS.md
-  "Comfort").
+  (a relay on the RVA36's H1 input or a sensor emulator on B9, see comfort.md).
+
 - Floor zones: the basement rose 0.8 (tvättstugan) and 1.6 °C (gillestugan), the
   ground floor (vardagsrum, badrum) 2.2-2.3 °C, at the same pace as the radiator rooms.
 

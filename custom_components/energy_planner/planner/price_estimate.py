@@ -11,8 +11,8 @@ change (e.g. Friday -> Saturday) learned from the price history, shrunk toward z
 while it has few samples. Then the gap between today's last price and the estimate
 for the first hour is added, fading with `GAP_TIME_CONSTANT`: the prices just after
 midnight follow the evening's, not the profile's level. Backtested on SE3, May 2025
-- Oct 2026 (see AGENTS.md): the mean hourly error was 23 öre/kWh against 25 without
-the day types; following the plan made with it until the real prices came cost
+- Oct 2026 (see docs/battery-plan.md): the mean hourly error was 23 öre/kWh against 25
+without the day types; following the plan made with it until the real prices came cost
 0.10 kr/day more than knowing them, against 0.31 kr/day for a plan that ends at
 midnight. Weather (wind, temperature, sun in the Nordics and Germany) predicted the
 prices better but did not improve the battery's decisions. The gap (SE3, 426 days

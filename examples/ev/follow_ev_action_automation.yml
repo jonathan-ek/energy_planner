@@ -1,6 +1,6 @@
 # Starts and stops the car charger (here a Zaptec, "Garaget") from
 # sensor.energy_planner_ev_action: charge in the plan's cheapest quarters before the
-# ready time, wait otherwise (see AGENTS.md, "Car").
+# ready time, wait otherwise (see docs/car.md).
 #
 # Planner config store: ev_charger_status_sensor = sensor.garaget_laddstatus,
 # ev_session_energy_sensor = sensor.garaget_session_total_charge, and once the car
