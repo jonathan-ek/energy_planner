@@ -1,14 +1,70 @@
-# energy_planner
-Energy planner for HA
+# Energy planner
 
-# Plan and actions
+A Home Assistant custom integration that plans a home battery, an electric car and a
+heat pump per quarter hour from Nord Pool spot prices, the grid tariff and forecasts
+of the house's load and solar power. It is built for Swedish homes with a Solis
+hybrid inverter and runs in four of them; it is a personal project, not a polished
+product, so expect to adapt entity ids and scripts.
 
-The integration plans the battery, an electric car and a heat pump per quarter
-(`sensor.energy_planner_battery_plan`, with the plan in its attributes) and publishes
-what each device should do now (`sensor.energy_planner_battery_action`, `_ev_action`,
-`_heat_pump_action`). Scripts and automations in `examples/` apply them.
+## What it does
 
-# Manual slot form
+- **Forecasts** the house load (from its own history, optionally corrected for the
+  outdoor temperature) and the PV power (Open-Meteo per panel plane, calibrated on
+  the actual production), plus planned loads from a calendar.
+- **Plans the battery** with dynamic programming over the SOC: charge, hold, self-use,
+  sell, sell or curtail the solar surplus, per quarter, with grid fees, monthly power
+  charges, the main fuse, battery wear and its efficiency. Before tomorrow's prices
+  are published it plans on an estimate (same-type days, a learned correction and the
+  wind forecast).
+- **Plans the car** with the battery: the energy it needs by the next morning or a
+  trip, in the cheapest quarters.
+- **Plans an air-to-air heat pump** against district heating, from its COP at the
+  forecast outdoor temperature.
+- **Guards the main fuse** per phase, splitting the room between the car charger and
+  the battery's grid charging.
+- **Manual slots** override the plan (charge, sell, pause, ... from a time to a time).
+
+The integration only *publishes* the plan and what each device should do now:
+`sensor.energy_planner_battery_plan` (the plan in its attributes),
+`sensor.energy_planner_battery_action`, `_ev_action`, `_heat_pump_action` and
+`_fuse_guard`. Scripts and automations in `examples/` apply them to the devices.
+
+## Requirements
+
+- Home Assistant 2026.9 or later.
+- The [Nord Pool](https://github.com/custom-components/nordpool) custom integration.
+- Sensors for the house load, PV power, battery SOC and voltage, with history in the
+  recorder. Forecast.Solar entries for the panel planes (for their tilt, direction,
+  kWp and location).
+- Something that applies the actions: `examples/battery/follow_battery_action.py` is
+  written for Solis inverters (peak shaving, time-of-use and Remote Dispatch).
+
+## Installation
+
+1. Add this repository to HACS as a custom integration repository and install
+   "Energy planner", then restart Home Assistant.
+2. Add the integration and pick the Nord Pool sensor; choose the grid tariff in its
+   options.
+3. Point the settings at your entities and set up the scripts:
+   [`examples/new_home_setup.md`](examples/new_home_setup.md).
+
+## Documentation
+
+- [`examples/README.md`](examples/README.md): the scripts, automations and dashboards.
+- [`docs/`](docs/README.md): how each part works and the backtests behind it
+  (forecast, battery plan, car, heat pump, main fuse), and the decisions.
+- [`GLOSSARY.md`](GLOSSARY.md): the domain terms.
+- [`AGENTS.md`](AGENTS.md): development: commands, checks and conventions.
+
+## Development
+
+```bash
+make install   # uv sync
+make check     # ruff, ty and the tests (scripts/check.sh)
+make hooks     # pre-commit and commit message hooks
+```
+
+## Manual slot form
 - Add the following to your configuration.yaml
 ```yaml
 homeassistant:
@@ -17,7 +73,7 @@ homeassistant:
 ```
 - Add the energy_planner_extras.yaml file to your configuration folder
 
-# Upgrading from the slot planners
+## Upgrading from the slot planners
 
 The basic, cheapest hours and price peak planners were removed (Oct 2026, see
 `docs/adr/0001-one-planner-no-schedule.md`). To stay on them, pin the tag
