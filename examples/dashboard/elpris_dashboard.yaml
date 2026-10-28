@@ -1,0 +1,3777 @@
+title: Elpris
+views:
+- title: Elpris
+  path: elpris
+  icon: mdi:flash
+  type: sections
+  max_columns: 3
+  dense_section_placement: true
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Elpris
+      heading_style: title
+    - type: vertical-stack
+      grid_options:
+        columns: full
+      cards:
+      - type: markdown
+        content: "{%- set h = now().hour -%}\n{%- set p = states('sensor.nordpool_kwh_se3_sek_3_10_025')\
+          \ | float(0) * 1 + 45 + (18 if 6 <= h < 23 else 9) -%}\n{%- set ns = namespace(sum=0, n=0) -%}\n\
+          {%- for r in state_attr('sensor.nordpool_kwh_se3_sek_3_10_025', 'raw_today') or [] -%}\n  {%-\
+          \ set h = as_datetime(r.start).hour -%}\n  {%- set ns.sum = ns.sum + r.value * 1 + 45 + (18\
+          \ if 6 <= h < 23 else 9) -%}\n  {%- set ns.n = ns.n + 1 -%}\n{%- endfor -%}\n{%- set avg = ns.sum\
+          \ / ns.n if ns.n else 0 -%}\n{%- set q = now().replace(minute=(now().minute // 15) * 15, second=0,\
+          \ microsecond=0) -%}\n<ha-icon icon=\"mdi:lightning-bolt\"></ha-icon> **Elpris nu** · {{ q.strftime('%H:%M')\
+          \ }}–{{ (q + timedelta(minutes=15)).strftime('%H:%M') }}\n\n# {{ p | round(0) | int }} <small>öre</small>\n\
+          \n{{ '▼' if p <= avg else '▲' }} snitt idag {{ avg | round(0) | int }} öre · inkl. skatt och\
+          \ nätavgift"
+        grid_options:
+          columns: full
+        card_mod:
+          style: &id001
+            .: 'ha-card { border-radius: 20px; border: none; padding: 4px 4px 8px; }'
+            ha-markdown$: '
+
+              h1 { font-size: 56px; font-weight: 700; line-height: 1.05; margin: 8px 0 6px; letter-spacing:
+              -1px; }
+
+              h1 small { font-size: 22px; font-weight: 500; opacity: 0.75; }
+
+              p { margin: 2px 0; }
+
+              table { width: 100%; border-collapse: collapse; border: none; }
+
+              th { text-align: left; opacity: 0.6; font-weight: 500; font-size: 13px; }
+
+              td, th { padding: 7px 2px; border: none !important; border-bottom: 1px solid rgba(127,127,127,0.15)
+              !important; }
+
+              '
+      - type: custom:apexcharts-card
+        graph_span: 24h
+        span:
+          start: day
+        update_interval: 5min
+        now:
+          show: true
+          color: '#ffffff'
+          label: ''
+        header:
+          show: false
+        experimental:
+          color_threshold: false
+        yaxis:
+        - show: false
+          min: 0
+        apex_config:
+          chart:
+            height: 70
+            toolbar:
+              show: false
+            zoom:
+              enabled: false
+            background: transparent
+          legend:
+            show: false
+          grid:
+            show: false
+            padding:
+              left: 8
+              right: 8
+              top: -10
+              bottom: -6
+          xaxis:
+            labels:
+              format: HH
+              style:
+                fontSize: 11px
+              show: true
+            axisBorder:
+              show: false
+            axisTicks:
+              show: false
+            tooltip:
+              enabled: false
+          tooltip:
+            x:
+              format: ddd HH:mm
+          stroke:
+            width: 2
+          dataLabels:
+            enabled: false
+          fill:
+            type:
+            - gradient
+            - gradient
+            - gradient
+            - gradient
+            - gradient
+            - gradient
+            - gradient
+            opacity:
+            - 1
+            - 1
+            - 1
+            - 1
+            - 1
+            - 1
+            - 1
+            gradient:
+              type: vertical
+              shadeIntensity: 0
+              opacityFrom: 0.45
+              opacityTo: 0.04
+              stops:
+              - 0
+              - 100
+          yaxis:
+            show: false
+        card_mod:
+          style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; } ha-card { margin-top:
+            -12px; } '
+        grid_options:
+          columns: full
+        series:
+        - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+          name: Ladda
+          type: area
+          curve: stepline
+          color: '#2dd4bf'
+          stroke_width: 2
+          unit: öre
+          float_precision: 0
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+            const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new Date(p.start).getTime(),\
+            \ p.value * 1, false]);\nconst last = pub.length ? pub[pub.length - 1][0] : 0;\nconst plan\
+            \ = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst est = (plan.starts\
+            \ || []).map((s, i) => [new Date(s).getTime(), plan.prices[i], (plan.estimated || [])[i]])\n\
+            \  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub, ...est].map((p) => [p[0], Math.round((p[1]\
+            \ + fee(p[0])) * 10) / 10, p[2]]);\n\nconst groups = {\"charge\": \"charge\", \"hold\": \"\
+            hold\", \"self_use\": \"self_use\", \"sell\": \"sell\", \"sell_excess\": \"sell_excess\",\
+            \ \"discard_excess\": \"discard_excess\"};\nconst states = {\"charge\": \"charge\", \"pause\"\
+            : \"hold\", \"discharge\": \"self_use\", \"sell\": \"sell\", \"sell-excess\": \"sell_excess\"\
+            , \"discard-excess\": \"discard_excess\"};\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+            const mode = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual\
+            \ || [])[i] ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+            \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n  const\
+            \ g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return [p[0], g\
+            \ === 'charge' || prev === 'charge' ? p[1] : null];\n});\n"
+          extend_to: false
+          show:
+            in_header: false
+            legend_value: false
+        - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+          name: Vila
+          type: area
+          curve: stepline
+          color: '#7c9cff'
+          stroke_width: 2
+          unit: öre
+          float_precision: 0
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+            const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new Date(p.start).getTime(),\
+            \ p.value * 1, false]);\nconst last = pub.length ? pub[pub.length - 1][0] : 0;\nconst plan\
+            \ = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst est = (plan.starts\
+            \ || []).map((s, i) => [new Date(s).getTime(), plan.prices[i], (plan.estimated || [])[i]])\n\
+            \  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub, ...est].map((p) => [p[0], Math.round((p[1]\
+            \ + fee(p[0])) * 10) / 10, p[2]]);\n\nconst groups = {\"charge\": \"charge\", \"hold\": \"\
+            hold\", \"self_use\": \"self_use\", \"sell\": \"sell\", \"sell_excess\": \"sell_excess\",\
+            \ \"discard_excess\": \"discard_excess\"};\nconst states = {\"charge\": \"charge\", \"pause\"\
+            : \"hold\", \"discharge\": \"self_use\", \"sell\": \"sell\", \"sell-excess\": \"sell_excess\"\
+            , \"discard-excess\": \"discard_excess\"};\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+            const mode = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual\
+            \ || [])[i] ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+            \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n  const\
+            \ g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return [p[0], g\
+            \ === 'hold' || prev === 'hold' ? p[1] : null];\n});\n"
+          extend_to: false
+          show:
+            in_header: false
+            legend_value: false
+        - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+          name: Självförbrukning
+          type: area
+          curve: stepline
+          color: '#ff8a3d'
+          stroke_width: 2
+          unit: öre
+          float_precision: 0
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+            const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new Date(p.start).getTime(),\
+            \ p.value * 1, false]);\nconst last = pub.length ? pub[pub.length - 1][0] : 0;\nconst plan\
+            \ = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst est = (plan.starts\
+            \ || []).map((s, i) => [new Date(s).getTime(), plan.prices[i], (plan.estimated || [])[i]])\n\
+            \  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub, ...est].map((p) => [p[0], Math.round((p[1]\
+            \ + fee(p[0])) * 10) / 10, p[2]]);\n\nconst groups = {\"charge\": \"charge\", \"hold\": \"\
+            hold\", \"self_use\": \"self_use\", \"sell\": \"sell\", \"sell_excess\": \"sell_excess\",\
+            \ \"discard_excess\": \"discard_excess\"};\nconst states = {\"charge\": \"charge\", \"pause\"\
+            : \"hold\", \"discharge\": \"self_use\", \"sell\": \"sell\", \"sell-excess\": \"sell_excess\"\
+            , \"discard-excess\": \"discard_excess\"};\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+            const mode = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual\
+            \ || [])[i] ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+            \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n  const\
+            \ g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return [p[0], g\
+            \ === 'self_use' || prev === 'self_use' ? p[1] : null];\n});\n"
+          extend_to: false
+          show:
+            in_header: false
+            legend_value: false
+        - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+          name: Sälj
+          type: area
+          curve: stepline
+          color: '#ff5c7a'
+          stroke_width: 2
+          unit: öre
+          float_precision: 0
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+            const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new Date(p.start).getTime(),\
+            \ p.value * 1, false]);\nconst last = pub.length ? pub[pub.length - 1][0] : 0;\nconst plan\
+            \ = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst est = (plan.starts\
+            \ || []).map((s, i) => [new Date(s).getTime(), plan.prices[i], (plan.estimated || [])[i]])\n\
+            \  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub, ...est].map((p) => [p[0], Math.round((p[1]\
+            \ + fee(p[0])) * 10) / 10, p[2]]);\n\nconst groups = {\"charge\": \"charge\", \"hold\": \"\
+            hold\", \"self_use\": \"self_use\", \"sell\": \"sell\", \"sell_excess\": \"sell_excess\",\
+            \ \"discard_excess\": \"discard_excess\"};\nconst states = {\"charge\": \"charge\", \"pause\"\
+            : \"hold\", \"discharge\": \"self_use\", \"sell\": \"sell\", \"sell-excess\": \"sell_excess\"\
+            , \"discard-excess\": \"discard_excess\"};\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+            const mode = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual\
+            \ || [])[i] ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+            \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n  const\
+            \ g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return [p[0], g\
+            \ === 'sell' || prev === 'sell' ? p[1] : null];\n});\n"
+          extend_to: false
+          show:
+            in_header: false
+            legend_value: false
+        - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+          name: Sälj överskott
+          type: area
+          curve: stepline
+          color: '#f5c542'
+          stroke_width: 2
+          unit: öre
+          float_precision: 0
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+            const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new Date(p.start).getTime(),\
+            \ p.value * 1, false]);\nconst last = pub.length ? pub[pub.length - 1][0] : 0;\nconst plan\
+            \ = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst est = (plan.starts\
+            \ || []).map((s, i) => [new Date(s).getTime(), plan.prices[i], (plan.estimated || [])[i]])\n\
+            \  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub, ...est].map((p) => [p[0], Math.round((p[1]\
+            \ + fee(p[0])) * 10) / 10, p[2]]);\n\nconst groups = {\"charge\": \"charge\", \"hold\": \"\
+            hold\", \"self_use\": \"self_use\", \"sell\": \"sell\", \"sell_excess\": \"sell_excess\",\
+            \ \"discard_excess\": \"discard_excess\"};\nconst states = {\"charge\": \"charge\", \"pause\"\
+            : \"hold\", \"discharge\": \"self_use\", \"sell\": \"sell\", \"sell-excess\": \"sell_excess\"\
+            , \"discard-excess\": \"discard_excess\"};\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+            const mode = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual\
+            \ || [])[i] ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+            \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n  const\
+            \ g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return [p[0], g\
+            \ === 'sell_excess' || prev === 'sell_excess' ? p[1] : null];\n});\n"
+          extend_to: false
+          show:
+            in_header: false
+            legend_value: false
+        - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+          name: Kasta överskott
+          type: area
+          curve: stepline
+          color: '#b78cff'
+          stroke_width: 2
+          unit: öre
+          float_precision: 0
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+            const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new Date(p.start).getTime(),\
+            \ p.value * 1, false]);\nconst last = pub.length ? pub[pub.length - 1][0] : 0;\nconst plan\
+            \ = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst est = (plan.starts\
+            \ || []).map((s, i) => [new Date(s).getTime(), plan.prices[i], (plan.estimated || [])[i]])\n\
+            \  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub, ...est].map((p) => [p[0], Math.round((p[1]\
+            \ + fee(p[0])) * 10) / 10, p[2]]);\n\nconst groups = {\"charge\": \"charge\", \"hold\": \"\
+            hold\", \"self_use\": \"self_use\", \"sell\": \"sell\", \"sell_excess\": \"sell_excess\",\
+            \ \"discard_excess\": \"discard_excess\"};\nconst states = {\"charge\": \"charge\", \"pause\"\
+            : \"hold\", \"discharge\": \"self_use\", \"sell\": \"sell\", \"sell-excess\": \"sell_excess\"\
+            , \"discard-excess\": \"discard_excess\"};\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+            const mode = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual\
+            \ || [])[i] ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+            \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n  const\
+            \ g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return [p[0], g\
+            \ === 'discard_excess' || prev === 'discard_excess' ? p[1] : null];\n});\n"
+          extend_to: false
+          show:
+            in_header: false
+            legend_value: false
+        - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+          name: Ingen plan
+          type: area
+          curve: stepline
+          color: '#8a94a6'
+          stroke_width: 2
+          unit: öre
+          float_precision: 0
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+            const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new Date(p.start).getTime(),\
+            \ p.value * 1, false]);\nconst last = pub.length ? pub[pub.length - 1][0] : 0;\nconst plan\
+            \ = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst est = (plan.starts\
+            \ || []).map((s, i) => [new Date(s).getTime(), plan.prices[i], (plan.estimated || [])[i]])\n\
+            \  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub, ...est].map((p) => [p[0], Math.round((p[1]\
+            \ + fee(p[0])) * 10) / 10, p[2]]);\n\nconst groups = {\"charge\": \"charge\", \"hold\": \"\
+            hold\", \"self_use\": \"self_use\", \"sell\": \"sell\", \"sell_excess\": \"sell_excess\",\
+            \ \"discard_excess\": \"discard_excess\"};\nconst states = {\"charge\": \"charge\", \"pause\"\
+            : \"hold\", \"discharge\": \"self_use\", \"sell\": \"sell\", \"sell-excess\": \"sell_excess\"\
+            , \"discard-excess\": \"discard_excess\"};\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+            const mode = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual\
+            \ || [])[i] ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+            \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n  const\
+            \ g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return [p[0], g\
+            \ === 'none' || prev === 'none' ? p[1] : null];\n});\n"
+          extend_to: false
+          show:
+            in_header: false
+            legend_value: false
+    - type: custom:tabbed-card
+      options:
+        defaultTabIndex: 0
+      styles:
+        --mdc-theme-primary: var(--primary-text-color)
+        --mdc-tab-text-label-color-default: var(--secondary-text-color)
+        --mdc-typography-button-font-size: 14px
+      tabs:
+      - card:
+          type: vertical-stack
+          cards:
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: false
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              align_to: 100
+              decimals: 0
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 260
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - solid
+                opacity:
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 0
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.04
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ladda
+              type: area
+              curve: stepline
+              color: '#2dd4bf'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'charge' || prev === 'charge' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Vila
+              type: area
+              curve: stepline
+              color: '#7c9cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'hold' || prev === 'hold' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Självförbrukning
+              type: area
+              curve: stepline
+              color: '#ff8a3d'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'self_use' || prev === 'self_use' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj
+              type: area
+              curve: stepline
+              color: '#ff5c7a'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell' || prev === 'sell' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj överskott
+              type: area
+              curve: stepline
+              color: '#f5c542'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell_excess' || prev === 'sell_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Kasta överskott
+              type: area
+              curve: stepline
+              color: '#b78cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'discard_excess' || prev === 'discard_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ingen plan
+              type: area
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'none' || prev === 'none' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Prognos
+              type: line
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              stroke_dash: 4
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ inSpan = all.filter((p) => p[0] >= start.getTime() && p[0] < end.getTime() && !p[2]);\n\
+                const avg = inSpan.length ? inSpan.reduce((s, p) => s + p[1], 0) / inSpan.length : 0;\n\
+                \nconst firstEst = all.findIndex((p) => p[2]);\nif (firstEst < 0) return [];\nreturn all.slice(Math.max(firstEst\
+                \ - 1, 0)).map((p) => [p[0], p[1]]);\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+        attributes:
+          label: I dag
+      - card:
+          type: vertical-stack
+          cards:
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+              offset: +1d
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: false
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              align_to: 100
+              decimals: 0
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 260
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - solid
+                opacity:
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 0
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.04
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ladda
+              type: area
+              curve: stepline
+              color: '#2dd4bf'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'charge' || prev === 'charge' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Vila
+              type: area
+              curve: stepline
+              color: '#7c9cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'hold' || prev === 'hold' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Självförbrukning
+              type: area
+              curve: stepline
+              color: '#ff8a3d'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'self_use' || prev === 'self_use' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj
+              type: area
+              curve: stepline
+              color: '#ff5c7a'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell' || prev === 'sell' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj överskott
+              type: area
+              curve: stepline
+              color: '#f5c542'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell_excess' || prev === 'sell_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Kasta överskott
+              type: area
+              curve: stepline
+              color: '#b78cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'discard_excess' || prev === 'discard_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ingen plan
+              type: area
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'none' || prev === 'none' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Prognos
+              type: line
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              stroke_dash: 4
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ inSpan = all.filter((p) => p[0] >= start.getTime() && p[0] < end.getTime() && !p[2]);\n\
+                const avg = inSpan.length ? inSpan.reduce((s, p) => s + p[1], 0) / inSpan.length : 0;\n\
+                \nconst firstEst = all.findIndex((p) => p[2]);\nif (firstEst < 0) return [];\nreturn all.slice(Math.max(firstEst\
+                \ - 1, 0)).map((p) => [p[0], p[1]]);\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+        attributes:
+          label: Imorgon
+      - card:
+          type: vertical-stack
+          cards:
+          - type: custom:apexcharts-card
+            graph_span: 48h
+            span:
+              start: day
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: false
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              align_to: 100
+              decimals: 0
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 260
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - solid
+                opacity:
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 0
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.04
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ladda
+              type: area
+              curve: stepline
+              color: '#2dd4bf'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'charge' || prev === 'charge' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Vila
+              type: area
+              curve: stepline
+              color: '#7c9cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'hold' || prev === 'hold' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Självförbrukning
+              type: area
+              curve: stepline
+              color: '#ff8a3d'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'self_use' || prev === 'self_use' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj
+              type: area
+              curve: stepline
+              color: '#ff5c7a'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell' || prev === 'sell' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj överskott
+              type: area
+              curve: stepline
+              color: '#f5c542'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell_excess' || prev === 'sell_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Kasta överskott
+              type: area
+              curve: stepline
+              color: '#b78cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'discard_excess' || prev === 'discard_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ingen plan
+              type: area
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'none' || prev === 'none' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Prognos
+              type: line
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              stroke_dash: 4
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ inSpan = all.filter((p) => p[0] >= start.getTime() && p[0] < end.getTime() && !p[2]);\n\
+                const avg = inSpan.length ? inSpan.reduce((s, p) => s + p[1], 0) / inSpan.length : 0;\n\
+                \nconst firstEst = all.findIndex((p) => p[2]);\nif (firstEst < 0) return [];\nreturn all.slice(Math.max(firstEst\
+                \ - 1, 0)).map((p) => [p[0], p[1]]);\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+        attributes:
+          label: 2 dagar
+      grid_options:
+        columns: full
+    - type: markdown
+      grid_options:
+        columns: full
+      content: <font color="#2dd4bf">●</font>&nbsp;Ladda &nbsp; <font color="#7c9cff">●</font>&nbsp;Vila
+        &nbsp; <font color="#ff8a3d">●</font>&nbsp;Självförbrukning &nbsp; <font color="#ff5c7a">●</font>&nbsp;Sälj
+        &nbsp; <font color="#f5c542">●</font>&nbsp;Sälj&nbsp;överskott &nbsp; <font color="#b78cff">●</font>&nbsp;Kasta&nbsp;överskott
+        &nbsp; <font color="#8a94a6">●</font>&nbsp;Ingen&nbsp;plan
+      card_mod:
+        style:
+          .: 'ha-card { border-radius: 20px; border: none; }'
+          ha-markdown$: 'p { margin: 0; font-size: 13px; opacity: 0.85; }'
+  - type: grid
+    cards:
+    - type: heading
+      heading: Besparing
+      heading_style: title
+    - type: markdown
+      content: '{%- macro kr(entity) -%}{{ ''{:,.0f}''.format(states(entity) | float(0)).replace('','',
+        '' '') }}{%- endmacro -%}
+
+        <ha-icon icon="mdi:piggy-bank-outline"></ha-icon> **Sparat idag** med sol och batteri
+
+
+        # {{ kr(''sensor.elbesparing_idag'') }} <small>kr</small>
+
+
+        Betalat {{ kr(''sensor.elkostnad_idag'') }} kr, utan sol och batteri {{ kr(''sensor.elkostnad_utan_sol_och_batteri_idag'')
+        }} kr
+
+
+        | Denna månad | Sedan installationen |
+
+        |:--|:--|
+
+        | **{{ kr(''sensor.elbesparing_manad'') }} kr** | **{{ kr(''sensor.elbesparing_totalt'') }} kr**
+        |
+
+
+        <small>Spotpris, energiskatt och överföring; effektavgiften ingår inte.</small>'
+      grid_options:
+        columns: full
+      card_mod:
+        style: *id001
+    - type: custom:tabbed-card
+      options:
+        defaultTabIndex: 0
+      styles:
+        --mdc-theme-primary: var(--primary-text-color)
+        --mdc-tab-text-label-color-default: var(--secondary-text-color)
+        --mdc-typography-button-font-size: 14px
+      tabs:
+      - card:
+          type: vertical-stack
+          cards:
+          - type: custom:apexcharts-card
+            graph_span: 7d
+            span:
+              end: day
+              offset: -12h
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Kronor
+            experimental:
+              color_threshold: false
+            yaxis:
+            - decimals: 0
+              align_to: 10
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: true
+                position: top
+                horizontalAlign: left
+                fontSize: 12px
+                markers:
+                  size: 5
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: ddd
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd d MMM
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  borderRadius: 3
+                  columnWidth: 70%
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.elbesparing
+              name: Sparat
+              type: column
+              color: '#2dd4bf'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kr
+            - entity: sensor.elkostnad
+              name: Betalat
+              type: column
+              color: '#ff8a3d'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kr
+          - type: custom:apexcharts-card
+            graph_span: 7d
+            span:
+              end: day
+              offset: -12h
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Energi kWh
+            experimental:
+              color_threshold: false
+            yaxis:
+            - decimals: 0
+              align_to: 10
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: true
+                position: top
+                horizontalAlign: left
+                fontSize: 12px
+                markers:
+                  size: 5
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: ddd
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd d MMM
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  borderRadius: 3
+                  columnWidth: 70%
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.solis_s6_solis_today_energy_consumption
+              name: Förbrukning
+              type: column
+              color: '#22c7e8'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kWh
+            - entity: sensor.solis_s6_solis_pv_today_energy_generation
+              name: Sol
+              type: column
+              color: '#ffa04d'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kWh
+          - type: custom:apexcharts-card
+            graph_span: 7d
+            span:
+              end: day
+              offset: -12h
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Elnätet kWh
+            experimental:
+              color_threshold: false
+            yaxis:
+            - decimals: 0
+              align_to: 10
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: true
+                position: top
+                horizontalAlign: left
+                fontSize: 12px
+                markers:
+                  size: 5
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: ddd
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd d MMM
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  borderRadius: 3
+                  columnWidth: 70%
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.matarstallning_aktiv_energi_uttag
+              name: Köpt
+              type: column
+              color: '#8fa3bf'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kWh
+            - entity: sensor.matarstallning_aktiv_energi_inmatning
+              name: Sålt
+              type: column
+              color: '#f5c542'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              transform: return -x;
+              unit: kWh
+        attributes:
+          label: Vecka
+      - card:
+          type: vertical-stack
+          cards:
+          - type: custom:apexcharts-card
+            graph_span: 30d
+            span:
+              end: day
+              offset: -12h
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Kronor
+            experimental:
+              color_threshold: false
+            yaxis:
+            - decimals: 0
+              align_to: 10
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: true
+                position: top
+                horizontalAlign: left
+                fontSize: 12px
+                markers:
+                  size: 5
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: d
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd d MMM
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  borderRadius: 3
+                  columnWidth: 70%
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.elbesparing
+              name: Sparat
+              type: column
+              color: '#2dd4bf'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kr
+            - entity: sensor.elkostnad
+              name: Betalat
+              type: column
+              color: '#ff8a3d'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kr
+          - type: custom:apexcharts-card
+            graph_span: 30d
+            span:
+              end: day
+              offset: -12h
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Energi kWh
+            experimental:
+              color_threshold: false
+            yaxis:
+            - decimals: 0
+              align_to: 10
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: true
+                position: top
+                horizontalAlign: left
+                fontSize: 12px
+                markers:
+                  size: 5
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: d
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd d MMM
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  borderRadius: 3
+                  columnWidth: 70%
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.solis_s6_solis_today_energy_consumption
+              name: Förbrukning
+              type: column
+              color: '#22c7e8'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kWh
+            - entity: sensor.solis_s6_solis_pv_today_energy_generation
+              name: Sol
+              type: column
+              color: '#ffa04d'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kWh
+          - type: custom:apexcharts-card
+            graph_span: 30d
+            span:
+              end: day
+              offset: -12h
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Elnätet kWh
+            experimental:
+              color_threshold: false
+            yaxis:
+            - decimals: 0
+              align_to: 10
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: true
+                position: top
+                horizontalAlign: left
+                fontSize: 12px
+                markers:
+                  size: 5
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: d
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd d MMM
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  borderRadius: 3
+                  columnWidth: 70%
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.matarstallning_aktiv_energi_uttag
+              name: Köpt
+              type: column
+              color: '#8fa3bf'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kWh
+            - entity: sensor.matarstallning_aktiv_energi_inmatning
+              name: Sålt
+              type: column
+              color: '#f5c542'
+              statistics:
+                type: change
+                period: day
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              transform: return -x;
+              unit: kWh
+        attributes:
+          label: Månad
+      - card:
+          type: vertical-stack
+          cards:
+          - type: custom:apexcharts-card
+            graph_span: 540d
+            span:
+              end: month
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Sparat sedan installationen
+              show_states: true
+              colorize_states: true
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              align_to: 5000
+              decimals: 0
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 150
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: MMM
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type: gradient
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.02
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.elbesparing
+              name: Totalt
+              type: area
+              color: '#2dd4bf'
+              unit: kr
+              statistics:
+                type: sum
+                period: day
+              float_precision: 0
+              show:
+                in_header: before_now
+                legend_value: false
+          - type: custom:apexcharts-card
+            graph_span: 365d
+            span:
+              end: month
+              offset: -15d
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Kronor
+            experimental:
+              color_threshold: false
+            yaxis:
+            - decimals: 0
+              align_to: 500
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: true
+                position: top
+                horizontalAlign: left
+                fontSize: 12px
+                markers:
+                  size: 5
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: MMM
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: MMMM yyyy
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  borderRadius: 3
+                  columnWidth: 70%
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.elbesparing
+              name: Sparat
+              type: column
+              color: '#2dd4bf'
+              statistics:
+                type: change
+                period: month
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kr
+            - entity: sensor.elkostnad
+              name: Betalat
+              type: column
+              color: '#ff8a3d'
+              statistics:
+                type: change
+                period: month
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kr
+          - type: custom:apexcharts-card
+            graph_span: 365d
+            span:
+              end: month
+              offset: -15d
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Energi kWh
+            experimental:
+              color_threshold: false
+            yaxis:
+            - decimals: 0
+              align_to: 500
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: true
+                position: top
+                horizontalAlign: left
+                fontSize: 12px
+                markers:
+                  size: 5
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: MMM
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: MMMM yyyy
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  borderRadius: 3
+                  columnWidth: 70%
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.solis_s6_solis_today_energy_consumption
+              name: Förbrukning
+              type: column
+              color: '#22c7e8'
+              statistics:
+                type: change
+                period: month
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kWh
+            - entity: sensor.solis_s6_solis_pv_today_energy_generation
+              name: Sol
+              type: column
+              color: '#ffa04d'
+              statistics:
+                type: change
+                period: month
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kWh
+          - type: custom:apexcharts-card
+            graph_span: 365d
+            span:
+              end: month
+              offset: -15d
+            update_interval: 30min
+            now:
+              show: false
+            header:
+              show: true
+              title: Elnätet kWh
+            experimental:
+              color_threshold: false
+            yaxis:
+            - decimals: 0
+              align_to: 500
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: true
+                position: top
+                horizontalAlign: left
+                fontSize: 12px
+                markers:
+                  size: 5
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: MMM
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: MMMM yyyy
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  borderRadius: 3
+                  columnWidth: 70%
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.matarstallning_aktiv_energi_uttag
+              name: Köpt
+              type: column
+              color: '#8fa3bf'
+              statistics:
+                type: change
+                period: month
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              unit: kWh
+            - entity: sensor.matarstallning_aktiv_energi_inmatning
+              name: Sålt
+              type: column
+              color: '#f5c542'
+              statistics:
+                type: change
+                period: month
+                align: start
+              float_precision: 1
+              show:
+                in_header: false
+                legend_value: false
+              transform: return -x;
+              unit: kWh
+        attributes:
+          label: År
+      grid_options:
+        columns: full
+  - type: grid
+    cards:
+    - type: heading
+      heading: Hemmet
+      heading_style: title
+    - type: custom:sunsynk-power-flow-card
+      cardstyle: compact
+      show_solar: true
+      large_font: false
+      inverter:
+        model: solis
+        modern: false
+        colour: '#959595'
+        autarky: 'no'
+        three_phase: false
+        auto_scale: false
+      battery:
+        show_daily: true
+        colour: '#22c7e8'
+        animation_speed: 6
+        auto_scale: false
+        show_absolute: false
+        show_remaining_energy: true
+        max_power: 6000
+        energy: 25600
+        shutdown_soc: 15
+      solar:
+        show_daily: true
+        colour: '#ffa04d'
+        animation_speed: 9
+        auto_scale: false
+        mppts: 3
+        max_power: 16000
+        pv1_name: Fram
+        pv2_name: Bak
+        pv3_name: Garaget
+        pv1_max_power: 6000
+        pv2_max_power: 7000
+        pv3_max_power: 5000
+      load:
+        show_aux: false
+        show_daily: true
+        animation_speed: 8
+        max_power: 6000
+        additional_loads: 0
+      grid:
+        show_daily_buy: true
+        show_daily_sell: true
+        no_grid_colour: red
+        animation_speed: 8
+        max_power: 6000
+        invert_grid: true
+      entities:
+        day_battery_charge_70: sensor.solis_s6_solis_today_battery_charge_energy
+        day_battery_discharge_71: sensor.solis_s6_solis_today_battery_discharge_energy
+        day_load_energy_84: sensor.solis_s6_solis_today_energy_consumption
+        day_pv_energy_108: sensor.solis_s6_solis_pv_today_energy_generation
+        inverter_voltage_154: sensor.solis_s6_solis_a_phase_voltage
+        load_frequency_192: sensor.solis_s6_solis_grid_frequency
+        inverter_current_164: sensor.solis_s6_solis_a_phase_current
+        inverter_power_175: sensor.solis_s6_solis_backup_load_power
+        grid_power_169: sensor.solis_s6_solis_ac_grid_port_power
+        grid_ct_power_172: sensor.solis_s6_solis_meter_total_active_power
+        battery_voltage_183: sensor.solis_s6_solis_battery_voltage
+        battery_soc_184: sensor.solis_s6_solis_battery_soc
+        battery_power_190: sensor.solis_s6_solis_battery_power
+        battery_current_191: sensor.solis_s6_solis_battery_current
+        battery_current_direction: sensor.solis_s6_solis_battery_current_direction
+        essential_power: sensor.solis_s6_solis_household_load_power
+        pv_total: sensor.solis_s6_solis_total_pv_power
+        dc_transformer_temp_90: sensor.solis_s6_solis_temperature
+        inverter_status_59: sensor.solis_s6_solis_status
+        grid_voltage: sensor.solis_s6_solis_a_phase_voltage
+        pv1_power_186: sensor.solis_s6_solis_pv_power_1
+        pv2_power_187: sensor.solis_s6_solis_pv_power_2
+        pv3_power_188: sensor.solis_s6_solis_pv_power_3
+        pv4_power_189: sensor.solis_s6_solis_pv_power_4
+        pv1_voltage_109: sensor.solis_s6_solis_pv_voltage_1
+        pv2_voltage_111: sensor.solis_s6_solis_pv_voltage_2
+        pv3_voltage_113: sensor.solis_s6_solis_pv_voltage_3
+        pv1_current_110: sensor.solis_s6_solis_pv_current_1
+        pv2_current_112: sensor.solis_s6_solis_pv_current_2
+        pv3_current_114: sensor.solis_s6_solis_pv_current_3
+        day_grid_import_76: sensor.daily_energy_bought
+        day_grid_export_77: sensor.daily_energy_sold
+      card_mod:
+        style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+      grid_options:
+        columns: full
+  - type: grid
+    cards:
+    - type: heading
+      heading: Batteriaktivitet
+      heading_style: title
+    - type: custom:tabbed-card
+      options:
+        defaultTabIndex: 0
+      styles:
+        --mdc-theme-primary: var(--primary-text-color)
+        --mdc-tab-text-label-color-default: var(--secondary-text-color)
+        --mdc-typography-button-font-size: 14px
+      tabs:
+      - card:
+          type: vertical-stack
+          cards:
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: true
+              title: Batteri kW
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: -10
+              max: 10
+              decimals: 0
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - pattern
+                pattern:
+                  style: slantedLines
+                  width: 6
+                  height: 6
+                  strokeWidth: 1
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.02
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.solis_s6_eh1p_battery_power_net
+              name: Batteri
+              type: area
+              color: '#22c7e8'
+              transform: return -x / 1000;
+              group_by:
+                func: avg
+                duration: 5min
+              extend_to: now
+              stroke_width: 2
+              unit: kW
+              float_precision: 1
+              show:
+                in_header: false
+            - entity: sensor.energy_planner_battery_plan
+              name: Planerat
+              type: area
+              curve: stepline
+              color: '#9aa4b2'
+              unit: kW
+              float_precision: 1
+              show:
+                in_header: false
+              extend_to: false
+              stroke_width: 1
+              data_generator: "\nconst a = entity.attributes;\nconst cap = parseFloat(hass.states['number.energy_planner_battery_capacity'].state)\
+                \ / 1000;\nlet prev = a.soc_start ?? (a.soc || [])[0];\nreturn (a.starts || []).map((s,\
+                \ i) => {\n  const kw = (a.soc[i] - prev) / 100 * cap / 0.25;\n  prev = a.soc[i];\n  return\
+                \ [new Date(s).getTime(), Math.round(kw * 10) / 10];\n});\n"
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: true
+              title: Elpris öre/kWh
+              show_states: false
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              align_to: 100
+              decimals: 0
+              apex_config:
+                tickAmount: 2
+            apex_config:
+              chart:
+                height: 130
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - solid
+                opacity:
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 0
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.04
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ladda
+              type: area
+              curve: stepline
+              color: '#2dd4bf'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'charge' || prev === 'charge' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Vila
+              type: area
+              curve: stepline
+              color: '#7c9cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'hold' || prev === 'hold' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Självförbrukning
+              type: area
+              curve: stepline
+              color: '#ff8a3d'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'self_use' || prev === 'self_use' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj
+              type: area
+              curve: stepline
+              color: '#ff5c7a'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell' || prev === 'sell' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj överskott
+              type: area
+              curve: stepline
+              color: '#f5c542'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell_excess' || prev === 'sell_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Kasta överskott
+              type: area
+              curve: stepline
+              color: '#b78cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'discard_excess' || prev === 'discard_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ingen plan
+              type: area
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'none' || prev === 'none' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Prognos
+              type: line
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              stroke_dash: 4
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ inSpan = all.filter((p) => p[0] >= start.getTime() && p[0] < end.getTime() && !p[2]);\n\
+                const avg = inSpan.length ? inSpan.reduce((s, p) => s + p[1], 0) / inSpan.length : 0;\n\
+                \nconst firstEst = all.findIndex((p) => p[2]);\nif (firstEst < 0) return [];\nreturn all.slice(Math.max(firstEst\
+                \ - 1, 0)).map((p) => [p[0], p[1]]);\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: true
+              title: Solel kW
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              decimals: 1
+              apex_config:
+                tickAmount: 2
+            apex_config:
+              chart:
+                height: 130
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - solid
+                opacity:
+                - 1
+                - 0
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.02
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.solis_s6_solis_total_pv_power
+              name: Sol
+              type: area
+              color: '#ffa04d'
+              transform: return x / 1000;
+              group_by:
+                func: avg
+                duration: 10min
+              unit: kW
+              float_precision: 1
+              extend_to: now
+              show:
+                in_header: false
+            - entity: sensor.energy_planner_pv_forecast
+              name: Prognos
+              type: line
+              color: '#ffa04d'
+              stroke_dash: 4
+              unit: kW
+              float_precision: 1
+              show:
+                in_header: false
+              extend_to: false
+              data_generator: '
+
+                const a = entity.attributes;
+
+                return (a.starts || []).map((s, i) => [new Date(s).getTime() + 450000, Math.round(a.pv[i]
+                * 4 * 100) / 100]);
+
+                '
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: true
+              title: Batterinivå %
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              max: 100
+              decimals: 0
+              apex_config:
+                tickAmount: 2
+            apex_config:
+              chart:
+                height: 130
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - solid
+                opacity:
+                - 1
+                - 0
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.02
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.solis_s6_solis_battery_soc
+              name: Batteri
+              type: area
+              color: '#22c7e8'
+              unit: '%'
+              group_by:
+                func: last
+                duration: 10min
+              float_precision: 0
+              extend_to: now
+              show:
+                in_header: false
+            - entity: sensor.energy_planner_battery_plan
+              name: Plan
+              type: line
+              color: '#9aa4b2'
+              stroke_dash: 4
+              unit: '%'
+              float_precision: 0
+              show:
+                in_header: false
+              extend_to: false
+              data_generator: '
+
+                const a = entity.attributes;
+
+                const pts = (a.starts || []).map((s, i) => [new Date(s).getTime() + 900000, a.soc[i]]);
+
+                if (a.starts && a.starts.length && a.soc_start != null) pts.unshift([new Date(a.starts[0]).getTime(),
+                a.soc_start]);
+
+                return pts;
+
+                '
+        attributes:
+          label: I dag
+      - card:
+          type: vertical-stack
+          cards:
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+              offset: +1d
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: true
+              title: Batteri kW
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: -10
+              max: 10
+              decimals: 0
+              apex_config:
+                tickAmount: 4
+            apex_config:
+              chart:
+                height: 170
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - pattern
+                pattern:
+                  style: slantedLines
+                  width: 6
+                  height: 6
+                  strokeWidth: 1
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.02
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.solis_s6_eh1p_battery_power_net
+              name: Batteri
+              type: area
+              color: '#22c7e8'
+              transform: return -x / 1000;
+              group_by:
+                func: avg
+                duration: 5min
+              extend_to: now
+              stroke_width: 2
+              unit: kW
+              float_precision: 1
+              show:
+                in_header: false
+            - entity: sensor.energy_planner_battery_plan
+              name: Planerat
+              type: area
+              curve: stepline
+              color: '#9aa4b2'
+              unit: kW
+              float_precision: 1
+              show:
+                in_header: false
+              extend_to: false
+              stroke_width: 1
+              data_generator: "\nconst a = entity.attributes;\nconst cap = parseFloat(hass.states['number.energy_planner_battery_capacity'].state)\
+                \ / 1000;\nlet prev = a.soc_start ?? (a.soc || [])[0];\nreturn (a.starts || []).map((s,\
+                \ i) => {\n  const kw = (a.soc[i] - prev) / 100 * cap / 0.25;\n  prev = a.soc[i];\n  return\
+                \ [new Date(s).getTime(), Math.round(kw * 10) / 10];\n});\n"
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+              offset: +1d
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: true
+              title: Elpris öre/kWh
+              show_states: false
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              align_to: 100
+              decimals: 0
+              apex_config:
+                tickAmount: 2
+            apex_config:
+              chart:
+                height: 130
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - gradient
+                - solid
+                opacity:
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 1
+                - 0
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.04
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ladda
+              type: area
+              curve: stepline
+              color: '#2dd4bf'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'charge' || prev === 'charge' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Vila
+              type: area
+              curve: stepline
+              color: '#7c9cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'hold' || prev === 'hold' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Självförbrukning
+              type: area
+              curve: stepline
+              color: '#ff8a3d'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'self_use' || prev === 'self_use' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj
+              type: area
+              curve: stepline
+              color: '#ff5c7a'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell' || prev === 'sell' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Sälj överskott
+              type: area
+              curve: stepline
+              color: '#f5c542'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'sell_excess' || prev === 'sell_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Kasta överskott
+              type: area
+              curve: stepline
+              color: '#b78cff'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'discard_excess' || prev === 'discard_excess' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Ingen plan
+              type: area
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ groups = {\"charge\": \"charge\", \"hold\": \"hold\", \"self_use\": \"self_use\", \"\
+                sell\": \"sell\", \"sell_excess\": \"sell_excess\", \"discard_excess\": \"discard_excess\"\
+                };\nconst states = {\"charge\": \"charge\", \"pause\": \"hold\", \"discharge\": \"self_use\"\
+                , \"sell\": \"sell\", \"sell-excess\": \"sell_excess\", \"discard-excess\": \"discard_excess\"\
+                };\nconst pa = hass.states['sensor.energy_planner_battery_plan'].attributes;\nconst mode\
+                \ = new Map((pa.starts || []).map((s, i) => [new Date(s).getTime(),\n  (pa.manual || [])[i]\
+                \ ? states[pa.manual[i]] : pa.modes[i]]));\nconst group = (ms) => groups[mode.get(ms)]\
+                \ || 'none';\nconst known = all.filter((p) => !p[2]);\nreturn known.map((p, i) => {\n\
+                \  const g = group(p[0]);\n  const prev = i > 0 ? group(known[i - 1][0]) : g;\n  return\
+                \ [p[0], g === 'none' || prev === 'none' ? p[1] : null];\n});\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+              name: Prognos
+              type: line
+              curve: stepline
+              color: '#8a94a6'
+              stroke_width: 2
+              stroke_dash: 4
+              unit: öre
+              float_precision: 0
+              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
+                \ >= 6 && h < 23 ? 18 : 9); };\nconst np = hass.states['sensor.nordpool_kwh_se3_sek_3_10_025'].attributes;\n\
+                const pub = [...(np.raw_today || []), ...(np.raw_tomorrow || [])]\n  .map((p) => [new\
+                \ Date(p.start).getTime(), p.value * 1, false]);\nconst last = pub.length ? pub[pub.length\
+                \ - 1][0] : 0;\nconst plan = hass.states['sensor.energy_planner_battery_plan'].attributes;\n\
+                const est = (plan.starts || []).map((s, i) => [new Date(s).getTime(), plan.prices[i],\
+                \ (plan.estimated || [])[i]])\n  .filter((p) => p[0] > last && p[2]);\nconst all = [...pub,\
+                \ ...est].map((p) => [p[0], Math.round((p[1] + fee(p[0])) * 10) / 10, p[2]]);\n\nconst\
+                \ inSpan = all.filter((p) => p[0] >= start.getTime() && p[0] < end.getTime() && !p[2]);\n\
+                const avg = inSpan.length ? inSpan.reduce((s, p) => s + p[1], 0) / inSpan.length : 0;\n\
+                \nconst firstEst = all.findIndex((p) => p[2]);\nif (firstEst < 0) return [];\nreturn all.slice(Math.max(firstEst\
+                \ - 1, 0)).map((p) => [p[0], p[1]]);\n"
+              extend_to: false
+              show:
+                in_header: false
+                legend_value: false
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+              offset: +1d
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: true
+              title: Solel kW
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              decimals: 1
+              apex_config:
+                tickAmount: 2
+            apex_config:
+              chart:
+                height: 130
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - solid
+                opacity:
+                - 1
+                - 0
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.02
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.solis_s6_solis_total_pv_power
+              name: Sol
+              type: area
+              color: '#ffa04d'
+              transform: return x / 1000;
+              group_by:
+                func: avg
+                duration: 10min
+              unit: kW
+              float_precision: 1
+              extend_to: now
+              show:
+                in_header: false
+            - entity: sensor.energy_planner_pv_forecast
+              name: Prognos
+              type: line
+              color: '#ffa04d'
+              stroke_dash: 4
+              unit: kW
+              float_precision: 1
+              show:
+                in_header: false
+              extend_to: false
+              data_generator: '
+
+                const a = entity.attributes;
+
+                return (a.starts || []).map((s, i) => [new Date(s).getTime() + 450000, Math.round(a.pv[i]
+                * 4 * 100) / 100]);
+
+                '
+          - type: custom:apexcharts-card
+            graph_span: 24h
+            span:
+              start: day
+              offset: +1d
+            update_interval: 5min
+            now:
+              show: true
+              color: '#ffffff'
+              label: ''
+            header:
+              show: true
+              title: Batterinivå %
+            experimental:
+              color_threshold: false
+            yaxis:
+            - min: 0
+              max: 100
+              decimals: 0
+              apex_config:
+                tickAmount: 2
+            apex_config:
+              chart:
+                height: 130
+                toolbar:
+                  show: false
+                zoom:
+                  enabled: false
+                background: transparent
+              legend:
+                show: false
+              grid:
+                borderColor: rgba(127,127,127,0.18)
+                strokeDashArray: 0
+                padding:
+                  left: 4
+                  right: 8
+                  top: 0
+                  bottom: 0
+              xaxis:
+                labels:
+                  format: HH
+                  style:
+                    fontSize: 11px
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
+                tooltip:
+                  enabled: false
+              tooltip:
+                x:
+                  format: ddd HH:mm
+              stroke:
+                width: 2
+              dataLabels:
+                enabled: false
+              fill:
+                type:
+                - gradient
+                - solid
+                opacity:
+                - 1
+                - 0
+                gradient:
+                  type: vertical
+                  shadeIntensity: 0
+                  opacityFrom: 0.45
+                  opacityTo: 0.02
+                  stops:
+                  - 0
+                  - 100
+            card_mod:
+              style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; }'
+            grid_options:
+              columns: full
+            series:
+            - entity: sensor.solis_s6_solis_battery_soc
+              name: Batteri
+              type: area
+              color: '#22c7e8'
+              unit: '%'
+              group_by:
+                func: last
+                duration: 10min
+              float_precision: 0
+              extend_to: now
+              show:
+                in_header: false
+            - entity: sensor.energy_planner_battery_plan
+              name: Plan
+              type: line
+              color: '#9aa4b2'
+              stroke_dash: 4
+              unit: '%'
+              float_precision: 0
+              show:
+                in_header: false
+              extend_to: false
+              data_generator: '
+
+                const a = entity.attributes;
+
+                const pts = (a.starts || []).map((s, i) => [new Date(s).getTime() + 900000, a.soc[i]]);
+
+                if (a.starts && a.starts.length && a.soc_start != null) pts.unshift([new Date(a.starts[0]).getTime(),
+                a.soc_start]);
+
+                return pts;
+
+                '
+        attributes:
+          label: Imorgon
+      grid_options:
+        columns: full
+    - type: markdown
+      grid_options:
+        columns: full
+      content: <font color="#2dd4bf">●</font>&nbsp;Ladda &nbsp; <font color="#7c9cff">●</font>&nbsp;Vila
+        &nbsp; <font color="#ff8a3d">●</font>&nbsp;Självförbrukning &nbsp; <font color="#ff5c7a">●</font>&nbsp;Sälj
+        &nbsp; <font color="#f5c542">●</font>&nbsp;Sälj&nbsp;överskott &nbsp; <font color="#b78cff">●</font>&nbsp;Kasta&nbsp;överskott
+        &nbsp; <font color="#8a94a6">●</font>&nbsp;Ingen&nbsp;plan
+      card_mod:
+        style:
+          .: 'ha-card { border-radius: 20px; border: none; }'
+          ha-markdown$: 'p { margin: 0; font-size: 13px; opacity: 0.85; }'
+    - type: markdown
+      content: "{%- set a = states.sensor.energy_planner_battery_plan.attributes if states.sensor.energy_planner_battery_plan\
+        \ else {} -%}\n{%- set names = {\"charge\": \"Ladda\", \"self_use\": \"Självförbrukning\", \"\
+        hold\": \"Vila\", \"sell\": \"Sälj\", \"sell_excess\": \"Sälj överskott\", \"discard_excess\"\
+        : \"Kasta överskott\"} -%}\n{%- set act = states('sensor.energy_planner_battery_action') -%}\n\
+        {%- set acts = {\"charge\": \"Laddar\", \"discharge\": \"Självförbrukning\", \"pause\": \"Vilar\"\
+        , \"sell\": \"Säljer\", \"sell-excess\": \"Säljer överskott\", \"discard-excess\": \"Kastar överskott\"\
+        } -%}\n**Batteriet nu:** {{ acts.get(act, act) }}{% if state_attr('sensor.energy_planner_battery_action','until')\
+        \ %} till {{ as_datetime(state_attr('sensor.energy_planner_battery_action','until')).strftime('%H:%M')\
+        \ }}{% endif %} · {{ states('sensor.solis_s6_solis_battery_soc') }} %\n\n{% if a.starts is defined\
+        \ and a.starts -%}\n{%- set ns = namespace(rows=[], mode=None, start=None, n=0) -%}\n{%- for s\
+        \ in a.starts -%}\n  {%- set m = a.modes[loop.index0] -%}\n  {%- if m != ns.mode -%}\n    {%-\
+        \ if ns.mode is not none and ns.n < 8 -%}\n      {%- set ns.rows = ns.rows + [[ns.start, s, ns.mode,\
+        \ a.soc[loop.index0 - 1]]] -%}\n      {%- set ns.n = ns.n + 1 -%}\n    {%- endif -%}\n    {%-\
+        \ set ns.mode = m -%}{%- set ns.start = s -%}\n  {%- endif -%}\n{%- endfor -%}\n| Tid | Plan |\
+        \ SOC |\n|:--|:--|--:|\n{% for r in ns.rows -%}\n| {{ ['mån','tis','ons','tor','fre','lör','sön'][as_datetime(r[0]).weekday()]\
+        \ }} {{ as_datetime(r[0]).strftime('%H:%M') }}–{{ as_datetime(r[1]).strftime('%H:%M') }} | {{\
+        \ names.get(r[2], r[2]) }} | {{ r[3] | round(0) | int }} % |\n{% endfor %}\n{%- else -%}\nIngen\
+        \ plan just nu.\n{%- endif %}"
+      grid_options:
+        columns: full
+      card_mod:
+        style: *id001
