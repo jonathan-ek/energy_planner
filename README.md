@@ -2,9 +2,10 @@
 
 A Home Assistant custom integration that plans a home battery, an electric car and a
 heat pump per quarter hour from Nord Pool spot prices, the grid tariff and forecasts
-of the house's load and solar power. It is built for Swedish homes with a Solis
-hybrid inverter and runs in four of them; it is a personal project, not a polished
-product, so expect to adapt entity ids and scripts.
+of the house's load and solar power. It works with any inverter and battery that
+Home Assistant can read and control; it runs in four Swedish homes (all with Solis
+hybrid inverters, which the example scripts are written for). It is a personal
+project, not a polished product, so expect to adapt entity ids and scripts.
 
 ## What it does
 
@@ -28,6 +29,11 @@ The integration only *publishes* the plan and what each device should do now:
 `sensor.energy_planner_battery_plan` (the plan in its attributes),
 `sensor.energy_planner_battery_action`, `_ev_action`, `_heat_pump_action` and
 `_fuse_guard`. Scripts and automations in `examples/` apply them to the devices.
+The battery action is a mode (charge, pause, discharge, sell, sell or discard the
+solar surplus) with an import target in kW, a target SOC and a current, so the
+inverter needs to charge from the grid, export, and ideally cap the grid import
+(peak shaving); with another brand, write a script that maps the action onto its
+controls.
 
 ## Requirements
 
@@ -36,8 +42,9 @@ The integration only *publishes* the plan and what each device should do now:
 - Sensors for the house load, PV power, battery SOC and voltage, with history in the
   recorder. Forecast.Solar entries for the panel planes (for their tilt, direction,
   kWp and location).
-- Something that applies the actions: `examples/battery/follow_battery_action.py` is
-  written for Solis inverters (peak shaving, time-of-use and Remote Dispatch).
+- Something that applies the actions. `examples/battery/follow_battery_action.py` is
+  written for Solis inverters (peak shaving, time-of-use and Remote Dispatch); the
+  car and heat pump automations for Zaptec and MELCloud.
 
 ## Installation
 
