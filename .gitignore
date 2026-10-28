@@ -170,5 +170,7 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 examples/2026_tv_data.json
+.claude/settings.local.json
+/.tmp/
 examples/dashboard/elpris_sites.local.json
 examples/dashboard/local/
