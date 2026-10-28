@@ -29,8 +29,8 @@ three-phase and balanced: the car charger's current and the battery's grid charg
 - `fuse.smooth`: lower values apply at once (the grid limit 0.2 kW lower, so small
   rises do not write again), higher ones once a step higher (0.5 kW, 1 A) and the last
   change is 1 min (grid) / 15 min (charger, Zaptec's cloud API is rate limited) old.
-- Updated on every change of the configured sensors (at most every 5 s) and every
-  minute right after the actions (never held back by the 5 s).
+- Updated on every change of the configured sensors (at most every 5 s) and at
+  second 0 of every minute right after the actions (never held back by the 5 s).
   Room is kept for the car while it is plugged in, has not finished and its
   published action is `charge`; plugged in since the action was published (or
   without actions), the car action's rule decides now (`ev.ev_action`). A missing

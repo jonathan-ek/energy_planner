@@ -15,7 +15,6 @@ from homeassistant.util import dt as dt_utils
 
 from homeassistant.helpers.event import (
     async_track_state_change_event,
-    async_track_time_interval,
     async_track_utc_time_change,
 )
 from homeassistant.helpers.start import async_at_started
@@ -273,14 +272,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     update_fuse_guard = _track_fuse_guard(hass, entry)
 
     async def every_minute(now: dt.datetime):
-        # The actions follow the plan's current quarter and the manual slots. Then
-        # the fuse guard, from the car action just published
+        # The actions follow the plan's current quarter and the manual slots; at
+        # second 0, so a new quarter's run starts on time. Then the fuse guard, from
+        # the car action just published
         write_plan_sensors(hass, now)
         update_fuse_guard()
 
-    entry.async_on_unload(
-        async_track_time_interval(hass, every_minute, dt.timedelta(minutes=1))
-    )
+    entry.async_on_unload(async_track_utc_time_change(hass, every_minute, second=0))
 
     async def update_forecast(*_):
         # A failing forecast or plan must not stop the timers

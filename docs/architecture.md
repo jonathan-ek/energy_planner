@@ -148,8 +148,9 @@ out to whole quarters, kept in UTC. Where they overlap, the last added wins.
   `replans` (`planner/settings.py`) or the tariff
   changes, manual slots change, or the
   SOC is `SOC_DRIFT` (5) % from the plan (at most every 5 min). All go through
-  `async_request_plan`. The action sensors are rewritten every minute (and the fuse
-  guard updated right after from them), after every plan and when the manual slots,
+  `async_request_plan`. The action sensors are rewritten at second 0 of every minute
+  (so a run that starts with a quarter is published on time, and the fuse guard is
+  updated right after from it), after every plan and when the manual slots,
   `enabled` or the charger's state change.
 - **Entities** are passive views: `update()` reads from `hass.data`, setters write
   back and call `save`.
