@@ -4,7 +4,7 @@ The plan (a `plan.Plan`) is published in `hass.data[DOMAIN]["plan"]` (shown by
 `sensor.energy_planner_battery_plan`). It controls nothing by itself:
 `sensor.energy_planner_battery_action` follows it while
 `switch.energy_planner_enabled` is on, and manual slots override it (see
-battery_action.py); an inverter script follows that sensor.
+actions.py); an inverter script follows that sensor.
 """
 
 import asyncio
@@ -20,10 +20,10 @@ from homeassistant.util import dt as dt_utils
 
 from ..const import DOMAIN, NUMBER_ENTITIES, PLAN_SENSORS
 from . import ev, manual, planning, settings
-from .battery_action import BatteryState, resolve
+from .actions import Actions, Situation, resolve
 from .battery_optimizer import Limit
 from .forecast import Forecast
-from .prices import async_update_prices
+from .prices import async_update_prices, spot_at
 from .tariff import fuse_power
 from .utils import get_tariff
 
@@ -52,11 +52,16 @@ async def _hourly_import(hass: HomeAssistant, statistic_id: str, start, end):
     }
 
 
-def ev_plugged(hass: HomeAssistant) -> bool:
-    """Return whether the car is plugged in (False without a charger status)."""
+def car_status(hass: HomeAssistant) -> str | None:
+    """Return the charger's state, None without a charger status sensor or state."""
     car = settings.car(hass.data[DOMAIN]["config"])
     state = hass.states.get(car.status_sensor) if car is not None else None
-    return ev.is_plugged(state.state if state is not None else None)
+    return state.state if state is not None else None
+
+
+def ev_plugged(hass: HomeAssistant) -> bool:
+    """Return whether the car is plugged in (False without a charger status)."""
+    return ev.is_plugged(car_status(hass))
 
 
 def _car(hass: HomeAssistant) -> planning.CarReadings | None:
@@ -152,43 +157,74 @@ async def _prune_manual_slots(hass: HomeAssistant, now: dt.datetime) -> None:
         await hass.data[DOMAIN]["save"]()
 
 
-def current_action(hass: HomeAssistant) -> dict:
-    """Return the action now, from the manual slots and the battery plan."""
+def situation(hass: HomeAssistant, now: dt.datetime) -> Situation:
+    """Return the situation at `now` from the stored plan, settings and readings."""
     data = hass.data[DOMAIN]
-    config = settings.battery(data["config"])
-    now = dt_utils.now()
-    battery = BatteryState(
-        soc=settings.reading(hass, config.soc_sensor),
-        voltage=settings.reading(hass, config.voltage_sensor) or 0.0,
-        capacity_kwh=config.capacity_kwh,
-        min_soc=config.shutdown_soc,
-        max_soc=config.max_soc,
-        max_charge_a=config.max_charge_a,
-        max_discharge_a=config.max_discharge_a,
-        reserve_soc=config.reserve_soc,
-    )
-    return resolve(
-        manual.running(data.get("manual_slots", []), now),
-        data.get("plan"),
-        now,
-        battery,
-        enabled=settings.get(data["config"], "enabled"),
-    )
-
-
-def car_action(hass: HomeAssistant, now: dt.datetime | None = None) -> dict:
-    """Return whether the car should charge now (see ev.ev_action)."""
-    return ev.ev_action(
-        hass.data[DOMAIN].get("plan"), now or dt_utils.now(), ev_plugged(hass)
+    config = data["config"]
+    battery = settings.battery(config)
+    heat_pump = settings.heat_pump(config)
+    forecast: Forecast | None = data.get("forecast")
+    return Situation(
+        now=now,
+        plan=data.get("plan"),
+        manual_slots=data.get("manual_slots", []),
+        enabled=settings.get(config, "enabled"),
+        battery=battery,
+        heat_pump=heat_pump,
+        tariff=get_tariff(hass),
+        spot=spot_at(hass, now),
+        heat_pump_loss=forecast.heat_pump_loss if forecast is not None else None,
+        soc=settings.reading(hass, battery.soc_sensor),
+        voltage=settings.reading(hass, battery.voltage_sensor),
+        car_status=car_status(hass),
+        outdoor=settings.reading(hass, heat_pump.outdoor_sensor),
+        indoor=settings.reading(hass, heat_pump.indoor_sensor),
     )
 
 
-def write_plan_sensors(hass: HomeAssistant) -> None:
-    """Update the plan and action sensors."""
+def actions_now(hass: HomeAssistant) -> Actions | None:
+    """Return the actions last resolved, None before the first or after a failure."""
+    return hass.data[DOMAIN].get("actions")
+
+
+def resolve_actions(hass: HomeAssistant, now: dt.datetime | None = None) -> None:
+    """Resolve the actions at `now` (default: now) into `hass.data[DOMAIN]["actions"]`.
+
+    An action that fails is None until it works again, its sensor unavailable, so
+    its device does what it does without the planner rather than follow an old
+    action; the situation failing makes them all None. Each failing part is logged
+    once while it keeps failing (`actions_failing`).
+    """
+    data = hass.data[DOMAIN]
+    moment = dt_utils.as_local(now) if now is not None else dt_utils.now()
+    try:
+        actions = resolve(situation(hass, moment))
+        errors = dict(actions.errors)
+    except Exception as err:
+        actions, errors = None, {"situation": err}
+    failing: set[str] = data.setdefault("actions_failing", set())
+    for name, err in errors.items():
+        if name not in failing:
+            _LOGGER.error("Failed to resolve %s", name, exc_info=err)
+    failing.clear()
+    failing.update(errors)
+    data["actions"] = actions
+
+
+def write_plan_sensors(hass: HomeAssistant, now: dt.datetime | None = None) -> None:
+    """Resolve the actions at `now` once, and write the plan and action sensors.
+
+    Never raises: a sensor that fails to write is logged and the others are written.
+    """
+    resolve_actions(hass, now)
     for sensor in hass.data[DOMAIN].get(PLAN_SENSORS, []):
-        if hasattr(sensor, "resolve"):
-            sensor.resolve()
-        sensor.async_write_ha_state()
+        # Not a disabled sensor (never added)
+        if sensor.hass is None:
+            continue
+        try:
+            sensor.async_write_ha_state()
+        except Exception:
+            _LOGGER.exception("Failed to write %s", sensor.entity_id)
 
 
 async def async_request_plan(hass: HomeAssistant, reason: str) -> None:

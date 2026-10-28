@@ -46,6 +46,12 @@ The battery action's state, the names the inverter scripts know: `charge`,
 is one mode.
 _Avoid_: slot state
 
+**Situation**:
+Everything the actions are resolved from at one moment: that moment, the plan, the
+manual slots, the settings and the readings. All the actions published together come
+from one situation, so they agree on the time and on whether the plan is stale.
+_Avoid_: snapshot, context
+
 **Fallback**:
 The action a device gets when there is no fresh plan covering now.
 

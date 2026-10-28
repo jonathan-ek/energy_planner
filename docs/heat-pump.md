@@ -36,8 +36,8 @@ heat: district heating at the season's energy price against electricity / COP.
   a difference of 3 °C or more (`heat_pump.heat_loss`). The first night gave about
   0.2 kW/K warming up and 0.14 later: 0.4 kW at 10 °C, 1.5 kW at −5 °C. The plan uses
   it per quarter with the live indoor and the forecast outdoor temperature, the saving
-  sensor with both live (`heating._power_kw`); without a measurement or indoor
-  temperature `heat_pump_power` (W) is used, and 0 turns planning off (the
+  sensor with both live (`actions.heat_pump_economy`); without a measurement or
+  indoor temperature `heat_pump_power` (W) is used, and 0 turns planning off (the
   forecast then keeps the heat pump's draw in the house load; `heat_pump.power_kw`
   serves both). The draw per
   hour is also taken out of the load history. Not modelled: the setpoint (the room

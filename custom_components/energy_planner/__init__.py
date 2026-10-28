@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import logging
 import datetime as dt
 
@@ -14,8 +15,8 @@ from homeassistant.util import dt as dt_utils
 
 from homeassistant.helpers.event import (
     async_track_state_change_event,
-    async_track_utc_time_change,
     async_track_time_interval,
+    async_track_utc_time_change,
 )
 from homeassistant.helpers.start import async_at_started
 
@@ -39,6 +40,7 @@ from .planner import (
     async_request_plan,
     async_set_ev_soc,
     async_update_forecast,
+    resolve_actions,
     write_plan_sensors,
 )
 from .store import async_save_to_store, async_load_from_store
@@ -262,14 +264,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         await async_request_plan(hass, "tariff changed")
 
     entry.async_on_unload(entry.add_update_listener(options_updated))
+    # Resolved before the sensors are added, so they start with them (not with the
+    # ones from before a reload, or unavailable)
+    hass.data[DOMAIN].pop("actions_failing", None)
+    resolve_actions(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    async def write_actions(now: dt.datetime):
-        # The actions follow the plan's current quarter and the manual slots
-        write_plan_sensors(hass)
+    update_fuse_guard = _track_fuse_guard(hass, entry)
+
+    async def every_minute(now: dt.datetime):
+        # The actions follow the plan's current quarter and the manual slots. Then
+        # the fuse guard, from the car action just published
+        write_plan_sensors(hass, now)
+        update_fuse_guard()
 
     entry.async_on_unload(
-        async_track_time_interval(hass, write_actions, dt.timedelta(minutes=1))
+        async_track_time_interval(hass, every_minute, dt.timedelta(minutes=1))
     )
 
     async def update_forecast(*_):
@@ -312,19 +322,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         async_track_utc_time_change(hass, update_plan, minute="/15", second=30)
     )
     _track_plan_triggers(hass, entry)
-    _track_fuse_guard(hass, entry)
     return True
 
 
-def _track_fuse_guard(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Update the fuse guard on new meter readings and every minute."""
+def _track_fuse_guard(hass: HomeAssistant, entry: ConfigEntry) -> Callable[[], None]:
+    """Update the fuse guard on new meter readings; return the update for the minute.
+
+    Readings update it at most every `FUSE_GUARD_INTERVAL`; the minute's update is
+    never held back, so the car's new run is seen when its quarter starts.
+    """
     last: list[dt.datetime] = []
 
-    async def update(*_):
-        now = dt_utils.utcnow()
-        if last and now - last[0] < FUSE_GUARD_INTERVAL:
-            return
-        last[:] = [now]
+    def update() -> None:
+        last[:] = [dt_utils.utcnow()]
         try:
             update_guard(hass)
         except Exception:
@@ -334,12 +344,17 @@ def _track_fuse_guard(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if sensor is not None and sensor.hass is not None:
             sensor.async_write_ha_state()
 
+    async def reading_changed(_event: Event[EventStateChangedData]):
+        if last and dt_utils.utcnow() - last[0] < FUSE_GUARD_INTERVAL:
+            return
+        update()
+
     entities = config_entities(hass.data[DOMAIN]["config"])
     if entities:
-        entry.async_on_unload(async_track_state_change_event(hass, entities, update))
-    entry.async_on_unload(
-        async_track_time_interval(hass, update, dt.timedelta(minutes=1))
-    )
+        entry.async_on_unload(
+            async_track_state_change_event(hass, entities, reading_changed)
+        )
+    return update
 
 
 def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -378,7 +393,11 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
         old, new = event.data["old_state"], event.data["new_state"]
         old_state = old.state if old is not None else None
         new_state = new.state if new is not None else None
-        if old_state != new_state and ev_is_unplugged(new_state):
+        if old_state == new_state:
+            return
+        # The car action follows the charger now, not after the replan
+        write_plan_sensors(hass)
+        if ev_is_unplugged(new_state):
             await async_car_unplugged(hass)
         was = ev_is_plugged(old_state)
         now = ev_is_plugged(new_state)

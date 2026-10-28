@@ -22,7 +22,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_utils
 
-from . import forecast, heating, settings
+from . import forecast, heat_pump, settings
 from ..const import DOMAIN, FORECAST_SENSORS
 
 _LOGGER = logging.getLogger(__name__)
@@ -322,7 +322,7 @@ async def async_update_forecast(hass: HomeAssistant) -> None:
         reserve_start=int(settings.number(config, "forecast_reserve_start")),
         reserve_end=int(settings.number(config, "forecast_reserve_end")),
         heat_pump_power_kw=heat_pump_config.power_kw,
-        cop_curve=heating.curve(hass),
+        cop_curve=heat_pump.cop_curve(heat_pump_config.model),
     )
     # A few hundred thousand operations: off the event loop, like the optimizer
     result = await hass.async_add_executor_job(forecast.build_forecast, inputs)

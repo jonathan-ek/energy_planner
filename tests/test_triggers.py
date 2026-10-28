@@ -68,6 +68,7 @@ async def test_unplugging_clears_the_entered_soc_not_an_unreachable_charger():
         patch.object(integration, "async_track_state_change_event", track),
         patch.object(integration, "async_request_plan", AsyncMock()) as request,
         patch.object(integration, "async_car_unplugged", unplugged),
+        patch.object(integration, "write_plan_sensors") as write,
     ):
         integration._track_plan_triggers(hass, MagicMock())
         await callbacks["sensor.charger"](change("connected_charging", "unavailable"))
@@ -76,3 +77,33 @@ async def test_unplugging_clears_the_entered_soc_not_an_unreachable_charger():
         unplugged.assert_awaited_once()
     # Plugged -> unavailable already counted as unplugged for the plan
     assert request.await_count == 1
+    # The car action is rewritten on each change of the charger
+    assert write.call_count == 2
+
+
+async def test_fuse_guard_minute_is_not_held_back_by_a_reading():
+    """Test that readings update the guard at most every 5 s, the minute always."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"config": {}}}
+    on_reading = []
+    update_guard = MagicMock()
+    with (
+        patch.object(integration, "config_entities", return_value=["sensor.l1"]),
+        patch.object(
+            integration,
+            "async_track_state_change_event",
+            lambda _hass, _ids, callback: on_reading.append(callback),
+        ),
+        patch.object(integration, "update_guard", update_guard),
+    ):
+        minute = integration._track_fuse_guard(hass, MagicMock())
+        for seconds in (57, 59):
+            now = START + dt.timedelta(seconds=seconds)
+            with patch.object(integration.dt_utils, "utcnow", return_value=now):
+                await on_reading[0](None)
+        # 59: within 5 s of 57
+        assert update_guard.call_count == 1
+        now = START + dt.timedelta(minutes=1)
+        with patch.object(integration.dt_utils, "utcnow", return_value=now):
+            minute()
+    assert update_guard.call_count == 2

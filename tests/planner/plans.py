@@ -1,10 +1,17 @@
 """Build battery plans for tests: the series a test sets, neutral values elsewhere."""
 
 from collections.abc import Sequence
+import dataclasses
 import datetime as dt
 
+from custom_components.energy_planner.planner import settings
 from custom_components.energy_planner.planner.plan import EvPlan, Plan
 from custom_components.energy_planner.planner.timeline import QUARTER, Timeline
+
+
+def battery_settings(**changes) -> settings.BatterySettings:
+    """Return the default battery settings with `changes`."""
+    return dataclasses.replace(settings.battery({}), **changes)
 
 
 def make_plan(

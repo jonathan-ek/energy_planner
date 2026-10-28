@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from .plans import battery_settings
+
 manual = importlib.import_module("custom_components.energy_planner.planner.manual")
 battery_action = importlib.import_module(
     "custom_components.energy_planner.planner.battery_action"
@@ -110,7 +112,7 @@ def test_stored_round_trip():
 
 def test_manual_until_is_published_in_local_time():
     """Test that a slot's end, kept in UTC, is published like the plan's times."""
-    battery = battery_action.BatteryState(50.0, 500.0, 10.0, 20.0, 90.0, 100.0, 100.0)
     slot = manual.ManualSlot(utc(24, 22), utc(25, 1, 30), "charge", 90)
-    result = battery_action.resolve(slot, None, FIRST, battery)
+    battery = battery_settings()
+    result = battery_action.resolve(slot, None, FIRST, battery, 50.0, 500.0)
     assert (result["source"], result["until"]) == ("manual", SECOND.isoformat())

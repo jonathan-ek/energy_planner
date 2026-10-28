@@ -2,6 +2,7 @@
 
 import datetime as dt
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -114,7 +115,7 @@ def test_update_guard_reads_the_sensors():
     }
     hass = MagicMock()
     hass.states.get = states.get
-    hass.data = {
+    data: dict[str, Any] = {
         DOMAIN: {
             "config": {
                 "main_fuse": 35,
@@ -126,6 +127,7 @@ def test_update_guard_reads_the_sensors():
             }
         }
     }
+    hass.data = data
     with patch.object(fuse_guard.dt_utils, "now", return_value=NOW):
         fuse_guard.update_guard(hass)
     guard = hass.data[DOMAIN]["fuse_guard"]
@@ -142,15 +144,13 @@ def test_update_guard_reads_the_sensors():
     guard = hass.data[DOMAIN]["fuse_guard"]
     assert guard["inverter_meter_offset_kw"] == pytest.approx(1.28, abs=0.01)
     assert guard["grid_limit_kw"] == pytest.approx(18.65 - 1.28, abs=0.06)
-    # While the car should charge, room is kept for it, unless it has finished
+    # While the published car action is to charge, room is kept for the car,
+    # unless it has finished
     states["sensor.charger"] = state("connected_charging")
     hass.data[DOMAIN]["config"]["ev_charger_status_sensor"] = "sensor.charger"
+    hass.data[DOMAIN]["actions"] = SimpleNamespace(car={"state": "charge"})
     del hass.data[DOMAIN]["fuse_guard_smoothing"]
-    charge = {"state": "charge"}
-    with (
-        patch.object(fuse_guard.dt_utils, "now", return_value=NOW),
-        patch.object(fuse_guard, "car_action", return_value=charge),
-    ):
+    with patch.object(fuse_guard.dt_utils, "now", return_value=NOW):
         fuse_guard.update_guard(hass)
         guard = hass.data[DOMAIN]["fuse_guard"]
         # 16 A per phase kept for the car
@@ -199,3 +199,34 @@ def test_the_sensors_are_tracked_before_a_fuse_is_set():
         "sensor.inverter",
     ]
     assert fuse_guard.config_entities({}) == []
+
+
+@pytest.mark.parametrize(
+    ("status", "published", "wanted"),
+    [
+        ("disconnected", "charge", False),
+        ("connected_charging", "charge", True),
+        ("connected_charging", "wait", False),
+        # Plugged in since the action was published: charges as without the planner
+        ("connected_requesting", None, True),
+        # No actions (resolving failed): the same
+        ("connected_requesting", "none", True),
+        # A car that has finished draws nothing
+        ("connected_finished", "charge", False),
+    ],
+)
+def test_car_wanted_from_the_published_action_and_the_live_charger(
+    status, published, wanted
+):
+    """Test that room is kept for a car that may charge now."""
+    hass = MagicMock()
+    hass.states.get = {"sensor.charger": state(status)}.get
+    actions = None if published == "none" else SimpleNamespace(car={"state": published})
+    data: dict[str, Any] = {
+        DOMAIN: {
+            "config": {"ev_charger_status_sensor": "sensor.charger"},
+            "actions": actions,
+        }
+    }
+    hass.data = data
+    assert fuse_guard._car_wanted(hass, NOW) is wanted

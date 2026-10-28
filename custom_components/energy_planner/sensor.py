@@ -7,11 +7,10 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfElectricCurrent, UnitOfEnergy
-from homeassistant.util import dt as dt_utils
+from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, FORECAST_SENSORS, FUSE_GUARD_SENSOR, PLAN_SENSORS
-from .planner.battery_plan import car_action, current_action, manual_slot_attributes
-from .planner.heating import heat_pump_action, heat_pump_economy
+from .planner.battery_plan import actions_now, manual_slot_attributes
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +53,8 @@ EXTRA_ATTRIBUTES = {
     ),
 }
 
-# key: (name, key in heat_pump_economy, unit, icon); the saving sensor has the details
+# key: (name, key in actions.heat_pump_economy, unit, icon); the saving sensor has
+# the details
 HEAT_PUMP_SENSORS = {
     "heat_pump_cop": ("Heat pump COP", "cop", None, "mdi:heat-pump-outline"),
     "district_heating_price": (
@@ -71,7 +71,7 @@ HEAT_PUMP_SENSORS = {
     ),
 }
 
-# key: (name, icon, resolve(hass) -> action). Each action has `state`, `source`,
+# key: (name, icon, field in actions.Actions). Each action has `state`, `source`,
 # `until`, `reason` and `plan_updated` (planner/plan.py), and its own keys:
 # - battery_action: what the inverter should do now, an action state: the manual
 #   slot covering now, or the battery plan, with the target SOC, current and import
@@ -81,14 +81,11 @@ HEAT_PUMP_SENSORS = {
 # - ev_action: `charge`/`wait` from the battery plan, `charge` without a fresh plan so
 #   the car charges as without the planner, no state while unplugged; with the plan's
 #   need (planner/ev.py)
+# All are resolved together at one moment (planner/actions.py).
 ACTION_SENSORS = {
-    "battery_action": (
-        "Battery action",
-        "mdi:battery-arrow-up-outline",
-        current_action,
-    ),
-    "heat_pump_action": ("Heat pump action", "mdi:heat-pump", heat_pump_action),
-    "ev_action": ("Car charging action", "mdi:ev-station", car_action),
+    "battery_action": ("Battery action", "mdi:battery-arrow-up-outline", "battery"),
+    "heat_pump_action": ("Heat pump action", "mdi:heat-pump", "heat_pump"),
+    "ev_action": ("Car charging action", "mdi:ev-station", "car"),
 }
 
 
@@ -199,62 +196,80 @@ class EnergyPlannerPlanSensor(SensorEntity):
     @property
     def native_value(self):
         """Return the planned mode for the current quarter, None if not covered."""
-        plan = self._hass.data[DOMAIN].get("plan")
-        return plan.value_at(dt_utils.now(), plan.modes) if plan is not None else None
+        actions = actions_now(self._hass)
+        return actions.mode if actions is not None else None
 
     @property
     def extra_state_attributes(self):
         """Return the plan, and the manual slots (also without a plan)."""
-        plan = self._hass.data[DOMAIN].get("plan")
+        # The plan the state was resolved from, also a stale one: what was planned.
+        # Without actions (the situation failed, the state is None) the stored plan,
+        # so the plan card still shows it
+        actions = actions_now(self._hass)
+        plan = (
+            actions.plan if actions is not None else self._hass.data[DOMAIN].get("plan")
+        )
         return {
             **(plan.to_attributes() if plan is not None else {}),
             "manual_slots": manual_slot_attributes(self._hass),
         }
 
 
-class EnergyPlannerActionSensor(SensorEntity):
-    """What a device should do now (`ACTION_SENSORS`): the state and its details."""
+class _ResolvedSensor(SensorEntity):
+    """A sensor showing one field of the resolved actions (`actions.Actions`).
+
+    Unavailable while that field can not be resolved.
+    """
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _hass: HomeAssistant
+    _field: str
+
+    def _value(self) -> dict | None:
+        actions = actions_now(self._hass)
+        return getattr(actions, self._field) if actions is not None else None
+
+    @property
+    def _resolved(self) -> dict:
+        return self._value() or {}
+
+    @property
+    def available(self) -> bool:
+        """Return False while this field can not be resolved."""
+        return self._value() is not None
+
+
+class EnergyPlannerActionSensor(_ResolvedSensor):
+    """What a device should do now (`ACTION_SENSORS`): the state and its details."""
 
     def __init__(self, hass, key):
         """Initialize the action sensor."""
         self._hass = hass
-        self._attr_name, self._attr_icon, self._resolve = ACTION_SENSORS[key]
+        self._attr_name, self._attr_icon, self._field = ACTION_SENSORS[key]
         self.entity_id = f"sensor.{DOMAIN}_{key}"
         self._attr_unique_id = f"{DOMAIN}_{key}"
-        self._action: dict = {}
-
-    def resolve(self) -> None:
-        """Resolve the action now; write_plan_sensors calls it before each write."""
-        self._action = self._resolve(self._hass)
-
-    async def async_added_to_hass(self) -> None:
-        """Resolve the action when the sensor is added."""
-        self.resolve()
 
     @property
     def native_value(self):
         """Return what to do now."""
-        return self._action.get("state")
+        return self._resolved.get("state")
 
     @property
     def extra_state_attributes(self):
         """Return where it comes from, until when, and the device's details."""
-        return {key: value for key, value in self._action.items() if key != "state"}
+        return {key: value for key, value in self._resolved.items() if key != "state"}
 
 
-class EnergyPlannerHeatPumpSensor(SensorEntity):
+class EnergyPlannerHeatPumpSensor(_ResolvedSensor):
     """Heat pump economy now: COP, district heating price, or the saving per kWh heat.
 
     The saving is district heating minus heat pump heat (öre per kWh of heat), so the
     heat pump pays when it is positive. See planner/heat_pump.py.
     """
 
-    _attr_has_entity_name = True
-    _attr_should_poll = False
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _field = "heat_pump_economy"
 
     def __init__(self, hass, key):
         """Initialize the heat pump sensor."""
@@ -266,28 +281,19 @@ class EnergyPlannerHeatPumpSensor(SensorEntity):
         self._attr_icon = icon
         self.entity_id = f"sensor.{DOMAIN}_{key}"
         self._attr_unique_id = f"{DOMAIN}_{key}"
-        self._economy: dict = {}
-
-    def resolve(self) -> None:
-        """Recalculate; write_plan_sensors calls it before each write."""
-        self._economy = heat_pump_economy(self._hass)
-
-    async def async_added_to_hass(self) -> None:
-        """Calculate when the sensor is added."""
-        self.resolve()
 
     @property
     def native_value(self):
         """Return this sensor's value."""
-        return self._economy.get(self._value_key)
+        return self._resolved.get(self._value_key)
 
     @property
     def extra_state_attributes(self):
         """Return the inputs and the other results (all on the saving sensor)."""
         if self._key == "heat_pump_saving":
-            return {k: v for k, v in self._economy.items() if k != "saving"}
+            return {k: v for k, v in self._resolved.items() if k != "saving"}
         if self._key == "heat_pump_cop":
-            return {"outdoor_temperature": self._economy.get("outdoor_temperature")}
+            return {"outdoor_temperature": self._resolved.get("outdoor_temperature")}
         return None
 
 

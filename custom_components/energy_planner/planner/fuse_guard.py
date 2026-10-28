@@ -24,8 +24,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_utils
 
 from ..const import DOMAIN
-from . import fuse, settings
-from .battery_plan import car_action
+from . import ev, fuse, settings
+from .battery_plan import actions_now, car_status
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,6 +96,28 @@ def _reading(
     )
 
 
+def _car_wanted(hass: HomeAssistant, now: dt.datetime) -> bool:
+    """Return whether the car may charge now, so room is kept for it.
+
+    The published car action, so the guard and `sensor.energy_planner_ev_action`
+    agree. For a car plugged in since it was published (no state), or without
+    published actions, the car action's own rule now from the live charger state.
+    A car that has finished draws nothing.
+    """
+    status = car_status(hass)
+    if (
+        status is None
+        or not ev.is_plugged(status)
+        or status.lower().endswith("finished")
+    ):
+        return False
+    actions = actions_now(hass)
+    car = actions.car if actions is not None else None
+    if car is None or car["state"] is None:
+        car = ev.ev_action(hass.data[DOMAIN].get("plan"), now, plugged=True)
+    return car["state"] == "charge"
+
+
 def update_guard(hass: HomeAssistant) -> None:
     """Recalculate the guard from the live readings (kept while a reading is missing).
 
@@ -111,17 +133,13 @@ def update_guard(hass: HomeAssistant) -> None:
     reading = _reading(hass, config, now)
     if reading is None:
         return
-    # A car that has finished draws nothing: no room is kept for it
-    status_id = config.ev_charger_status_sensor
-    status = hass.states.get(status_id) if status_id else None
-    finished = status is not None and status.state.lower().endswith("finished")
     guard = fuse.limits(
         reading,
         config.main_fuse_a,
         config.margin_a,
         # An 11 kW charger is 16 A
         round(config.charger_max_kw * 1000 / (len(reading.phase_kw) * fuse.VOLTAGE)),
-        ev_wanted=not finished and car_action(hass, now)["state"] == "charge",
+        ev_wanted=_car_wanted(hass, now),
     )
     meter_kw = settings.reading(
         hass, config.inverter_grid_power_sensor, unit="kW", max_age=MAX_AGE, now=now

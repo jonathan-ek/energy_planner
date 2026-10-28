@@ -134,8 +134,8 @@ async def run(hass, history=None, price_history=None):
 async def test_plan_is_stored_and_published(mock_hass):
     """Test that the plan is stored, available from when it was made, and shown."""
     finished = NOW + dt.timedelta(seconds=3)
-    # The prune, the prices and the plan at NOW, done 3 s later
-    clock = MagicMock(side_effect=[NOW, NOW, NOW, finished])
+    # The prune, the prices and the plan at NOW, done 3 s later; the actions then
+    clock = MagicMock(side_effect=[NOW, NOW, NOW, finished, finished])
     with (
         patch.object(battery_plan.dt_utils, "now", clock),
         patch.object(spot, "_published", AsyncMock(return_value=prices())),
@@ -305,6 +305,42 @@ async def test_no_battery_state(mock_hass):
     estimate.assert_not_called()
 
 
+async def test_failed_actions_make_the_sensors_unavailable(mock_hass):
+    """Test that a failing situation drops the actions, logged once while it fails."""
+    data = mock_hass.data[DOMAIN]
+    broken = patch.object(battery_plan, "situation", side_effect=ValueError("broken"))
+    with patch.object(battery_plan, "_LOGGER") as log:
+        with broken:
+            battery_plan.write_plan_sensors(mock_hass, NOW)
+            battery_plan.write_plan_sensors(mock_hass, NOW)
+        assert battery_plan.actions_now(mock_hass) is None
+        assert log.error.call_count == 1
+        assert data[PLAN_SENSORS][0].async_write_ha_state.call_count == 2
+        # Working again: published, and a later failure is logged again
+        battery_plan.write_plan_sensors(mock_hass, NOW)
+        assert battery_plan.actions_now(mock_hass) is not None
+        with broken:
+            battery_plan.write_plan_sensors(mock_hass, NOW)
+    assert log.error.call_count == 2
+
+
+async def test_a_failing_sensor_write_does_not_stop_the_others(mock_hass):
+    """Test that every sensor is written although one raises."""
+    failing, other = MagicMock(), MagicMock()
+    failing.async_write_ha_state.side_effect = RuntimeError("broken")
+    mock_hass.data[DOMAIN][PLAN_SENSORS] = [failing, other]
+    battery_plan.write_plan_sensors(mock_hass, NOW)
+    other.async_write_ha_state.assert_called_once()
+
+
+async def test_a_disabled_sensor_is_not_written(mock_hass):
+    """Test that a sensor that was never added (disabled) is skipped."""
+    disabled = MagicMock(hass=None)
+    mock_hass.data[DOMAIN][PLAN_SENSORS] = [disabled]
+    battery_plan.write_plan_sensors(mock_hass, NOW)
+    disabled.async_write_ha_state.assert_not_called()
+
+
 async def test_requests_during_a_run_are_coalesced(mock_hass):
     """Test that requests while the plan is calculated give one more run."""
     calls = []
@@ -320,32 +356,26 @@ async def test_requests_during_a_run_are_coalesced(mock_hass):
     assert len(calls) == 2
 
 
-async def test_current_action_follows_the_plan_or_a_manual_slot(mock_hass):
-    """Test the action sensor's value: the plan, off, and a manual slot."""
+async def test_situation_reads_the_plan_settings_and_readings(mock_hass):
+    """Test the situation gathered from HA, and the actions written from it."""
     await run(mock_hass)
+    data = mock_hass.data[DOMAIN]
+    slot = manual.make(NOW, NOW + dt.timedelta(hours=1), "charge", 70)
+    data["manual_slots"] = [slot]
+    found = battery_plan.situation(mock_hass, NOW)
+    assert found.now == NOW
+    assert found.plan is data["plan"]
+    assert found.manual_slots == [slot]
+    assert found.enabled
+    assert found.battery == settings.battery(data["config"])
+    assert found.spot == data["prices"].published[spot.quarter_start(NOW)]
+    assert (found.soc, found.voltage) == (20.0, 536.0)
+    # No charger status sensor, no outdoor or indoor reading
+    assert (found.car_status, found.outdoor, found.indoor) == (None, None, None)
     with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
-        result = battery_plan.current_action(mock_hass)
-    assert result["source"] == "plan"
-    assert result["mode"] == mock_hass.data[DOMAIN]["plan"].modes[0]
-    # With the planner off the plan is not followed
-    mock_hass.data[DOMAIN]["config"]["enabled"] = False
-    with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
-        result = battery_plan.current_action(mock_hass)
-    assert (result["state"], result["source"]) == ("discharge", "none")
-    # A manual slot runs while off and without a plan, to its target
-    mock_hass.data[DOMAIN]["plan"] = None
-    mock_hass.data[DOMAIN]["manual_slots"] = [
-        manual.make(NOW, NOW + dt.timedelta(hours=1), "charge", 70)
-    ]
-    with patch.object(battery_plan.dt_utils, "now", return_value=NOW):
-        result = battery_plan.current_action(mock_hass)
-    assert (result["state"], result["source"], result["soc"]) == (
-        "charge",
-        "manual",
-        70,
-    )
-    # Rounded out to whole quarters: 22:45 to 00:00
-    assert result["until"] == (NOW + dt.timedelta(minutes=70)).isoformat()
+        battery_plan.write_plan_sensors(mock_hass)
+    assert data["actions"].battery["source"] == "manual"
+    data[PLAN_SENSORS][0].async_write_ha_state.assert_called()
 
 
 async def test_tomorrow_is_estimated(mock_hass):
@@ -479,7 +509,7 @@ async def test_plan_settings_replan(mock_hass):
     mock_hass.data[DOMAIN]["values"] = {}
     try:
         await run(mock_hass)
-        battery_plan.current_action(mock_hass)
+        battery_plan.situation(mock_hass, NOW)
     finally:
         del STATES["sensor.charger_status"]
     assert "heat_pump_margin" in config.read

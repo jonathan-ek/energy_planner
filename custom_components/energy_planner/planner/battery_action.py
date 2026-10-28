@@ -19,13 +19,13 @@ The state is always an action state the inverter scripts know (`charge`,
 `discharge`, `sell`, `sell-excess`, `pause`, `discard-excess`).
 """
 
-import dataclasses
 import datetime as dt
 import math
 from typing import Any
 
 from .manual import STATE_MODES, ManualSlot, SocLimits, target
 from .plan import Plan, action, follow
+from .settings import BatterySettings
 
 # Battery plan mode -> action state
 ACTION_STATES = {
@@ -36,20 +36,6 @@ ACTION_STATES = {
     "charge": "charge",
     "sell": "sell",
 }
-
-
-@dataclasses.dataclass(frozen=True)
-class BatteryState:
-    """The live battery state and the settings the action needs."""
-
-    soc: float | None  # %, None: no reading (the plan's expected SOC is used)
-    voltage: float  # V
-    capacity_kwh: float
-    min_soc: float  # %
-    max_soc: float  # %
-    max_charge_a: float
-    max_discharge_a: float
-    reserve_soc: float = 0.0  # %, the plan keeps it, peak shaving may use it
 
 
 def _action(
@@ -74,13 +60,18 @@ def _action(
     )
 
 
-def _current(kwh: float, until: dt.datetime, now: dt.datetime, battery, limit):
-    """Return the battery current in A that moves `kwh` by `until`, at most `limit`."""
+def _current(
+    kwh: float, until: dt.datetime, now: dt.datetime, voltage: float | None, limit
+):
+    """Return the battery current in A that moves `kwh` by `until`, at most `limit`.
+
+    0 without a voltage reading.
+    """
     # Timestamps: local times in the hour repeated when DST ends subtract by wall clock
     hours = max((until.timestamp() - now.timestamp()) / 3600, 1 / 60)
-    if kwh <= 0 or battery.voltage <= 0:
+    if kwh <= 0 or voltage is None or voltage <= 0:
         return 0
-    return min(math.ceil(kwh / hours * 1000 / battery.voltage), int(limit))
+    return min(math.ceil(kwh / hours * 1000 / voltage), int(limit))
 
 
 def _modes_and_manual(plan: Plan) -> list[tuple[str, str | None]]:
@@ -90,11 +81,16 @@ def _modes_and_manual(plan: Plan) -> list[tuple[str, str | None]]:
 
 
 def plan_action(
-    plan: Plan | None, now: dt.datetime, battery: BatteryState
+    plan: Plan | None,
+    now: dt.datetime,
+    battery: BatterySettings,
+    soc: float | None,
+    voltage: float | None,
 ) -> dict[str, Any]:
     """Return the battery plan's action now, or a self-use fallback.
 
-    The run ends where a manual slot's quarters begin or end, even with the same
+    `soc` (%) and `voltage` (V) are the readings, None when missing. The run
+    ends where a manual slot's quarters begin or end, even with the same
     mode: its target and current are the plan's own up to there.
     """
     run, reason = follow(plan, now, _modes_and_manual)
@@ -106,7 +102,8 @@ def plan_action(
     index = run.index
     mode = run.value[0]
     # Without a reading, the SOC the plan expects: 0 would look like an empty battery
-    soc = battery.soc if battery.soc is not None else plan.soc_at(now)
+    if soc is None:
+        soc = plan.soc_at(now)
     if soc is None:
         soc = plan.soc[index]
     until = run.until
@@ -114,10 +111,10 @@ def plan_action(
     capacity = battery.capacity_kwh / 100  # kWh per %
     extra: dict[str, Any] = {"soc": None, "current_a": 0}
     target_kw = plan.targets[index]
-    reserve = max(battery.min_soc, battery.reserve_soc)
+    reserve = max(battery.shutdown_soc, battery.reserve_soc)
     if (
         mode in ("self_use", "sell_excess", "hold")
-        and battery.reserve_soc > battery.min_soc
+        and battery.reserve_soc > battery.shutdown_soc
         and soc <= reserve
     ):
         # Keep the reserve for peaks; no power charge: just keep it
@@ -131,7 +128,7 @@ def plan_action(
             (target_soc - soc) * capacity,
             until,
             now,
-            battery,
+            voltage,
             battery.max_charge_a,
         )
     elif mode == "sell":
@@ -140,7 +137,7 @@ def plan_action(
             (soc - target_soc) * capacity,
             until,
             now,
-            battery,
+            voltage,
             battery.max_discharge_a,
         )
     elif mode == "sell_excess":
@@ -163,7 +160,9 @@ def resolve(
     manual: ManualSlot | None,
     plan: Plan | None,
     now: dt.datetime,
-    battery: BatteryState,
+    battery: BatterySettings,
+    soc: float | None,
+    voltage: float | None,
     enabled: bool = True,
 ) -> dict[str, Any]:
     """Return the action now from the manual slot covering now and the plan.
@@ -174,21 +173,21 @@ def resolve(
     reserve.
     """
     if manual is not None:
-        limits = SocLimits(battery.min_soc, battery.max_soc, battery.reserve_soc)
-        soc = {
+        limits = SocLimits(battery.shutdown_soc, battery.max_soc, battery.reserve_soc)
+        manual_soc = {
             "pause": battery.max_soc,
-            "sell-excess": max(battery.min_soc, battery.reserve_soc),
+            "sell-excess": max(battery.shutdown_soc, battery.reserve_soc),
         }.get(manual.state, target(manual, limits))
         current = {"charge": battery.max_charge_a, "sell": battery.max_discharge_a}
         return _action(
             manual.state,
             "manual",
             mode=STATE_MODES[manual.state],
-            soc=None if soc is None else round(soc),
+            soc=None if manual_soc is None else round(manual_soc),
             current_a=int(current.get(manual.state, 0)),
             # Kept in UTC; published in local time like the plan's times
             until=manual.end.astimezone(now.tzinfo),
         )
     if not enabled:
         return _action("discharge", "none", reason="planner off")
-    return plan_action(plan, now, battery)
+    return plan_action(plan, now, battery, soc, voltage)

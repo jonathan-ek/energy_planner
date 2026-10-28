@@ -122,7 +122,7 @@ def heat_pump_quarters(
     """
     config = readings.settings
     temps = [readings.outdoor if t is None else t for t in temperatures]
-    cop_curve = heat_pump.COP_CURVES.get(config.model, ())
+    cop_curve = heat_pump.cop_curve(config.model)
     seasons = heat_pump.DISTRICT_HEATING_PRESETS.get(config.district_heating, ())
     draws = [
         heat_pump.power_kw(config.power_kw, loss, readings.indoor, t, cop_curve)

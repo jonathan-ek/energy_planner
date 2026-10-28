@@ -18,7 +18,7 @@ a house heated by district heating) only pays when a kWh of heat from it,
   `loss * (indoor - outdoor) / COP` (`draw`).
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 import dataclasses
 import datetime as dt
 from itertools import pairwise
@@ -44,6 +44,11 @@ COP_CURVES: dict[str, tuple[tuple[float, float], ...]] = {
         (16.0, 4.05),
     ),
 }
+
+
+def cop_curve(model: str) -> tuple[tuple[float, float], ...]:
+    """Return a heat pump model's COP curve, empty for an unknown model."""
+    return COP_CURVES.get(model, ())
 
 
 @dataclasses.dataclass(frozen=True)
@@ -235,18 +240,17 @@ def schedule(
 def action(
     plan: Plan | None,
     now: dt.datetime,
-    economy: Callable[[], Mapping],
+    economy: Mapping,
     margin: float,
     heating_limit: float,
 ) -> dict:
     """Return whether the heat pump should heat now.
 
     From the battery plan (source `plan`) while it is fresh and covers now, otherwise
-    from the economy now (`economy()`, `heating.heat_pump_economy`, only worked out
-    then) against the margin (öre per kWh
-    of heat) and the heating limit (°C outdoor), source `fallback`. Without prices or
-    an outdoor temperature no decision (state None, source `none`), so the automation
-    leaves the heat pump as it is.
+    from the economy now (`actions.heat_pump_economy`) against the margin (öre per
+    kWh of heat) and the heating limit (°C outdoor), source `fallback`. Without
+    prices or an outdoor temperature no decision (state None, source `none`), so the
+    automation leaves the heat pump as it is.
     """
     run, reason = follow(plan, now, lambda p: p.heat_pump)
     if run is not None and plan is not None:
@@ -260,10 +264,9 @@ def action(
             marginal=marginal[run.index] if run.index < len(marginal) else None,
             cop=plan.heat_pump_cop[run.index],
         )
-    economy_now = economy()
-    outdoor = economy_now.get("outdoor_temperature")
-    saving = economy_now.get("saving")
-    if "cop" not in economy_now or outdoor is None:
+    outdoor = economy.get("outdoor_temperature")
+    saving = economy.get("saving")
+    if "cop" not in economy or outdoor is None:
         return make_action(
             None, "none", plan=plan, reason=reason, marginal=None, cop=None
         )
@@ -273,6 +276,6 @@ def action(
         "fallback",
         plan=plan,
         reason=reason,
-        marginal=economy_now.get("electricity_price"),
-        cop=economy_now.get("cop"),
+        marginal=economy.get("electricity_price"),
+        cop=economy.get("cop"),
     )

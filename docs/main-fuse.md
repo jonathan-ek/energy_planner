@@ -30,8 +30,12 @@ three-phase and balanced: the car charger's current and the battery's grid charg
   rises do not write again), higher ones once a step higher (0.5 kW, 1 A) and the last
   change is 1 min (grid) / 15 min (charger, Zaptec's cloud API is rate limited) old.
 - Updated on every change of the configured sensors (at most every 5 s) and every
-  minute; a missing phase, or a meter silent for 2 min, keeps the last result (any
-  of its phase sensors counts, since MQTT does not write an unchanged value).
+  minute right after the actions (never held back by the 5 s).
+  Room is kept for the car while it is plugged in, has not finished and its
+  published action is `charge`; plugged in since the action was published (or
+  without actions), the car action's rule decides now (`ev.ev_action`). A missing
+  phase, or a meter silent for 2 min, keeps the last result (any of its phase
+  sensors counts, since MQTT does not write an unchanged value).
   `sensor.energy_planner_fuse_guard`: state the room (A), attributes `grid_limit_kw`,
   `ev_current_a` (None without `ev_charger_current_number`), `phase_a`, `house_a`, `over_a`, `updated`.
 - `examples/battery/follow_battery_action.py` caps the import target at `grid_limit_kw` (a

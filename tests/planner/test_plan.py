@@ -10,7 +10,7 @@ from custom_components.energy_planner.planner import battery_action, ev, heat_pu
 from custom_components.energy_planner.planner.plan import follow
 from custom_components.energy_planner.planner.timeline import QUARTER, Timeline
 
-from .plans import make_plan
+from .plans import battery_settings, make_plan
 
 TZ = ZoneInfo("Europe/Stockholm")
 START = dt.datetime(2026, 10, 7, 22, 0, tzinfo=TZ)
@@ -114,11 +114,11 @@ def test_attributes():
 def test_every_action_has_the_common_keys():
     """Test that the battery, car and heat pump actions share their core keys."""
     plan = make_plan(START, ev_power_kw=[0.0] * 4, heat_pump=[True] * 4)
-    battery = battery_action.BatteryState(50.0, 500.0, 20.0, 15.0, 90.0, 20.0, 18.0)
+    battery = battery_settings()
     actions = [
-        battery_action.resolve(None, plan, at(5), battery),
+        battery_action.resolve(None, plan, at(5), battery, 50.0, 500.0),
         ev.ev_action(plan, at(5), plugged=True),
-        heat_pump.action(plan, at(5), dict, 5.0, 15.0),
+        heat_pump.action(plan, at(5), {}, 5.0, 15.0),
     ]
     for action in actions:
         assert {"state", "source", "until", "reason", "plan_updated"} <= set(action)
@@ -136,7 +136,7 @@ def test_every_action_has_the_common_keys():
         ),
     )
     for action in (
-        battery_action.resolve(None, stale, later, battery),
+        battery_action.resolve(None, stale, later, battery, 50.0, 500.0),
         ev.ev_action(stale, later, plugged=True),
     ):
         assert (action["source"], action["reason"]) == ("fallback", "plan is old")

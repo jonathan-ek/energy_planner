@@ -1,22 +1,14 @@
-"""Tests for the heat pump economy and its glue."""
+"""Tests for the heat pump economy, its schedule and its draw."""
 
 import datetime as dt
 import importlib
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from custom_components.energy_planner.const import DOMAIN
-from custom_components.energy_planner.planner.prices import SpotPrices
-
-from .plans import make_plan
-
 heat_pump = importlib.import_module(
     "custom_components.energy_planner.planner.heat_pump"
 )
-heating = importlib.import_module("custom_components.energy_planner.planner.heating")
 
 TZ = ZoneInfo("Europe/Stockholm")
 CURVE = heat_pump.COP_CURVES["msz_ap42"]
@@ -73,61 +65,6 @@ def test_too_cold():
     assert result["saving"] is None
 
 
-NOW = dt.datetime(2026, 10, 7, 21, 5, tzinfo=TZ)
-QUARTER = dt.datetime(2026, 10, 7, 21, 0, tzinfo=TZ)
-# A plan with the spot price now, made an hour ago: too old to follow
-OLD_PLAN = make_plan(QUARTER, spot=[500.0], updated=QUARTER - dt.timedelta(hours=1))
-
-
-def mock_hass(states, plan=OLD_PLAN, published=None):
-    """Return a mock hass with the spot price now, a plan and sensor states."""
-    hass = MagicMock()
-    hass.states.get = lambda entity_id: (
-        SimpleNamespace(state=states[entity_id]) if entity_id in states else None
-    )
-    hass.data = {
-        DOMAIN: {
-            "options": {"tariff_preset": "tekniska_verken_alternativ"},
-            "config": {},
-            "plan": plan,
-            "prices": SpotPrices(
-                {QUARTER: 500.0} if published is None else published, {}
-            ),
-        }
-    }
-    return hass
-
-
-def test_glue_uses_the_live_inputs():
-    """Test the outdoor sensor, the price now and the tariff's day fee."""
-    hass = mock_hass({"sensor.gw1100a_outdoor_temperature": "0.0"})
-    with patch.object(heating.dt_utils, "now", return_value=NOW):
-        result = heating.heat_pump_economy(hass)
-    assert result["district_heating_price"] == 76.7
-    assert result["cop"] == 3.0
-    assert result["spot"] == 50.0
-    # 62.5 spot + 45 energy tax + 18 day transfer fee
-    assert result["electricity_price"] == pytest.approx(125.5)
-    assert result["export_share"] == 0.0
-
-
-def test_glue_planned_export():
-    """Test that the plan's export in this quarter makes the electricity cheaper."""
-    plan = make_plan(QUARTER, spot=[500.0], grid_export_kw=[2.0])
-    hass = mock_hass({"sensor.gw1100a_outdoor_temperature": "10"}, plan)
-    with patch.object(heating.dt_utils, "now", return_value=NOW):
-        result = heating.heat_pump_economy(hass)
-    assert result["export_share"] == 1.0
-
-
-def test_glue_missing_inputs():
-    """Test that without an outdoor temperature only the district price is given."""
-    hass = mock_hass({})
-    with patch.object(heating.dt_utils, "now", return_value=NOW):
-        result = heating.heat_pump_economy(hass)
-    assert result == {"district_heating_price": 76.7, "outdoor_temperature": None}
-
-
 def test_schedule_runs_where_heat_is_cheaper():
     """Test the rule: district heating minus electricity / COP at least the margin."""
     # COP 3, district heating 76.7: pays up to 215 öre/kWh electricity with margin 5
@@ -152,17 +89,6 @@ def test_schedule_removes_short_gaps_and_runs():
     on = heat_pump.schedule(marginal, [3.0] * 11, [76.7] * 11, [True] * 11, 5.0)
     # Gap at 2 filled, run at 7 dropped, the run at the end is kept
     assert on == [True] * 5 + [False] * 5 + [True]
-
-
-def plan_hass(states, plan=OLD_PLAN, published=None):
-    """Return a mock hass with heat pump settings, prices and a plan."""
-    hass = mock_hass(states, plan, published)
-    hass.data[DOMAIN]["config"] = {
-        "heat_pump_power": 300,
-        "heat_pump_margin": 5,
-        "heat_pump_heating_limit": 15,
-    }
-    return hass
 
 
 def test_heat_loss():
@@ -198,63 +124,3 @@ def test_power_from_the_loss_or_the_setting():
     assert heat_pump.power_kw(0.3, loss, None, 0.0, CURVE) == 0.3
     # Not planned: the forecast keeps the draw in the house load
     assert heat_pump.power_kw(0.0, loss, 21.0, 0.0, CURVE) == 0.0
-
-
-def test_action_follows_the_plan():
-    """Test the plan's flag now and when the run ends."""
-    plan = make_plan(QUARTER, heat_pump=[True, True, False, False])
-    starts = plan.timeline.locals
-    hass = plan_hass({}, plan)
-    with patch.object(heating.dt_utils, "now", return_value=NOW):
-        action = heating.heat_pump_action(hass)
-    assert action["state"] == "on"
-    assert action["source"] == "plan"
-    assert action["until"] == starts[2].isoformat()
-    # Following the plan, the economy is not worked out
-    with (
-        patch.object(heating.dt_utils, "now", return_value=NOW),
-        patch.object(heating, "heat_pump_economy") as economy,
-    ):
-        heating.heat_pump_action(hass)
-    economy.assert_not_called()
-
-
-def test_action_without_heat_pump():
-    """Test a plan made with heat_pump_power 0: no marginal prices, always off."""
-    plan = make_plan(QUARTER, heat_pump=[False] * 4, marginal=[])
-    starts = plan.timeline.locals
-    hass = plan_hass({}, plan)
-    with patch.object(heating.dt_utils, "now", return_value=NOW):
-        action = heating.heat_pump_action(hass)
-    assert action["state"] == "off"
-    assert action["marginal"] is None
-    assert action["until"] == (starts[-1] + dt.timedelta(minutes=15)).isoformat()
-
-
-def test_action_falls_back_to_the_economy_now():
-    """Test that without a plan the saving now and the heating limit decide."""
-    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"})
-    with patch.object(heating.dt_utils, "now", return_value=NOW):
-        action = heating.heat_pump_action(hass)
-    assert (action["state"], action["source"]) == ("on", "fallback")
-    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "16"})
-    with patch.object(heating.dt_utils, "now", return_value=NOW):
-        action = heating.heat_pump_action(hass)
-    assert action["state"] == "off"
-
-
-def test_action_without_inputs_decides_nothing():
-    """Test that missing prices give no decision, so the heat pump is left alone."""
-    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, published={})
-    with patch.object(heating.dt_utils, "now", return_value=NOW):
-        action = heating.heat_pump_action(hass)
-    assert (action["state"], action["source"]) == (None, "none")
-
-
-def test_action_without_a_plan_uses_the_prices():
-    """Test that a failed plan (e.g. no battery SOC) still leaves the fallback."""
-    hass = plan_hass({"sensor.gw1100a_outdoor_temperature": "5"}, plan=None)
-    with patch.object(heating.dt_utils, "now", return_value=NOW):
-        action = heating.heat_pump_action(hass)
-    assert action["source"] == "fallback"
-    assert action["state"] in ("on", "off")
