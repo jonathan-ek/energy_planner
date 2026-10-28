@@ -1,6 +1,7 @@
 # Battery plan
 
-`battery_optimizer.optimize`, published as `sensor.energy_planner_battery_plan`.
+`battery_optimizer.optimize`, published as `sensor.energy_planner_battery_plan`
+(state: the mode now, none from a stale plan; the attributes keep the last plan).
 `sensor.energy_planner_battery_action` resolves what to do now
 (`battery_action.resolve`): a manual slot covering now wins (see `docs/architecture.md` "Manual slots");
 with `enabled` on, the plan (self-use if the plan is stale, see `plan.py`, or ends);

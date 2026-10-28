@@ -12,6 +12,10 @@ action published together (`Actions`), so they agree on the time and on the plan
   for its sensors and the heat pump's fallback
 - mode: the plan's mode now, for the plan sensor
 
+A stale plan (plan.py) is followed by nothing: every action falls back, and the mode
+is None. Two uses of an old plan are on purpose: the heat pump economy takes its
+export (`heat_pump_economy`), and the plan sensor's attributes still show it.
+
 A missing reading is None here; each device's rule says what it means. An action
 that fails to resolve is None (its sensor unavailable) and does not take the others
 with it; the caller logs `Actions.errors`.
@@ -24,7 +28,7 @@ from typing import Any
 
 from . import ev, heat_pump, manual
 from .battery_action import resolve as battery_action
-from .plan import Plan
+from .plan import Plan, follow
 from .settings import BatterySettings, HeatPumpSettings
 from .tariff import Tariff
 
@@ -62,7 +66,7 @@ class Actions:
     car: dict[str, Any] | None
     heat_pump: dict[str, Any] | None
     heat_pump_economy: dict[str, Any] | None
-    mode: str | None  # None: the plan does not cover now
+    mode: str | None  # None: no fresh plan covering now
     errors: Mapping[str, Exception] = dataclasses.field(default_factory=dict)
 
 
@@ -124,7 +128,9 @@ def resolve(situation: Situation) -> Actions:
             return None
 
     def mode() -> str | None:
-        return plan.value_at(now, plan.modes) if plan is not None else None
+        # The same rule as each device's: no mode from a stale plan
+        run, _ = follow(plan, now, lambda p: p.modes)
+        return run.value if run is not None else None
 
     economy = part("heat_pump_economy", lambda: heat_pump_economy(situation))
     return Actions(

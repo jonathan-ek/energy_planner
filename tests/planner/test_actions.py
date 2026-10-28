@@ -182,6 +182,8 @@ def test_every_device_falls_back_together_from_a_stale_plan():
     for action in (resolved.battery, resolved.car, resolved.heat_pump):
         assert (action["source"], action["reason"]) == ("fallback", "plan is old")
     assert resolved.battery["state"] == "discharge"
+    # The plan sensor shows no mode
+    assert resolved.mode is None
     # The car charges as without the planner, and its need is not published
     assert (resolved.car["state"], resolved.car["need_kwh"]) == ("charge", None)
 

@@ -195,7 +195,7 @@ class EnergyPlannerPlanSensor(SensorEntity):
 
     @property
     def native_value(self):
-        """Return the planned mode for the current quarter, None if not covered."""
+        """Return the planned mode now, None if the plan is stale or not covering."""
         actions = actions_now(self._hass)
         return actions.mode if actions is not None else None
 
