@@ -1,0 +1,30 @@
+# Reload the Nord Pool integration when tomorrow's prices are late (copied from the
+# owner's HA on 2026-10-09). At 15, 17, 19 and 21, if tomorrow_valid is still false,
+# the config entry is reloaded. When tomorrow_valid turns true the integration
+# replans by itself. Replace the sensor with the local Nord Pool sensor.
+#
+# The owner's Nord Pool settings: region SE3, currency SEK, price type kWh, price in
+# cents (öre), VAT on, additional costs 0, precision 3. The energy planner adds the
+# grid fees itself, so leave additional costs at 0.
+
+- alias: Auto ladda om nordpool
+  description: Reload Nord Pool when tomorrow's prices are late.
+  triggers:
+    - trigger: time
+      at: "15:00:00"
+    - trigger: time
+      at: "17:00:00"
+    - trigger: time
+      at: "19:00:00"
+    - trigger: time
+      at: "21:00:00"
+  conditions:
+    - condition: state
+      entity_id: sensor.nordpool_kwh_se3_sek_3_10_025
+      attribute: tomorrow_valid
+      state: false
+  actions:
+    - action: homeassistant.reload_config_entry
+      target:
+        entity_id: sensor.nordpool_kwh_se3_sek_3_10_025
+  mode: single

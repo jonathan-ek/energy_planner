@@ -1,0 +1,2365 @@
+# The owner's "Energi" dashboard (copied from HA on 2026-10-09, .storage/lovelace.dashboard_energi).
+# Views: Home (plan, forecast and battery charts, slots, the Solis inverter), Settings
+# (the planner's number/select/time entities, the add slot form) and Historik.
+# Use: Settings > Dashboards > Add dashboard > open it > Edit > Raw configuration editor,
+# paste this file. Replace the solis_s6_* entities with the local inverter's.
+# HACS frontend cards needed: apexcharts-card, lovelace-multiple-entity-row,
+# sunsynk-power-flow-card. The add slot form needs energy_planner_extras.yaml.
+views:
+- title: Home
+  sections:
+  - type: grid
+    cards:
+    - type: custom:sunsynk-power-flow-card
+      cardstyle: compact
+      show_solar: true
+      battery:
+        show_daily: true
+        colour: pink
+        animation_speed: 6
+        max_power: 6000
+        auto_scale: false
+        show_absolute: false
+        show_remaining_energy: false
+        energy: 25600
+        shutdown_soc: 15
+      solar:
+        mppts: 3
+        show_daily: true
+        colour: '#F4C430'
+        animation_speed: 9
+        max_power: 16000
+        pv1_name: Fram
+        pv2_name: Bak
+        pv3_name: Garaget
+        auto_scale: false
+        pv3_max_power: 5000
+        pv1_max_power: 6000
+        pv2_max_power: 7000
+      load:
+        show_aux: false
+        show_daily: true
+        animation_speed: 8
+        max_power: 6000
+        additional_loads: 0
+        load2_icon: ''
+        load1_icon: ''
+      grid:
+        show_daily_buy: true
+        no_grid_colour: red
+        animation_speed: 8
+        max_power: 6000
+        invert_grid: true
+        show_daily_sell: true
+      entities:
+        dc_transformer_temp_90: sensor.solis_s6_solis_temperature
+        day_battery_charge_70: sensor.solis_s6_solis_today_battery_charge_energy
+        day_battery_discharge_71: sensor.solis_s6_solis_today_battery_discharge_energy
+        day_load_energy_84: sensor.solis_s6_solis_today_energy_consumption
+        day_pv_energy_108: sensor.solis_s6_solis_pv_today_energy_generation
+        inverter_voltage_154: sensor.solis_s6_solis_a_phase_voltage
+        load_frequency_192: sensor.solis_s6_solis_grid_frequency
+        inverter_current_164: sensor.solis_s6_solis_a_phase_current
+        inverter_power_175: sensor.solis_s6_solis_backup_load_power
+        grid_power_169: sensor.solis_s6_solis_ac_grid_port_power
+        battery_voltage_183: sensor.solis_s6_solis_battery_voltage
+        battery_soc_184: sensor.solis_s6_solis_battery_soc
+        battery_power_190: sensor.solis_s6_solis_battery_power
+        battery_current_191: sensor.solis_s6_solis_battery_current
+        essential_power: sensor.solis_s6_solis_household_load_power
+        grid_ct_power_172: sensor.solis_s6_solis_meter_total_active_power
+        pv1_power_186: sensor.solis_s6_solis_pv_power_1
+        pv2_power_187: sensor.solis_s6_solis_pv_power_2
+        pv_total: sensor.solis_s6_solis_total_pv_power
+        pv2_voltage_111: sensor.solis_s6_solis_pv_voltage_2
+        grid_voltage: sensor.solis_s6_solis_a_phase_voltage
+        battery_current_direction: sensor.solis_s6_solis_battery_current_direction
+        remaining_solar: sensor.solcast_pv_forecast_forecast_remaining_today
+        pv3_power_188: sensor.solis_s6_solis_pv_power_3
+        pv4_power_189: sensor.solis_s6_solis_pv_power_4
+        pv1_voltage_109: sensor.solis_s6_solis_pv_voltage_1
+        pv1_current_110: sensor.solis_s6_solis_pv_current_1
+        pv2_current_112: sensor.solis_s6_solis_pv_current_2
+        pv3_voltage_113: sensor.solis_s6_solis_pv_voltage_3
+        pv3_current_114: sensor.solis_s6_solis_pv_current_3
+        inverter_status_59: sensor.solis_s6_solis_status
+        day_grid_import_76: sensor.daily_energy_bought
+        day_grid_export_77: sensor.daily_energy_sold
+      view_layout:
+        grid-area: flow
+      large_font: true
+      panel_mode: true
+      card_height: 415px
+      inverter:
+        model: solis
+        modern: false
+        colour: '#959595'
+        autarky: 'no'
+        three_phase: false
+        auto_scale: false
+      grid_options:
+        columns: 15
+        rows: 7
+    - type: history-graph
+      entities:
+      - entity: sensor.solis_s6_solis_pv_today_energy_generation
+      grid_options:
+        columns: 15
+        rows: 6
+    - type: markdown
+      content: |-
+        Inverter time: {{ states('sensor.solis_s6_solis_clock_hours') }}:{{ states('sensor.solis_s6_solis_clock_minutes') }}:{{ states('sensor.solis_s6_solis_clock_seconds') }}
+        Last update: {{ strptime(states('sensor.solis_s6_eh3p_last_clock_adjustment'), '%Y-%m-%dT%H:%M:%S%z').strftime('%H:%M:%S') }}
+      grid_options:
+        columns: 6
+        rows: auto
+    column_span: 4
+  - type: grid
+    cards:
+    - type: custom:apexcharts-card
+      graph_span: 48h
+      header:
+        title: Elpriser idag och imorgon (Öre/kWh)
+        show: true
+        show_states: true
+      apex_config:
+        tooltip:
+          fixed:
+            enabled: true
+            position: topLeft
+            offsetX: 60
+            offsetY: 20
+        chart:
+          zoom:
+            enabled: true
+            type: x
+            autoScaleYaxis: true
+            allowMouseWheelZoom: false
+          toolbar:
+            show: true
+            autoSelected: none
+            tools:
+              download: false
+              selection: false
+              zoom: true
+              zoomin: false
+              zoomout: false
+              pan: false
+              reset: true
+      span:
+        start: day
+      now:
+        show: true
+        label: Now
+      series:
+      - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+        type: column
+        name: Pris
+        float_precision: 2
+        show:
+          in_header: raw
+          name_in_header: false
+        data_generator: |
+          return [...(entity.attributes.raw_today || []), ...(entity.attributes.raw_tomorrow || [])]
+            .filter((p) => p && p.value !== null)
+            .map((p) => [new Date(p.start).getTime(), p.value]);
+      - entity: sensor.energy_planner_battery_plan
+        type: column
+        name: Uppskattat
+        color: '#9e9e9e'
+        opacity: 0.6
+        float_precision: 2
+        show:
+          in_header: false
+          legend_value: false
+        data_generator: |
+          const a = entity.attributes;
+          return (a.starts || [])
+            .map((s, i) => [new Date(s).getTime(), a.estimated && a.estimated[i] ? a.prices[i] : null])
+            .filter((p) => p[1] !== null);
+      section_mode: true
+      grid_options:
+        columns: full
+        rows: 6
+    column_span: 3
+  - type: grid
+    cards:
+    - type: custom:apexcharts-card
+      header:
+        title: Batteriplan
+        show: true
+      graph_span: 48h
+      span:
+        start: day
+      now:
+        show: true
+        label: Nu
+      apex_config:
+        legend:
+          show: true
+        tooltip:
+          shared: true
+        chart:
+          zoom:
+            enabled: true
+            type: x
+            autoScaleYaxis: true
+            allowMouseWheelZoom: false
+          toolbar:
+            show: true
+            autoSelected: none
+            tools:
+              download: false
+              selection: false
+              zoom: true
+              zoomin: false
+              zoomout: false
+              pan: false
+              reset: true
+      yaxis:
+      - id: kw
+        decimals: 1
+        apex_config:
+          title:
+            text: kW
+      - id: soc
+        opposite: true
+        min: 0
+        max: 100
+        decimals: 0
+        apex_config:
+          title:
+            text: SOC %
+      series:
+      - entity: sensor.energy_planner_battery_plan
+        name: Import, laddning
+        type: column
+        yaxis_id: kw
+        color: '#43a047'
+        opacity: 0.7
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const a = entity.attributes; const s = a.starts || [];
+          const q = (t) => new Date(t).getTime();
+          return s.map((t, i) => [q(t), a.modes[i] === 'charge' ? a.grid_import[i] : 0]);
+        extend_to: false
+      - entity: sensor.energy_planner_battery_plan
+        name: Import, övrigt
+        type: column
+        yaxis_id: kw
+        color: '#1e88e5'
+        opacity: 0.7
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const a = entity.attributes; const s = a.starts || [];
+          const q = (t) => new Date(t).getTime();
+          return s.map((t, i) => [q(t), a.modes[i] === 'charge' ? 0 : a.grid_import[i]]);
+        extend_to: false
+      - entity: sensor.energy_planner_battery_plan
+        name: Export (sälj)
+        type: column
+        yaxis_id: kw
+        color: '#f9a825'
+        opacity: 0.7
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const a = entity.attributes; const s = a.starts || [];
+          const q = (t) => new Date(t).getTime();
+          return s.map((t, i) => [q(t), -a.grid_export[i]]);
+        extend_to: false
+      - entity: sensor.energy_planner_battery_plan
+        name: Importmål
+        type: line
+        curve: stepline
+        yaxis_id: kw
+        color: '#e53935'
+        stroke_width: 1
+        stroke_dash: 4
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const a = entity.attributes; const s = a.starts || [];
+          const q = (t) => new Date(t).getTime();
+          return s.map((t, i) => [q(t), a.targets[i]]);
+        extend_to: false
+      - entity: sensor.aktiv_effekt_uttag_momentan_trefaseffekt
+        name: Import, verklig
+        type: line
+        yaxis_id: kw
+        color: '#0d47a1'
+        stroke_width: 2
+        unit: kW
+        float_precision: 2
+        group_by:
+          func: avg
+          duration: 15min
+        extend_to: now
+      - entity: sensor.energy_planner_battery_plan
+        name: SOC, plan
+        type: line
+        yaxis_id: soc
+        color: '#8e24aa'
+        stroke_width: 2
+        stroke_dash: 4
+        unit: '%'
+        float_precision: 0
+        data_generator: |
+          const a = entity.attributes; const s = a.starts || [];
+          const q = (t) => new Date(t).getTime();
+          return s.map((t, i) => [q(t) + 15 * 60000, a.soc[i]]);
+        extend_to: false
+      - entity: sensor.solis_s6_solis_battery_soc
+        name: SOC, verklig
+        type: line
+        yaxis_id: soc
+        color: '#6a1b9a'
+        stroke_width: 2
+        unit: '%'
+        float_precision: 0
+        extend_to: now
+      grid_options:
+        columns: full
+        rows: full
+    column_span: 3
+  - type: grid
+    cards:
+    - type: custom:apexcharts-card
+      header:
+        title: Prognos idag och imorgon (kW, snitt per kvart)
+        show: true
+      graph_span: 48h
+      span:
+        start: day
+      apex_config:
+        legend:
+          show: true
+        tooltip:
+          shared: true
+        chart:
+          zoom:
+            enabled: true
+            type: x
+            autoScaleYaxis: true
+            allowMouseWheelZoom: false
+          toolbar:
+            show: true
+            autoSelected: none
+            tools:
+              download: false
+              selection: false
+              zoom: true
+              zoomin: false
+              zoomout: false
+              pan: false
+              reset: true
+      yaxis:
+      - id: kw
+        min: 0
+        decimals: 1
+        apex_config:
+          title:
+            text: kW
+      - id: price
+        opposite: true
+        decimals: 0
+        apex_config:
+          title:
+            text: öre/kWh
+      series:
+      - entity: sensor.energy_planner_pv_forecast
+        name: Sol, prognos
+        type: area
+        curve: stepline
+        yaxis_id: kw
+        color: '#f9a825'
+        opacity: 0.3
+        stroke_width: 1
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const s = entity.attributes.starts || [];
+          const v = entity.attributes.pv || [];
+          return s.map((t, i) => [new Date(t).getTime(), v[i] === null || v[i] === undefined ? null : v[i] * 4]);
+      - entity: sensor.energy_planner_load_forecast
+        name: Förbrukning, prognos
+        type: line
+        curve: stepline
+        yaxis_id: kw
+        color: '#1e88e5'
+        stroke_width: 2
+        stroke_dash: 4
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const s = entity.attributes.starts || [];
+          const v = entity.attributes.load || [];
+          return s.map((t, i) => [new Date(t).getTime(), v[i] === null || v[i] === undefined ? null : v[i] * 4]);
+      - entity: sensor.energy_planner_load_forecast
+        name: Planerat
+        type: column
+        yaxis_id: kw
+        color: '#43a047'
+        opacity: 0.6
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const s = entity.attributes.starts || [];
+          const v = entity.attributes.planned || [];
+          return s.map((t, i) => [new Date(t).getTime(), v[i] === null || v[i] === undefined ? null : v[i] * 4]);
+      - entity: sensor.energy_planner_load_forecast
+        name: Reserv
+        type: column
+        yaxis_id: kw
+        color: '#8e24aa'
+        opacity: 0.5
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const s = entity.attributes.starts || [];
+          const v = entity.attributes.reserve || [];
+          return s.map((t, i) => [new Date(t).getTime(), v[i] === null || v[i] === undefined ? null : v[i] * 4]);
+      - entity: sensor.solis_s6_solis_total_pv_power
+        name: Sol, verklig
+        type: line
+        yaxis_id: kw
+        color: '#e65100'
+        stroke_width: 2
+        unit: kW
+        float_precision: 2
+        transform: 'return x > 25000 ? null : x / 1000;'
+        group_by:
+          func: avg
+          duration: 15min
+      - entity: sensor.solis_s6_solis_household_load_power
+        name: Förbrukning, verklig
+        type: line
+        yaxis_id: kw
+        color: '#0d47a1'
+        stroke_width: 2
+        unit: kW
+        float_precision: 2
+        transform: return x / 1000;
+        group_by:
+          func: avg
+          duration: 15min
+      - entity: sensor.nordpool_kwh_se3_sek_3_10_025
+        name: Pris
+        type: line
+        curve: stepline
+        yaxis_id: price
+        color: '#9e9e9e'
+        stroke_width: 1
+        float_precision: 0
+        data_generator: |
+          return [...(entity.attributes.raw_today || []), ...(entity.attributes.raw_tomorrow || [])]
+            .filter((p) => p && p.value !== null)
+            .map((p) => [new Date(p.start).getTime(), p.value]);
+      - entity: sensor.energy_planner_battery_plan
+        name: Värmepump, plan
+        type: line
+        curve: stepline
+        yaxis_id: kw
+        color: '#e53935'
+        stroke_width: 2
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const s = entity.attributes.starts || [];
+          const v = entity.attributes.heat_pump || [];
+          const kw = Number(hass.states['number.energy_planner_heat_pump_power']?.state || 300) / 1000;
+          return s.map((t, i) => [new Date(t).getTime(), v[i] ? kw : 0]);
+      grid_options:
+        columns: full
+        rows: full
+      now:
+        show: true
+        label: Nu
+    column_span: 3
+  - type: grid
+    cards:
+    - type: markdown
+      content: |
+        {%- set a = state_attr('sensor.energy_planner_battery_plan', 'starts') and states.sensor.energy_planner_battery_plan.attributes -%}
+        {%- if a -%}
+        {%- set labels = {'self_use': 'Egenanvändning', 'hold': 'Håll', 'sell_excess': 'Sälj överskott', 'discard_excess': 'Kasta överskott', 'charge': '**Ladda**', 'sell': '**Sälj**'} -%}
+        {%- set days = ['mån', 'tis', 'ons', 'tor', 'fre', 'lör', 'sön'] -%}
+        {%- set targeted = ['hold', 'charge'] -%}
+        | Tid | Läge | SOC % | Import kWh | Export kWh | Mål kW | VP |
+        |:--|:--|--:|--:|--:|--:|:--|
+        {% set ns = namespace(first=0, imp=0, exp=0) -%}
+        {%- for i in range(a.starts | length) -%}
+        {%- set ns.imp = ns.imp + a.grid_import[i] / 4 -%}
+        {%- set ns.exp = ns.exp + a.grid_export[i] / 4 -%}
+        {%- set mode = a.modes[i] -%}
+        {%- if loop.last or a.modes[i + 1] != mode or (mode in targeted and a.targets[i + 1] != a.targets[i]) or (a.heat_pump and a.heat_pump[i + 1] != a.heat_pump[i]) -%}
+        {%- set start = as_datetime(a.starts[ns.first]) | as_local -%}
+        {%- set end = (as_datetime(a.starts[i]) | as_local) + timedelta(minutes=15) -%}
+        {%- set before = a.soc[ns.first - 1] if ns.first > 0 else states('sensor.solis_s6_solis_battery_soc') | float(0) -%}
+        | {{ days[start.weekday()] }} {{ start.strftime('%H:%M') }}–{{ end.strftime('%H:%M') }} | {{ labels.get(mode, mode) }} | {{ before | round(0) | int }} → {{ a.soc[i] | round(0) | int }} | {{ ns.imp | round(1) if ns.imp >= 0.05 else '' }} | {{ ns.exp | round(1) if ns.exp >= 0.05 else '' }} | {{ a.targets[i] if mode in targeted and a.targets[i] is not none else '' }} | {{ 'på' if a.heat_pump and a.heat_pump[i] else '' }} |
+        {% set ns.first = i + 1 -%}
+        {%- set ns.imp = 0 -%}
+        {%- set ns.exp = 0 -%}
+        {%- endif -%}
+        {%- endfor %}
+
+        Beräknad {{ (as_datetime(a.updated) | as_local).strftime('%H:%M') }}. Energi {{ a.energy_cost }} kr, slitage {{ a.wear_cost }} kr, ökad effektavgift {{ a.power_cost }} kr.
+        {%- else -%}
+        Ingen batteriplan ännu.
+        {%- endif -%}
+      grid_options:
+        columns: 24
+        rows: auto
+    column_span: 3
+  - type: grid
+    cards:
+    - type: vertical-stack
+      title: Laddningsschema
+      cards:
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_1_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_1_active
+            type: custom:multiple-entity-row
+            name: Slot 1
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_1_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_1_state
+            entities:
+            - entity: number.energy_planner_slot_1_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_1_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_2_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_2_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_2_active
+            type: custom:multiple-entity-row
+            name: Slot 2
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_2_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_2_state
+            entities:
+            - entity: number.energy_planner_slot_2_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_2_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_3_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_3_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_3_active
+            type: custom:multiple-entity-row
+            name: Slot 3
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_3_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_3_state
+            entities:
+            - entity: number.energy_planner_slot_3_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_3_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_4_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_4_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_4_active
+            type: custom:multiple-entity-row
+            name: Slot 4
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_4_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_4_state
+            entities:
+            - entity: number.energy_planner_slot_4_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_4_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_5_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_5_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_5_active
+            type: custom:multiple-entity-row
+            name: Slot 5
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_5_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_5_state
+            entities:
+            - entity: number.energy_planner_slot_5_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_5_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_6_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_6_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_6_active
+            type: custom:multiple-entity-row
+            name: Slot 6
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_6_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_6_state
+            entities:
+            - entity: number.energy_planner_slot_6_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_6_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_7_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_7_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_7_active
+            type: custom:multiple-entity-row
+            name: Slot 7
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_7_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_7_state
+            entities:
+            - entity: number.energy_planner_slot_7_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_7_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_8_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_8_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_8_active
+            type: custom:multiple-entity-row
+            name: Slot 8
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_8_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_8_state
+            entities:
+            - entity: number.energy_planner_slot_8_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_8_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_9_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_9_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_9_active
+            type: custom:multiple-entity-row
+            name: Slot 9
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_9_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_9_state
+            entities:
+            - entity: number.energy_planner_slot_9_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_9_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_10_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_10_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_10_active
+            type: custom:multiple-entity-row
+            name: Slot 10
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_10_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_10_state
+            entities:
+            - entity: number.energy_planner_slot_10_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_10_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_11_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_11_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_11_active
+            type: custom:multiple-entity-row
+            name: Slot 11
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_11_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_11_state
+            entities:
+            - entity: number.energy_planner_slot_11_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_11_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_12_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_12_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_12_active
+            type: custom:multiple-entity-row
+            name: Slot 12
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_12_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_12_state
+            entities:
+            - entity: number.energy_planner_slot_12_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_12_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_13_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_13_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_13_active
+            type: custom:multiple-entity-row
+            name: Slot 13
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_13_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_13_state
+            entities:
+            - entity: number.energy_planner_slot_13_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_13_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_14_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_14_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_14_active
+            type: custom:multiple-entity-row
+            name: Slot 14
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_14_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_14_state
+            entities:
+            - entity: number.energy_planner_slot_14_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_14_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_15_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_15_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_15_active
+            type: custom:multiple-entity-row
+            name: Slot 15
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_15_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_15_state
+            entities:
+            - entity: number.energy_planner_slot_15_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_15_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_16_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_16_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_16_active
+            type: custom:multiple-entity-row
+            name: Slot 16
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_16_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_16_state
+            entities:
+            - entity: number.energy_planner_slot_16_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_16_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_17_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_17_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_17_active
+            type: custom:multiple-entity-row
+            name: Slot 17
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_17_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_17_state
+            entities:
+            - entity: number.energy_planner_slot_17_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_17_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_18_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_18_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_18_active
+            type: custom:multiple-entity-row
+            name: Slot 18
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_18_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_18_state
+            entities:
+            - entity: number.energy_planner_slot_18_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_18_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_19_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_19_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_19_active
+            type: custom:multiple-entity-row
+            name: Slot 19
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_19_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_19_state
+            entities:
+            - entity: number.energy_planner_slot_19_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_19_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_20_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_20_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_20_active
+            type: custom:multiple-entity-row
+            name: Slot 20
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_20_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_20_state
+            entities:
+            - entity: number.energy_planner_slot_20_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_20_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_21_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_21_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_21_active
+            type: custom:multiple-entity-row
+            name: Slot 21
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_21_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_21_state
+            entities:
+            - entity: number.energy_planner_slot_21_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_21_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_22_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_22_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_22_active
+            type: custom:multiple-entity-row
+            name: Slot 22
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_22_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_22_state
+            entities:
+            - entity: number.energy_planner_slot_22_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_22_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_23_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_23_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_23_active
+            type: custom:multiple-entity-row
+            name: Slot 23
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_23_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_23_state
+            entities:
+            - entity: number.energy_planner_slot_23_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_23_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_24_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_24_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_24_active
+            type: custom:multiple-entity-row
+            name: Slot 24
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_24_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_24_state
+            entities:
+            - entity: number.energy_planner_slot_24_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_24_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_25_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_25_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_25_active
+            type: custom:multiple-entity-row
+            name: Slot 25
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_25_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_25_state
+            entities:
+            - entity: number.energy_planner_slot_25_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_25_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_26_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_26_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_26_active
+            type: custom:multiple-entity-row
+            name: Slot 26
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_26_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_26_state
+            entities:
+            - entity: number.energy_planner_slot_26_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_26_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_27_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_27_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_27_active
+            type: custom:multiple-entity-row
+            name: Slot 27
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_27_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_27_state
+            entities:
+            - entity: number.energy_planner_slot_27_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_27_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_28_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_28_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_28_active
+            type: custom:multiple-entity-row
+            name: Slot 28
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_28_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_28_state
+            entities:
+            - entity: number.energy_planner_slot_28_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_28_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_29_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_29_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_29_active
+            type: custom:multiple-entity-row
+            name: Slot 29
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_29_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_29_state
+            entities:
+            - entity: number.energy_planner_slot_29_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_29_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_30_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_30_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_30_active
+            type: custom:multiple-entity-row
+            name: Slot 30
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_30_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_30_state
+            entities:
+            - entity: number.energy_planner_slot_30_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_30_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_31_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_31_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_31_active
+            type: custom:multiple-entity-row
+            name: Slot 31
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_31_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_31_state
+            entities:
+            - entity: number.energy_planner_slot_31_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_31_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_32_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_32_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_32_active
+            type: custom:multiple-entity-row
+            name: Slot 32
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_32_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_32_state
+            entities:
+            - entity: number.energy_planner_slot_32_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_32_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_33_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_33_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_33_active
+            type: custom:multiple-entity-row
+            name: Slot 33
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_33_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_33_state
+            entities:
+            - entity: number.energy_planner_slot_33_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_33_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_34_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_34_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_34_active
+            type: custom:multiple-entity-row
+            name: Slot 34
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_34_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_34_state
+            entities:
+            - entity: number.energy_planner_slot_34_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_34_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_35_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_35_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_35_active
+            type: custom:multiple-entity-row
+            name: Slot 35
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_35_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_35_state
+            entities:
+            - entity: number.energy_planner_slot_35_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_35_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_36_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_36_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_36_active
+            type: custom:multiple-entity-row
+            name: Slot 36
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_36_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_36_state
+            entities:
+            - entity: number.energy_planner_slot_36_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_36_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_37_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_37_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_37_active
+            type: custom:multiple-entity-row
+            name: Slot 37
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_37_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_37_state
+            entities:
+            - entity: number.energy_planner_slot_37_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_37_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_38_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_38_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_38_active
+            type: custom:multiple-entity-row
+            name: Slot 38
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_38_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_38_state
+            entities:
+            - entity: number.energy_planner_slot_38_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_38_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_39_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_39_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_39_active
+            type: custom:multiple-entity-row
+            name: Slot 39
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_39_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_39_state
+            entities:
+            - entity: number.energy_planner_slot_39_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_39_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_40_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_40_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_40_active
+            type: custom:multiple-entity-row
+            name: Slot 40
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_40_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_40_state
+            entities:
+            - entity: number.energy_planner_slot_40_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_40_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_41_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_41_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_41_active
+            type: custom:multiple-entity-row
+            name: Slot 41
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_41_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_41_state
+            entities:
+            - entity: number.energy_planner_slot_41_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_41_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_42_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_42_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_42_active
+            type: custom:multiple-entity-row
+            name: Slot 42
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_42_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_42_state
+            entities:
+            - entity: number.energy_planner_slot_42_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_42_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_43_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_43_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_43_active
+            type: custom:multiple-entity-row
+            name: Slot 43
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_43_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_43_state
+            entities:
+            - entity: number.energy_planner_slot_43_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_43_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_44_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_44_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_44_active
+            type: custom:multiple-entity-row
+            name: Slot 44
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_44_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_44_state
+            entities:
+            - entity: number.energy_planner_slot_44_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_44_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_45_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_45_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_45_active
+            type: custom:multiple-entity-row
+            name: Slot 45
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_45_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_45_state
+            entities:
+            - entity: number.energy_planner_slot_45_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_45_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_46_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_46_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_46_active
+            type: custom:multiple-entity-row
+            name: Slot 46
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_46_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_46_state
+            entities:
+            - entity: number.energy_planner_slot_46_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_46_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_47_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_47_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_47_active
+            type: custom:multiple-entity-row
+            name: Slot 47
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_47_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_47_state
+            entities:
+            - entity: number.energy_planner_slot_47_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_47_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_48_date_time_start
+              name: To
+      - type: conditional
+        conditions:
+        - condition: state
+          entity: select.energy_planner_slot_48_state
+          state_not: 'off'
+        card:
+          type: entities
+          entities:
+          - entity: switch.energy_planner_slot_48_active
+            type: custom:multiple-entity-row
+            name: Slot 48
+            toggle: true
+            state_color: true
+            icon: mdi:timer
+            secondary_info:
+              entity: select.energy_planner_slot_48_state
+              name: false
+            tap_action:
+              action: more-info
+              entity: select.energy_planner_slot_48_state
+            entities:
+            - entity: number.energy_planner_slot_48_soc
+              name: SOC
+              unit: false
+            - entity: datetime.energy_planner_slot_48_date_time_start
+              name: From
+            - entity: datetime.energy_planner_slot_49_date_time_start
+              name: To
+    - type: entities
+      entities:
+      - entity: input_datetime.energy_planner_extras_start
+        name: Slot start
+      - entity: input_datetime.energy_planner_extras_end
+        name: Slot slut
+      - entity: input_select.energy_planner_extras_state
+        name: State
+      - type: conditional
+        conditions:
+        - condition: or
+          conditions:
+          - entity: input_select.energy_planner_extras_state
+            state: sell
+          - entity: input_select.energy_planner_extras_state
+            state: charge
+        row:
+          entity: input_number.energy_planner_extras_soc
+          name: SOC
+      footer:
+        type: buttons
+        entities:
+        - entity: input_button.energy_planner_extras_add_slot
+          name: Spara
+      title: Manuella Slots
+    column_span: 2
+  - type: grid
+    cards:
+    - type: vertical-stack
+      cards:
+      - type: entities
+        entities:
+        - entity: switch.solis_s6_eh1p_grid_time_of_use_charging_period_1
+          type: custom:multiple-entity-row
+          name: Charge Slot 1
+          toggle: true
+          state_color: true
+          icon: mdi:timer
+          entities:
+          - entity: number.solis_s6_eh1p_grid_time_of_use_charge_battery_current_slot_1
+            name: Charge Current
+          - entity: number.solis_s6_eh1p_grid_time_of_use_charge_cut_off_soc_slot_1
+            name: SOC
+        - entity: time.solis_s6_eh1p_grid_time_of_use_charge_end_slot_1
+          type: custom:multiple-entity-row
+          name: ' '
+          icon: ' '
+          toggle: false
+          state_header: Charge To
+          entities:
+          - entity: time.solis_s6_eh1p_grid_time_of_use_charge_start_slot_1
+            name: Charge From
+        - entity: switch.solis_s6_eh1p_grid_time_of_use_charging_period_2
+          type: custom:multiple-entity-row
+          name: Charge Slot 2
+          toggle: true
+          state_color: true
+          icon: mdi:timer
+          entities:
+          - entity: number.solis_s6_eh1p_grid_time_of_use_charge_battery_current_slot_2
+            name: Charge Current
+          - entity: number.solis_s6_eh1p_grid_time_of_use_charge_cut_off_soc_slot_2
+            name: SOC
+        - entity: time.solis_s6_eh1p_grid_time_of_use_charge_end_slot_2
+          type: custom:multiple-entity-row
+          name: ' '
+          icon: ' '
+          toggle: false
+          state_header: Charge To
+          entities:
+          - entity: time.solis_s6_eh1p_grid_time_of_use_charge_start_slot_2
+            name: Charge From
+        - entity: switch.solis_s6_eh1p_grid_time_of_use_charging_period_6
+          type: custom:multiple-entity-row
+          name: Automatic Slot
+          toggle: true
+          state_color: true
+          icon: mdi:timer
+          entities:
+          - entity: number.solis_s6_eh1p_grid_time_of_use_charge_battery_current_slot_6
+            name: Charge Current
+          - entity: number.solis_s6_eh1p_grid_time_of_use_charge_cut_off_soc_slot_6
+            name: SOC
+        - entity: time.solis_s6_eh1p_grid_time_of_use_charge_end_slot_6
+          type: custom:multiple-entity-row
+          name: ' '
+          icon: ' '
+          toggle: false
+          state_header: Charge To
+          entities:
+          - entity: time.solis_s6_eh1p_grid_time_of_use_charge_start_slot_6
+            name: Charge From
+        state_color: true
+      view_layout:
+        grid-area: a
+    - type: vertical-stack
+      cards:
+      - type: entities
+        entities:
+        - entity: switch.solis_s6_eh1p_grid_time_of_use_discharge_period_1
+          type: custom:multiple-entity-row
+          name: Discharge Slot 1
+          toggle: true
+          state_color: true
+          icon: mdi:timer
+          entities:
+          - entity: number.solis_s6_eh1p_grid_time_of_use_discharge_battery_current_slot_1
+            name: Discharge Current
+          - entity: number.solis_s6_eh1p_grid_time_of_use_discharge_cut_off_soc_slot_1
+            name: SOC
+        - entity: time.solis_s6_eh1p_grid_time_of_use_discharge_end_slot_1
+          type: custom:multiple-entity-row
+          name: ' '
+          icon: ' '
+          toggle: false
+          state_header: Discharge To
+          entities:
+          - entity: time.solis_s6_eh1p_grid_time_of_use_discharge_start_slot_1
+            name: Discharge From
+        - entity: switch.solis_s6_eh1p_grid_time_of_use_discharge_period_2
+          type: custom:multiple-entity-row
+          name: Discharge Slot 2
+          toggle: true
+          state_color: true
+          icon: mdi:timer
+          entities:
+          - entity: number.solis_s6_eh1p_grid_time_of_use_discharge_battery_current_slot_2
+            name: Discharge Current
+          - entity: number.solis_s6_eh1p_grid_time_of_use_discharge_cut_off_soc_slot_2
+            name: SOC
+        - entity: time.solis_s6_eh1p_grid_time_of_use_discharge_end_slot_2
+          type: custom:multiple-entity-row
+          name: ' '
+          icon: ' '
+          toggle: false
+          state_header: Discharge To
+          entities:
+          - entity: time.solis_s6_eh1p_grid_time_of_use_discharge_start_slot_2
+            name: Discharge From
+        - entity: switch.solis_s6_eh1p_grid_time_of_use_discharge_period_6
+          type: custom:multiple-entity-row
+          name: Automatic Slot
+          toggle: true
+          state_color: true
+          icon: mdi:timer
+          entities:
+          - entity: number.solis_s6_eh1p_grid_time_of_use_discharge_battery_current_slot_6
+            name: Discharge Current
+          - entity: number.solis_s6_eh1p_grid_time_of_use_discharge_cut_off_soc_slot_6
+            name: SOC
+        - entity: time.solis_s6_eh1p_grid_time_of_use_discharge_end_slot_6
+          type: custom:multiple-entity-row
+          name: ' '
+          icon: ' '
+          toggle: false
+          state_header: Discharge To
+          entities:
+          - entity: time.solis_s6_eh1p_grid_time_of_use_discharge_start_slot_6
+            name: Discharge From
+        state_color: true
+      view_layout: null
+    - type: entities
+      entities:
+      - switch.solis_s6_eh1p_grid_feed_in_power_limit_switch
+  cards: []
+  type: sections
+  max_columns: 3
+- type: sections
+  max_columns: 4
+  title: Settings
+  path: settings
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Ny sektion
+    - type: entities
+      entities:
+      - entity: number.solis_s6_eh1p_max_charge_soc
+      - entity: number.solis_s6_eh1p_overdischarge_soc
+      - entity: number.solis_s6_eh1p_force_charge_soc
+      title: Växelriktarinställningar
+    - type: entities
+      title: Automationer
+      entities:
+      - entity: automation.update_battery_action
+        name: Följ batteriplanen
+      - entity: automation.follow_heat_pump_action
+        name: Följ värmepumpsplanen
+      - entity: automation.peak
+        name: Peak +
+      - entity: automation.peak_1
+        name: Peak −
+    - type: entities
+      title: Värmepump
+      entities:
+      - entity: sensor.energy_planner_heat_pump_action
+        name: Värmepump nu
+      - type: attribute
+        entity: sensor.energy_planner_heat_pump_action
+        attribute: until
+        name: '  till'
+      - entity: sensor.energy_planner_heat_pump_saving
+        name: Besparing per kWh värme
+      - entity: sensor.energy_planner_heat_pump_cop
+        name: COP nu
+      - entity: sensor.energy_planner_district_heating_price
+        name: Fjärrvärmepris
+      - entity: number.energy_planner_heat_pump_power
+        name: Effekt när den värmer
+      - entity: number.energy_planner_heat_pump_margin
+        name: Marginal
+      - entity: number.energy_planner_heat_pump_heating_limit
+        name: Värmegräns ute
+  - type: grid
+    cards:
+    - type: heading
+      heading: Ny sektion
+    - type: vertical-stack
+      cards:
+      - type: entities
+        entities:
+        - entity: number.energy_planner_max_charge_current
+          name: Laddningsström
+        - entity: number.energy_planner_max_discharge_current
+          name: Urladdningsström
+        - entity: number.energy_planner_battery_capacity
+          name: Batteri kapacitet
+        - entity: number.energy_planner_battery_shutdown_soc
+          name: Batteri min SOC
+        - entity: number.energy_planner_battery_max_soc
+          name: Batteri max SOC
+        - entity: select.energy_planner_planner_state
+        title: Inställningar
+      - type: entities
+        entities:
+        - entity: number.energy_planner_basic_nr_of_charge_hours
+          name: Laddningstimmar
+        - entity: number.energy_planner_basic_nr_of_discharge_hours
+          name: Urladdningstimmar
+        - entity: time.energy_planner_earliest_charge_time
+          name: Första tillåtna laddningstid
+        - entity: time.energy_planner_earliest_discharge_time
+          name: Första tillåtna urladdningstid
+        title: Basic inställningar
+      - type: entities
+        entities:
+        - entity: number.energy_planner_cheapest_hours_nr_of_charge_hours
+          name: Laddningstimmar
+        title: Billigaste timmar inställningar
+      - type: entities
+        entities:
+        - entity: number.energy_planner_price_peak_nr_of_charge_hours
+        - entity: number.energy_planner_price_peak_nr_of_discharge_hours
+        - entity: number.energy_planner_price_peak_efficiency_factor
+        - entity: select.energy_planner_price_peak_planner_cheap_state
+        - entity: select.energy_planner_price_peak_planner_expensive_state
+        - entity: select.energy_planner_price_peak_planner_inbetween_state
+        title: Price peak inställningar
+      - type: entities
+        entities:
+        - entity: input_button.energy_planner_extras_run
+        - entity: input_button.energy_planner_extras_clear_manual_slots
+        title: Actions
+  - type: grid
+    cards:
+    - type: heading
+      heading: Ny sektion
+    - type: entities
+      title: Prognos
+      entities:
+      - entity: sensor.energy_planner_load_forecast
+        name: Förbrukning imorgon
+      - type: attribute
+        entity: sensor.energy_planner_load_forecast
+        attribute: base_tomorrow
+        name: '  varav normalförbrukning'
+        suffix: kWh
+      - type: attribute
+        entity: sensor.energy_planner_load_forecast
+        attribute: planned_tomorrow
+        name: '  varav planerat (kalender)'
+        suffix: kWh
+      - entity: sensor.energy_planner_pv_forecast
+        name: Sol imorgon
+      - type: attribute
+        entity: sensor.energy_planner_load_forecast
+        attribute: load_today_remaining
+        name: Förbrukning resten av idag
+        suffix: kWh
+      - type: attribute
+        entity: sensor.energy_planner_pv_forecast
+        attribute: pv_today_remaining
+        name: Sol resten av idag
+        suffix: kWh
+      - type: attribute
+        entity: sensor.energy_planner_pv_forecast
+        attribute: pv_tomorrow_uncalibrated
+        name: Sol imorgon, okorrigerad
+        suffix: kWh
+      - type: attribute
+        entity: sensor.energy_planner_pv_forecast
+        attribute: pv_calibration
+        name: Solkorrigering (senaste 14 dagar)
+      - type: attribute
+        entity: sensor.energy_planner_pv_forecast
+        attribute: pv_source
+        name: Solprognos från
+      - type: section
+        label: Igår
+      - type: attribute
+        entity: sensor.energy_planner_load_forecast
+        attribute: yesterday_load_kwh
+        name: Förbrukning, prognos
+        suffix: kWh
+      - type: attribute
+        entity: sensor.energy_planner_load_forecast
+        attribute: yesterday_load_actual_kwh
+        name: Förbrukning, utfall (exkl. elbil)
+        suffix: kWh
+      - type: attribute
+        entity: sensor.energy_planner_pv_forecast
+        attribute: yesterday_pv_kwh
+        name: Sol, prognos dagen före
+        suffix: kWh
+      - type: attribute
+        entity: sensor.energy_planner_pv_forecast
+        attribute: yesterday_pv_actual_kwh
+        name: Sol, utfall
+        suffix: kWh
+      - type: section
+        label: Batteriplan (test)
+      - entity: sensor.energy_planner_battery_plan
+        name: Läge nu
+      - entity: sensor.energy_planner_battery_action
+        name: Åtgärd nu
+      - type: attribute
+        entity: sensor.energy_planner_battery_action
+        attribute: source
+        name: Åtgärd från
+      - type: attribute
+        entity: sensor.energy_planner_battery_plan
+        attribute: target_kw
+        name: Importmål nu
+        suffix: kW
+      - type: attribute
+        entity: sensor.energy_planner_battery_plan
+        attribute: energy_cost
+        name: Energikostnad, planen
+        suffix: kr
+      - type: attribute
+        entity: sensor.energy_planner_battery_plan
+        attribute: power_cost
+        name: Ökad effektavgift
+        suffix: kr
+      - type: attribute
+        entity: sensor.energy_planner_battery_plan
+        attribute: end_value
+        name: Värde kvar i batteriet
+        suffix: kr
+      - type: attribute
+        entity: sensor.energy_planner_battery_plan
+        attribute: wear_cost
+        name: Batterislitage, planen
+        suffix: kr
+      - type: attribute
+        entity: sensor.energy_planner_battery_plan
+        attribute: updated
+        name: Uppdaterad
+        format: relative
+      - type: button
+        name: Uppdatera batteriplan
+        icon: mdi:battery-sync
+        action_name: Kör
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.energy_planner_update_battery_plan
+      - type: section
+        label: Inställningar
+      - entity: number.energy_planner_grid_import_limit
+        name: Importgräns
+      - entity: number.energy_planner_grid_import_limit_start
+        name: Importgräns från
+      - entity: number.energy_planner_grid_import_limit_end
+        name: Importgräns till
+      - entity: number.energy_planner_battery_wear_cost
+        name: Batterislitage
+      - entity: number.energy_planner_forecast_weekend_reserve
+        name: Helgreserv
+      - entity: number.energy_planner_forecast_reserve_start
+        name: Helgreserv från
+      - entity: number.energy_planner_forecast_reserve_end
+        name: Helgreserv till
+      - entity: calendar.energiplan
+        name: Energiplan (kalender)
+      - type: attribute
+        entity: sensor.energy_planner_load_forecast
+        attribute: updated
+        name: Uppdaterad
+        format: relative
+      - type: button
+        name: Uppdatera prognos
+        icon: mdi:refresh
+        action_name: Kör
+        tap_action:
+          action: perform-action
+          perform_action: energy_planner.update_forecast
+- type: sections
+  max_columns: 4
+  title: Historik
+  path: historik
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Ny sektion
+    - type: history-graph
+      entities:
+      - entity: sensor.solis_s6_solis_pv_today_energy_generation
+      hours_to_show: 120
+      grid_options:
+        columns: 12
+        rows: 4
+    - type: custom:apexcharts-card
+      header:
+        title: 'Igår: prognos mot utfall (kW, snitt per kvart)'
+        show: true
+      graph_span: 24h
+      span:
+        start: day
+        offset: -1d
+      apex_config:
+        legend:
+          show: true
+        tooltip:
+          shared: true
+      yaxis:
+      - id: kw
+        min: 0
+        decimals: 1
+        apex_config:
+          title:
+            text: kW
+      series:
+      - entity: sensor.energy_planner_pv_forecast
+        name: Sol, prognos dagen före
+        type: area
+        curve: stepline
+        yaxis_id: kw
+        color: '#f9a825'
+        opacity: 0.3
+        stroke_width: 1
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const s = entity.attributes.yesterday_starts || [];
+          const v = entity.attributes.yesterday_pv || [];
+          return s.map((t, i) => [new Date(t).getTime(), v[i] === null || v[i] === undefined ? null : v[i] * 4]);
+      - entity: sensor.solis_s6_solis_total_pv_power
+        name: Sol, verklig
+        type: line
+        yaxis_id: kw
+        color: '#e65100'
+        stroke_width: 2
+        unit: kW
+        float_precision: 2
+        transform: 'return x > 25000 ? null : x / 1000;'
+        group_by:
+          func: avg
+          duration: 15min
+      - entity: sensor.energy_planner_load_forecast
+        name: Förbrukning, prognos
+        type: line
+        curve: stepline
+        yaxis_id: kw
+        color: '#1e88e5'
+        stroke_width: 2
+        stroke_dash: 4
+        unit: kW
+        float_precision: 2
+        data_generator: |
+          const s = entity.attributes.yesterday_starts || [];
+          const v = entity.attributes.yesterday_load || [];
+          return s.map((t, i) => [new Date(t).getTime(), v[i] === null || v[i] === undefined ? null : v[i] * 4]);
+      - entity: sensor.solis_s6_solis_household_load_power
+        name: Förbrukning, verklig
+        type: line
+        yaxis_id: kw
+        color: '#0d47a1'
+        stroke_width: 2
+        unit: kW
+        float_precision: 2
+        transform: return x / 1000;
+        group_by:
+          func: avg
+          duration: 15min
+      grid_options:
+        columns: 18
+        rows: 8

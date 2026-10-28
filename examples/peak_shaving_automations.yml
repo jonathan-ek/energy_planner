@@ -1,0 +1,79 @@
+# The owner's older peak shaving automations for a Solis S6 (solis_modbus), copied
+# from HA on 2026-10-09. They are the "Peak +/-" the battery plan's `hold` mode is
+# modelled on. With follow_battery_action.py the inverter's own peak shaving
+# (peak_max_usable_grid_power) does this instead, so these are only a fallback.
+#
+# Time-of-use discharge slot 1 must be active (switch ..._discharge_period_1) for
+# the whole day with a low discharge current. While the meter shows import above
+# 1 kW (negative power on this meter) the discharge current is raised 1 A every 30 s;
+# while import is below 0.1-0.2 kW it is lowered 1 A. When the inverter exports and
+# the current is 0 the slot is switched off.
+
+- alias: Peak +
+  description: Raise the battery discharge current 1 A while importing above 1 kW.
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.solis_s6_solis_meter_total_active_power
+      below: -1000
+      for:
+        seconds: 30
+    - trigger: time_pattern
+      seconds: /30
+  conditions:
+    - condition: numeric_state
+      entity_id: sensor.solis_s6_solis_meter_total_active_power
+      below: -1000
+  actions:
+    - action: number.set_value
+      target:
+        entity_id: number.solis_s6_eh1p_grid_time_of_use_discharge_battery_current_slot_1
+      data:
+        value: >-
+          {% set e = 'number.solis_s6_eh1p_grid_time_of_use_discharge_battery_current_slot_1' %}
+          {{ [states(e) | float(0) + 1, state_attr(e, 'max') | float(1000)] | min }}
+  mode: single
+
+- alias: Peak -1
+  description: Lower the battery discharge current 1 A while import is low.
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.solis_s6_solis_meter_total_active_power
+      above: -100
+      for:
+        seconds: 30
+    - trigger: time_pattern
+      seconds: /30
+  conditions:
+    - condition: numeric_state
+      entity_id: sensor.solis_s6_solis_meter_total_active_power
+      above: -200
+  actions:
+    - action: number.set_value
+      target:
+        entity_id: number.solis_s6_eh1p_grid_time_of_use_discharge_battery_current_slot_1
+      data:
+        value: >-
+          {% set e = 'number.solis_s6_eh1p_grid_time_of_use_discharge_battery_current_slot_1' %}
+          {{ [states(e) | float(0) - 1, state_attr(e, 'min') | float(0)] | max }}
+  mode: single
+
+- alias: Slå av peakshaving
+  description: Turn the discharge slot off when exporting with no discharge current.
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.solis_s6_solis_active_power
+      above: 0
+      for:
+        minutes: 1
+  conditions:
+    - condition: numeric_state
+      entity_id: sensor.solis_s6_solis_active_power
+      above: 0
+    - condition: numeric_state
+      entity_id: number.solis_s6_eh1p_grid_time_of_use_discharge_battery_current_slot_1
+      below: 0.5
+  actions:
+    - action: switch.turn_off
+      target:
+        entity_id: switch.solis_s6_eh1p_grid_time_of_use_discharge_period_1
+  mode: single
