@@ -32,7 +32,9 @@ each holds the method, the backtests behind its numbers and its HA entities.
 - Area and currency are parsed from the Nord Pool entity id by position
   (`prices.nordpool_zone`: parts 2 and 3 split at `_`, e.g.
   `sensor.nordpool_kwh_se3_sek_…`).
-- Requires the `nordpool` custom integration for the `nordpool.hourly` service.
+- Requires the HACS `nordpool` custom integration (custom-components/nordpool) for
+  the `nordpool.hourly` service and its `tomorrow_valid` attribute; HA's built-in
+  Nord Pool integration (same domain, overridden by the HACS one) is not supported.
 - Nord Pool prices are SEK/MWh excluding VAT; the network settings are öre/kWh
   including VAT (`* 1.25` adds VAT, `* 10` converts öre/kWh to SEK/MWh).
 

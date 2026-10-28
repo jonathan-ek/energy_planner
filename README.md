@@ -38,7 +38,12 @@ controls.
 ## Requirements
 
 - Home Assistant 2026.9 or later.
-- The [Nord Pool](https://github.com/custom-components/nordpool) custom integration.
+- The [Nord Pool custom integration](https://github.com/custom-components/nordpool)
+  from HACS, not the Nord Pool integration built into Home Assistant. The planner
+  fetches prices with the HACS integration's `nordpool.hourly` service and reads the
+  area and currency from its sensor's entity id (`sensor.nordpool_kwh_se3_sek_…`);
+  the built-in one has neither. Both use the domain `nordpool`, and the HACS one
+  replaces the built-in one when installed.
 - Sensors for the house load, PV power, battery SOC and voltage, with history in the
   recorder. Forecast.Solar entries for the panel planes (for their tilt, direction,
   kWp and location).
@@ -50,8 +55,8 @@ controls.
 
 1. Add this repository to HACS as a custom integration repository and install
    "Energy planner", then restart Home Assistant.
-2. Add the integration and pick the Nord Pool sensor; choose the grid tariff in its
-   options.
+2. Add the integration and pick the HACS Nord Pool integration's sensor; choose the
+   grid tariff in its options.
 3. Point the settings at your entities and set up the scripts:
    [`examples/new_home_setup.md`](examples/new_home_setup.md).
 

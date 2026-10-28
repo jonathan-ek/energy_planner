@@ -7,13 +7,13 @@ are the owner's entity ids, so another home needs most of the steps below.
 
 | Integration | Use |
 | --- | --- |
-| `nordpool` (HACS) | Spot prices; needed for its `nordpool.hourly` service. Region, kWh, VAT on, additional costs 0 (the planner adds the grid fees). Prices in öre or SEK both work: the area and currency are read from the entity id. `nordpool_reload_automation.yml` reloads it when tomorrow's prices are late |
+| `nordpool` (HACS, [custom-components/nordpool](https://github.com/custom-components/nordpool)) | Spot prices; needed for its `nordpool.hourly` service. HA's built-in Nord Pool integration does not work (no such service, other sensor names); the HACS one replaces it. Region, kWh, VAT on, additional costs 0 (the planner adds the grid fees). Prices in öre or SEK both work: the area and currency are read from the entity id. `nordpool_reload_automation.yml` reloads it when tomorrow's prices are late |
 | Inverter (HACS, e.g. `solis_modbus`) | House load, PV, battery SOC and voltage, and the controls the battery script writes |
 | Forecast.Solar (core) | One entry per panel plane. The PV forecast reads the planes, kWp and location from it and fetches Open-Meteo itself; disable the entry of a plane with faulty panels |
 | Local calendar (core) | `calendar.energiplan`: planned loads (`bastu`, `tvätt`, `5 kWh`, ...) and away (`borta`), see `docs/forecast.md` |
 | Car charger (optional) | Zaptec or Easee: status, session energy and a way to start, stop and set the current |
 
-Install the integration from HACS, add it and pick the Nord Pool sensor; in its
+Install the integration from HACS, add it and pick the HACS Nord Pool sensor; in its
 options choose the grid tariff (flat from `network_cost` / `network_compensation`, a
 preset such as `tekniska_verken_alternativ` or `eon_20a`, or custom YAML, see
 `planner/tariff.py`).

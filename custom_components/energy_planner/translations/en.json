@@ -5,12 +5,12 @@
         "title": "Energy planner",
         "description": "Integration configuration for energy planner",
         "data": {
-          "nordpool_entity_id": "Entity ID of Nordpool sensor"
+          "nordpool_entity_id": "Entity ID of the Nord Pool sensor (the HACS nordpool integration)"
         }
       }
     },
     "abort": {
-      "invalid_nordpool_entity_id": "The Nordpool entity was not found"
+      "invalid_nordpool_entity_id": "The Nord Pool entity was not found (the HACS nordpool integration is needed)"
     }
   },
   "services": {
