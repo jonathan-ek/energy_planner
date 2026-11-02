@@ -30,26 +30,47 @@ from .utils import get_tariff
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _hourly_import(hass: HomeAssistant, statistic_id: str, start, end):
-    """Grid import per hour start (UTC) in kWh (= the hourly mean kW).
+async def _hourly_import(hass: HomeAssistant, statistic_ids, start, end):
+    """Grid import (or export) per hour start (UTC) in kWh (= the hourly mean kW).
 
+    `statistic_ids`: one energy sensor or a list, none: no history. With several, an
+    hour is the lowest of them and only counts when all have it: a meter that misses
+    an hour and books it in the next (Tibber's counter does) would otherwise set a
+    false peak, which makes the plan import up to it for the rest of the month. A
+    false peak then needs every source wrong in the same hour; a missing or low hour
+    only shaves more.
+    An hour also only counts when its source has the hour before: after a gap (HA or
+    the meter down) the first hour holds the whole gap's energy, also with one source.
     UTC keys: local ones would make the two hours when DST ends one.
     """
+    if not statistic_ids:
+        return {}
+    ids = [statistic_ids] if isinstance(statistic_ids, str) else list(statistic_ids)
+    hour = dt.timedelta(hours=1)
     stats = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
         hass,
-        start,
+        start - hour,  # the first hour's previous one
         end,
-        {statistic_id},
+        set(ids),
         "hour",
         {"energy": "kWh"},
         {"change"},
     )
-    return {
-        dt.datetime.fromtimestamp(row["start"], dt.UTC): row["change"]
-        for row in stats.get(statistic_id, [])
-        if row.get("change") is not None
-    }
+    sources = [
+        {
+            dt.datetime.fromtimestamp(row["start"], dt.UTC): change
+            for row in stats.get(statistic_id, [])
+            if (change := row.get("change")) is not None
+        }
+        for statistic_id in ids
+    ]
+    hours = (
+        set.intersection(*({h for h in s if h - hour in s} for s in sources))
+        if sources
+        else set()
+    )
+    return {h: min(source[h] for source in sources) for h in hours if h >= start}
 
 
 def car_status(hass: HomeAssistant) -> str | None:
@@ -287,6 +308,9 @@ async def async_update_plan(hass: HomeAssistant) -> None:
         last_plan=data.get("plan"),
         car=_car(hass),
         heat_pump=_heat_pump(hass),
+        export_history=await _hourly_import(
+            hass, settings.get(config, "grid_export_sensor"), month_start, now
+        ),
     )
     plan = await hass.async_add_executor_job(
         functools.partial(planning.build_plan, inputs)

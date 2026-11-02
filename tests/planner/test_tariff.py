@@ -40,6 +40,20 @@ class TestPeriod:
         assert not period.contains(at(1, 10, 12))
         assert not period.contains(at(2, 2, 12))
 
+    def test_years(self):
+        """Test that a rule limited to a year switches over at New Year."""
+        fees = tariff.tariff_from_dict(
+            {
+                "energy_fees": [
+                    {"ore_per_kwh": 16.85, "years": [2026]},
+                    {"ore_per_kwh": 8.0, "years": [2027]},
+                ]
+            }
+        )
+        assert fees.buy_fee(at(12, 31, 23)) == pytest.approx(16.85)
+        assert fees.buy_fee(at(1, 1, 0, year=2027)) == pytest.approx(8.0)
+        assert fees.buy_fee(at(1, 1, 0, year=2028)) == 0.0
+
     def test_whole_day(self):
         """Test that equal start and end mean the whole day."""
         assert tariff.in_hours(3, 0, 24)
@@ -124,6 +138,7 @@ class TestParsing:
             {"energy_fees": [{"ore_per_kwh": 1, "hours": 6}]},
             {"power_charges": [{"kr_per_kw": 1, "peaks": 0}]},
             {"power_charges": [{"kr_per_kw": "x"}]},
+            {"energy_fees": [{"ore_per_kwh": 1, "years": []}]},
         ],
     )
     def test_invalid(self, data):
@@ -138,6 +153,40 @@ def test_eon():
     assert eon.buy_fee(at(1, 5, 12)) == pytest.approx(77.3)
     assert eon.sell_fee(at(1, 5, 12)) == pytest.approx(10.0)
     assert eon.power_cost([(at(1, 5, 12), 9.0)]) == 0.0
+
+
+def test_spot_percent():
+    """Test a fee that is a share of the spot price, as E.ON's effektabonnemang."""
+    fees = tariff.tariff_from_dict(
+        {
+            "energy_fees": [
+                {"ore_per_kwh": 16.85, "spot_percent": 5.1},
+                {"spot_percent": 2, "hours": [6, 23]},
+            ]
+        }
+    )
+    assert fees.buy_fee(at(1, 5, 12)) == pytest.approx(16.85)
+    assert fees.spot_factor(at(1, 5, 12)) == pytest.approx(1.071)
+    assert fees.spot_factor(at(1, 5, 3)) == pytest.approx(1.051)
+    assert TEKNISKA_VERKEN.spot_factor(at(1, 5, 12)) == 1.0
+
+
+def test_spot_percent_only_on_bought_energy():
+    """Test that a spot share in the sell compensation is rejected, not ignored."""
+    with pytest.raises(ValueError, match="spot_percent"):
+        tariff.tariff_from_dict({"sell_compensation": [{"spot_percent": 5}]})
+    # A rule that is not a mapping is an invalid tariff too, not a TypeError
+    with pytest.raises(ValueError, match="invalid tariff"):
+        tariff.tariff_from_dict({"sell_compensation": [5.1]})
+
+
+def test_export_power_charge():
+    """Test that an export charge is parsed and left out of the import charges."""
+    parsed = tariff.tariff_from_dict(
+        {"power_charges": [{"kr_per_kw": 10, "export": True}, {"kr_per_kw": 1}]}
+    )
+    assert [c.export for c in parsed.power_charges] == [True, False]
+    assert parsed.power_cost([(at(1, 5, 12), 5.0)]) == pytest.approx(5.0)
 
 
 def test_import_limit():

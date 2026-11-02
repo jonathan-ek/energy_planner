@@ -200,12 +200,12 @@ async def test_inputs_from_the_settings_and_sensors(mock_hass):
     assert (limit.kw, limit.start_hour, limit.end_hour) == (1.0, 6, 23)
     # 20 A on three phases
     assert limit.fuse_kw == pytest.approx(13.8)
-    # This month's import, from the HAN meter by default
-    assert hourly.call_args.args[1:] == (
-        "sensor.matarstallning_aktiv_energi_uttag",
-        dt.datetime(2026, 1, 1, tzinfo=TZ),
-        NOW,
-    )
+    # This month's import, from the HAN meter by default; no export sensor
+    month = dt.datetime(2026, 1, 1, tzinfo=TZ)
+    assert [c.args[1:] for c in hourly.call_args_list] == [
+        ("sensor.matarstallning_aktiv_energi_uttag", month, NOW),
+        (None, month, NOW),
+    ]
     assert inputs.import_history == history
     assert (inputs.manual_slots, inputs.last_plan) == ((slot,), last)
     # The car without a charge limit sensor
@@ -521,3 +521,55 @@ async def test_plan_settings_replan(mock_hass):
         if settings.SETTINGS[key].platform and not settings.SETTINGS[key].replans
     }
     assert missing == set()
+
+
+async def test_import_history_is_the_lowest_source_per_hour():
+    """Test that one source's glitch (an hour booked late) can not set the peak."""
+    h9, h10, h11, h12 = (
+        dt.datetime(2026, 10, 25, h, tzinfo=dt.UTC) for h in (9, 10, 11, 12)
+    )
+    stats = {
+        # Tibber's counter missed hour 10 and booked it in 11
+        "sensor.counter": [
+            {"start": h9.timestamp(), "change": 1.0},
+            {"start": h10.timestamp(), "change": 0.0},
+            {"start": h11.timestamp(), "change": 54.6},
+            {"start": h12.timestamp(), "change": 20.0},
+        ],
+        # Integrated power: no row for hour 12 (HA down)
+        "sensor.power": [
+            {"start": h9.timestamp(), "change": 1.0},
+            {"start": h10.timestamp(), "change": 30.1},
+            {"start": h11.timestamp(), "change": 21.7},
+        ],
+        # A meter that was down in hour 10 and booked it all in 11
+        "sensor.gap": [
+            {"start": h9.timestamp(), "change": 1.0},
+            {"start": h11.timestamp(), "change": 9.0},
+            {"start": h12.timestamp(), "change": 2.0},
+        ],
+    }
+    recorder = MagicMock()
+    recorder.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
+    with (
+        patch.object(battery_plan, "get_instance", return_value=recorder),
+        patch.object(
+            battery_plan,
+            "statistics_during_period",
+            lambda _hass, _start, _end, ids, *_: {i: stats[i] for i in ids},
+        ),
+    ):
+
+        async def history(ids):
+            return await battery_plan._hourly_import(MagicMock(), ids, h10, None)
+
+        both = await history(["sensor.counter", "sensor.power"])
+        single = await history("sensor.counter")
+        gap = await history("sensor.gap")
+        none = await history([])
+    # Hour 9 is only fetched as hour 10's previous one
+    assert both == {h10: 0.0, h11: 21.7}
+    assert max(single.values()) == 54.6
+    # The hour after the gap is dropped, the next one counts again
+    assert gap == {h12: 2.0}
+    assert none == {}

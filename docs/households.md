@@ -36,12 +36,14 @@ Background for the planner (from the owner, Oct 2026):
 
 Users have different grid operators, so fees and power charges come from the tariff
 (`planner/tariff.py`), chosen in the integration options. Owner: preset
-`tekniska_verken_alternativ`, `grid_import_limit` 1 kW 06–23. The limit is meant to
-keep daytime import at the house's base load: with a 45 kr/kW winter day power charge,
-charging the battery from the grid in the day costs far more than at night. The heat
-pump's load is exempt from it (Oct 2026): its saving pays for the higher peak. Later, the
-planner should also be able to shift controllable loads (e.g. the heat pump) to stay
-under it.
+`tekniska_verken_alternativ`, no `grid_import_limit` (0) since 2026-11-01. It was 1.5
+kW 06–23, to keep daytime import at the house's base load, but the power charge alone
+holds the day peak there: a replay of October 2026 (daily replan at 13:00, actual load
+and PV as the forecast) chose a 1.46 kW day peak without it against 1.50 with it, at
+the same cost (442 kr), and the plan of 2026-11-01 kept 1.28 kW either way.
+`max_discharge_current` 20 A since 2026-11-01 (was 18): at about 522 V 18 A gave 9.0-9.4
+kW from the battery in `sell` (8.1-8.7 kW exported), below the S6-EH3P's 10 kW; the
+inverter caps the AC side itself.
 
 The owner's brother uses E.ON Energidistribution (Virserum), preset `eon_20a` from his
 price list: 32.30 öre/kWh transfer fee (+ 45 öre energy tax, assumed), 835 kr/month,
@@ -54,5 +56,8 @@ has an outdoor sensor, a template sensor from his SMHI weather entity (history i
 from Open-Meteo). PV: the inverter clips at about 10 kW, "Platta" is shaded in the
 afternoon (`hourly` calibration) and "Frigge 1/2" seem faulty, so their Forecast.Solar
 entries are disabled. The model covers the common Swedish variants: mean of the N highest hourly means per
-month, optionally at most one per day, limited by months, weekdays and hours.
+month, optionally at most one per day, limited by years, months, weekdays and hours (`years`
+holds next year's prices ahead of a change), and energy
+fees as a share of the spot price (`spot_percent`, E.ON's effektabonnemang: 5.10 % in
+2026, 12.10 % from 2027 on E4N04L).
 Holidays are not detected.

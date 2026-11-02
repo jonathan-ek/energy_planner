@@ -73,6 +73,10 @@ class PlanInputs:
     last_plan: Plan | None
     car: CarReadings | None  # None: not set up or not plugged in
     heat_pump: HeatPumpReadings
+    # This month's grid export per hour start (UTC), kWh, for export power charges
+    export_history: Mapping[dt.datetime, float] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -210,11 +214,12 @@ def vehicle(
 def _peak_label(tariff: Tariff, key: str) -> dict[str, Any]:
     index, month = key.split(":")
     charge = tariff.power_charges[int(index)]
-    return {
+    label = {
         "month": month,
         "hours": [charge.period.start_hour, charge.period.end_hour],
         "kr_per_kw": charge.kr_per_kw,
     }
+    return {**label, "export": True} if charge.export else label
 
 
 def build_plan(inputs: PlanInputs) -> Plan | None:
@@ -281,6 +286,7 @@ def build_plan(inputs: PlanInputs) -> Plan | None:
         tariff=inputs.tariff,
         limit=inputs.limit,
         history=dict(inputs.import_history),
+        export_history=dict(inputs.export_history),
         forced=forced,
         forced_soc=[None if t is None else t / 100 * capacity for t in forced_soc],
         current_mode=last.value_at(inputs.now, last.modes) if last else None,

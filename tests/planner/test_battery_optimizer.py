@@ -51,6 +51,15 @@ LOAD = [0.25] * 96  # 1 kW
 NO_PV = [0.0] * 96
 
 
+def test_spot_percent_is_paid_on_bought_energy():
+    """Test that a fee of 10 % of spot adds 10 % to the spot part of the cost."""
+    spot = tariff.tariff_from_dict({"energy_fees": [{"spot_percent": 10}]})
+    prices = [1000.0] * 96
+    without = opt.optimize(STARTS, prices, LOAD, NO_PV, battery(2.0), NO_FEES)
+    plan = opt.optimize(STARTS, prices, LOAD, NO_PV, battery(2.0), spot)
+    assert plan.energy_cost == pytest.approx(without.energy_cost * 1.1)
+
+
 def test_charges_cheap_and_uses_expensive():
     """Test that the battery is filled at night and used in the evening."""
     plan = opt.optimize(
@@ -161,6 +170,52 @@ class TestPowerCharge:
             self.night_charge,
         )
         assert peak(early.grid_import, 0, 6) > peak(late.grid_import, 0, 6)
+
+
+class TestExportCharge:
+    """Tests for a power charge on the highest hourly export."""
+
+    export_charge = tariff.Tariff(power_charges=(tariff.PowerCharge(2.0, export=True),))
+    # Two expensive hours, 18 kWh to sell, no load
+    prices = tuple(8000.0 if 18 <= s.hour < 20 else 300.0 for s in STARTS)
+    last_day = tuple(s.replace(day=31) for s in STARTS)
+
+    def sell(self, tariff_, **kwargs):
+        """Plan selling the full battery on the last day of the month."""
+        return opt.optimize(
+            self.last_day,
+            self.prices,
+            [0.0] * 96,
+            NO_PV,
+            battery(soc_kwh=20.0),
+            tariff_,
+            **kwargs,
+        )
+
+    def test_sells_slower_to_keep_the_export_peak_low(self):
+        """Test that the sale is spread over both hours instead of 10 + 8 kW."""
+        free = self.sell(NO_FEES)
+        charged = self.sell(self.export_charge)
+        assert peak(free.grid_export, 18, 20) == pytest.approx(10.0)
+        assert peak(charged.grid_export, 18, 20) == pytest.approx(9.0, abs=0.1)
+        assert sum(charged.grid_export) == pytest.approx(18.0)
+        # The import charges and their published levels are not affected
+        assert set(charged.peak_levels) == {None}
+        ((before, after),) = charged.peaks.values()
+        assert (before, after) == (0.0, pytest.approx(9.0, abs=0.1))
+
+    def test_export_peak_already_paid_is_free(self):
+        """Test that exporting up to this month's export peak costs nothing more."""
+        history = {dt.datetime(2026, 1, 2, 12, tzinfo=TZ): 10.0}
+        plan = self.sell(self.export_charge, export_history=history)
+        assert peak(plan.grid_export, 18, 20) == pytest.approx(10.0)
+        assert plan.power_cost == pytest.approx(0.0)
+
+    def test_import_history_does_not_count_as_export(self):
+        """Test that the import peak does not make export free."""
+        history = {dt.datetime(2026, 1, 2, 12, tzinfo=TZ): 10.0}
+        plan = self.sell(self.export_charge, history=history)
+        assert peak(plan.grid_export, 18, 20) < 9.5
 
 
 def test_tekniska_verken_winter_day():

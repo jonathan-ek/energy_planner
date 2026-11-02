@@ -124,7 +124,9 @@ out to whole quarters, kept in UTC. Where they overlap, the last added wins.
 - Forecast inputs (config store only, defaults in `planner/settings.py`): `forecast_load_sensor`,
   `forecast_pv_sensor`, `forecast_ev_sensor`, `forecast_calendar`
   (`calendar.energiplan`); battery plan inputs `battery_soc_sensor`,
-  `battery_voltage_sensor`, `grid_import_sensor`; heat pump inputs
+  `battery_voltage_sensor`, `grid_import_sensor` (one energy sensor or a list, see
+  `docs/battery-plan.md`), `grid_export_sensor` (the same for export power charges, no
+  default); heat pump inputs
   `outdoor_temperature_sensor` (`sensor.gw1100a_outdoor_temperature`),
   `heat_pump_model` (`msz_ap42`), `district_heating` (`tekniska_verken_2026`),
   `heat_pump_climate` (`climate.hallen`), `indoor_temperature_sensor`

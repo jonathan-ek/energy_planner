@@ -5,6 +5,7 @@ the integration options) and parsed by `tariff_from_dict`:
 
     energy_fees:          # öre/kWh incl. VAT on bought energy, matching rules add up
       - ore_per_kwh: 45   # energy tax, always
+      - spot_percent: 5.1 # a fee of 5.1 % of the spot price (energy fees only)
       - ore_per_kwh: 18
         hours: [6, 23]    # from 06:00 to 23:00, local time
       - ore_per_kwh: 9
@@ -18,8 +19,12 @@ the integration options) and parsed by `tariff_from_dict`:
         hours: [6, 23]
         peaks: 1                    # average of the highest N hourly means
         one_per_day: false          # true: at most one of the N peaks per day
+      - kr_per_kw: 11.75            # a charge on the highest hourly mean export
+        export: true                # (E.ON's production subscriptions above 43.5 kW)
 
-Every rule may limit `months`, `weekdays` and `hours`; a missing key means always.
+Every rule may limit `years`, `months`, `weekdays` and `hours`; a missing key means
+always. `years` lets a tariff hold next year's prices ahead of the change, e.g.
+`years: [2026]` on the old rules and `years: [2027]` on the new.
 Holidays are not detected.
 """
 
@@ -42,10 +47,13 @@ class Period:
     weekdays: frozenset[int] = ALL_WEEKDAYS
     start_hour: int = 0
     end_hour: int = 24
+    years: frozenset[int] | None = None  # None: every year
 
     def contains(self, moment: dt.datetime) -> bool:
         """Return True if the local time `moment` is in the period."""
         if moment.month not in self.months or moment.isoweekday() not in self.weekdays:
+            return False
+        if self.years is not None and moment.year not in self.years:
             return False
         return in_hours(moment.hour, self.start_hour, self.end_hour)
 
@@ -56,16 +64,21 @@ class Rate:
 
     ore_per_kwh: float
     period: Period = Period()
+    spot_percent: float = 0.0
 
 
 @dataclasses.dataclass(frozen=True)
 class PowerCharge:
-    """A monthly charge on the highest hourly mean power during a period."""
+    """A monthly charge on the highest hourly mean power during a period.
+
+    On the grid import, or with `export` on the export.
+    """
 
     kr_per_kw: float
     period: Period = Period()
     peaks: int = 1
     one_per_day: bool = False
+    export: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -80,15 +93,31 @@ class Tariff:
         """Return the fees in öre/kWh incl. VAT on energy bought at `moment`."""
         return _sum_rates(self.energy_fees, moment)
 
+    def spot_factor(self, moment: dt.datetime) -> float:
+        """Return what bought energy's spot price is multiplied by at `moment`.
+
+        1 plus the energy fees' `spot_percent`: a fee that is a share of the spot price.
+        """
+        return (
+            1
+            + sum(
+                rate.spot_percent
+                for rate in self.energy_fees
+                if rate.period.contains(moment)
+            )
+            / 100
+        )
+
     def sell_fee(self, moment: dt.datetime) -> float:
         """Return the compensation in öre/kWh for energy sold at `moment`."""
         return _sum_rates(self.sell_compensation, moment)
 
     def power_cost(self, hourly_kw: Iterable[tuple[dt.datetime, float]]) -> float:
-        """Return the power charges in kr for hourly mean grid import.
+        """Return the import power charges in kr for hourly mean grid import.
 
         `hourly_kw`: pairs of a local hour start and the mean import in kW (see
-        `charged_peak`). Each month in it is charged separately.
+        `charged_peak`). Each month in it is charged separately; export charges are
+        left out.
         """
         months: dict[tuple[int, int], list[tuple[dt.datetime, float]]] = {}
         for hour, kw in hourly_kw:
@@ -96,6 +125,7 @@ class Tariff:
         return sum(
             charge.kr_per_kw * charged_peak(charge, month)
             for charge in self.power_charges
+            if not charge.export
             for month in months.values()
         )
 
@@ -140,6 +170,7 @@ def _period(rule: Mapping[str, Any]) -> Period:
     months = frozenset(int(m) for m in rule.get("months", ALL_MONTHS))
     weekdays = frozenset(int(d) for d in rule.get("weekdays", ALL_WEEKDAYS))
     start_hour, end_hour = (int(h) for h in rule.get("hours", (0, 24)))
+    years = frozenset(int(y) for y in rule["years"]) if "years" in rule else None
     if not months or not months <= ALL_MONTHS:
         msg = f"months must be 1-12: {sorted(months)}"
         raise ValueError(msg)
@@ -149,11 +180,24 @@ def _period(rule: Mapping[str, Any]) -> Period:
     if not (0 <= start_hour <= 24 and 0 <= end_hour <= 24):
         msg = f"hours must be 0-24: {[start_hour, end_hour]}"
         raise ValueError(msg)
-    return Period(months, weekdays, start_hour, end_hour)
+    if years is not None and not years:
+        msg = "years must not be empty"
+        raise ValueError(msg)
+    return Period(months, weekdays, start_hour, end_hour, years)
 
 
 def _rates(rules: Iterable[Mapping[str, Any]]) -> tuple[Rate, ...]:
-    return tuple(Rate(float(rule["ore_per_kwh"]), _period(rule)) for rule in rules)
+    for rule in rules:
+        if "ore_per_kwh" not in rule and "spot_percent" not in rule:
+            raise KeyError("ore_per_kwh")
+    return tuple(
+        Rate(
+            float(rule.get("ore_per_kwh", 0)),
+            _period(rule),
+            float(rule.get("spot_percent", 0)),
+        )
+        for rule in rules
+    )
 
 
 def _power_charge(rule: Mapping[str, Any]) -> PowerCharge:
@@ -166,12 +210,16 @@ def _power_charge(rule: Mapping[str, Any]) -> PowerCharge:
         _period(rule),
         peaks,
         bool(rule.get("one_per_day", False)),
+        bool(rule.get("export", False)),
     )
 
 
 def tariff_from_dict(data: Mapping[str, Any]) -> Tariff:
     """Parse a tariff dict (see the module docstring), raising ValueError if invalid."""
     try:
+        if any("spot_percent" in rule for rule in data.get("sell_compensation") or ()):
+            msg = "spot_percent is only for energy_fees, not sell_compensation"
+            raise ValueError(msg)
         return Tariff(
             _rates(data.get("energy_fees") or ()),
             _rates(data.get("sell_compensation") or ()),

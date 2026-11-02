@@ -44,6 +44,15 @@ def test_heat_pump_pays_in_autumn():
     assert result["break_even_spot"] == pytest.approx(133.7)
 
 
+def test_spot_factor_raises_the_spot_part():
+    """Test a grid fee of 10 % of spot (E.ON) on bought electricity."""
+    result = heat_pump.evaluate(500.0, 63.0, 5.1, 0.0, CURVE, 76.7, spot_factor=1.1)
+    # 62.5 * 1.1 + 63
+    assert result["electricity_price"] == pytest.approx(131.8)
+    # (76.7 * 3 - 63) / 1.25 / 1.1
+    assert result["break_even_spot"] == pytest.approx(121.5)
+
+
 def test_heat_pump_does_not_pay_in_summer():
     """Test that 13 öre district heating beats bought electricity."""
     result = heat_pump.evaluate(100.0, 63.0, 5.1, 20.0, CURVE, 13.0)

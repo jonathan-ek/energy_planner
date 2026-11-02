@@ -85,7 +85,8 @@ with it off, self-use. An inverter script follows the action sensor
   plan has for now, so a recalculation only changes the running mode when that pays.
   Modes that do the same in a quarter (`sell` with an empty battery and
   `sell_excess`) are named after the simplest.
-- Costs: import at `spot * 1.25 + tariff.buy_fee`, export at `spot +
+- Costs: import at `spot * 1.25 * tariff.spot_factor + tariff.buy_fee` (`spot_factor`:
+  1 + the energy fees' `spot_percent`, a fee that is a share of spot), export at `spot +
   tariff.sell_fee`, import above `grid_import_limit` at `LIMIT_PENALTY` (20 SEK/kWh, so
   only when unavoidable), import above the main fuse (`main_fuse` × 3 × 230 V,
   `tariff.fuse_power`) at the same penalty, for all load (the car and the heat pump
@@ -98,11 +99,27 @@ with it off, self-use. An inverter script follows the action sensor
 - Power charges: each charge and month gets an import target (kW), starting at the
   peak already reached this month (from the hourly changes of `grid_import_sensor`,
   default the HAN meter `sensor.matarstallning_aktiv_energi_uttag`): import up to it is
-  free. A coordinate search raises the targets in 0.5 kW steps while the cost drops.
+  free. A false peak makes the plan import up to it for the rest of the month, so
+  `grid_import_sensor` may be a list of independent meters: each hour is then the lowest
+  of them, and only hours all of them have count (Vibogruppen, Oct 2026: Tibber's kWh
+  counter missed hours and booked them in the next, once at 54.6 kW against a real 44.4;
+  with the integrated Pulse power as a second source no hour was off). An hour also
+  only counts when its meter has the hour before: after a gap (HA or the meter down)
+  the first hour holds the whole gap's energy, so it is dropped, also with one meter
+  (a meter that books a missed hour in the next while reporting 0 for it, as Tibber's,
+  still needs a second source). A coordinate search raises the targets in 0.5 kW steps while the cost drops.
   `max_charge_current` is only the hardware limit; the target sets the charging speed.
   Raising a peak is charged at the share of the month's remaining hours the plan
   covers, because the peak is then free for the rest of the month (`_month_share`): a
   higher peak is accepted early in the month, hardly at the end.
+- Export power charges: a power charge with `export: true` (E.ON's production
+  subscriptions above 43.5 kW: 7.80-13.80 kr/kW excl. VAT per month on the highest
+  hourly export) gets an export target the same way, starting at the export peak
+  already reached (`grid_export_sensor`, same rules as `grid_import_sensor`; without
+  it the month starts at 0). `sell` then discharges no faster than the load plus the
+  target, so a sale is spread over more hours when that pays; PV exported above it
+  costs the charge. The action's sell current follows from the plan's energy over the
+  run, so the inverter scripts need no change. The export target is not published.
 - Reserve: the plan keeps `battery_reserve_soc` (a soft minimum above the shutdown
   SOC) for load the forecast misses, e.g. a washing machine. `Battery.reserve_kwh`:
   no mode discharges below it, a SOC below it (after a peak) is allowed, and the

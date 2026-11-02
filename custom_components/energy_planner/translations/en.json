@@ -84,7 +84,7 @@
       },
       "custom": {
         "title": "Custom grid tariff",
-        "description": "YAML with energy_fees and sell_compensation (öre/kWh incl. VAT, matching rules add up) and power_charges (kr/kW per month, peaks = mean of the N highest hourly means, one_per_day). Every rule may limit months (1-12), weekdays (1-7, Monday = 1) and hours ([start, end), may wrap midnight).",
+        "description": "YAML with energy_fees and sell_compensation (öre/kWh incl. VAT, matching rules add up) and power_charges (kr/kW per month, peaks = mean of the N highest hourly means, one_per_day, export: true for a charge on the highest hourly export, spot_percent in energy_fees for a fee that is a share of spot). Every rule may limit years (e.g. [2027], for a price change ahead), months (1-12), weekdays (1-7, Monday = 1) and hours ([start, end), may wrap midnight).",
         "data": {
           "tariff": "Tariff"
         }

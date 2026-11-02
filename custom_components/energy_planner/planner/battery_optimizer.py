@@ -17,7 +17,8 @@ the tariff and the battery, choose per quarter one of the modes the inverter can
   curtailed instead of exported (the action state `discard-excess`, the inverter's
   feed-in limit). Pays when the export price (spot plus the network compensation)
   is negative.
-- `sell`: the battery discharges at full power, the surplus is exported.
+- `sell`: the battery discharges at full power (or down to the export target, see
+  below), the surplus is exported.
 
 Dynamic programming over the state of charge finds the cheapest modes for given
 import targets. Power charges are not additive (they are set by the month's highest
@@ -25,6 +26,10 @@ hours), so the targets are searched in an outer loop: each power charge gets a
 target, starting at the peak already reached this month (import up to it is free)
 and raised in steps while the total cost, power charges included, goes down. Raising
 it lets the battery charge faster in the cheapest hours, at the price of a higher peak.
+An export power charge (`PowerCharge.export`, on the highest hourly export) gets an
+export target the same way, from the export peak already reached
+(`export_history`): `sell` discharges no faster than the load plus that target, and
+export above it (e.g. PV the battery can not take) costs the charge.
 
 The main fuse (`Limit.fuse_kw`) caps all grid import, the car and the heat pump
 included, at `LIMIT_PENALTY` per kWh above it, and the import targets are capped at
@@ -218,10 +223,19 @@ def _forced_soc(inputs: _Inputs, index: int) -> float | None:
     return inputs.forced_soc[index] if inputs.forced_soc else None
 
 
-def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh, extra=0.0):
+def _step(
+    inputs: _Inputs,
+    index: int,
+    mode: str,
+    soc,
+    target_kwh,
+    extra=0.0,
+    export_kwh=math.inf,
+):
     """Return (next soc, grid import, grid export) for a mode, vectorized over soc.
 
-    `extra` is load added to the quarter's (for Plan.marginal).
+    `extra` is load added to the quarter's (for Plan.marginal), `export_kwh` the
+    export target: `sell` discharges no faster than the load plus it.
     """
     battery = inputs.battery
     eta = math.sqrt(battery.efficiency)
@@ -238,7 +252,7 @@ def _step(inputs: _Inputs, index: int, mode: str, soc, target_kwh, extra=0.0):
             # A manual sell may go below the reserve, down to its own target
             floor = max(battery.min_kwh, forced_soc)
             available = np.maximum(soc - floor, 0.0) * eta
-        out = np.minimum(available, power)
+        out = np.minimum(np.minimum(available, power), max(export_kwh + net, 0.0))
         grid = net - out
         return soc - out / eta, np.maximum(grid, 0.0), np.maximum(-grid, 0.0)
     if mode == "charge":
@@ -282,8 +296,9 @@ def _quarter_cost(
         * LIMIT_PENALTY
     )
     # A kWh above a target in one quarter raises that hour's mean by 1 kW
-    for cap_kwh, kr_per_kw in caps:
-        cost = cost + np.maximum(grid_import - cap_kwh, 0.0) * kr_per_kw
+    for cap_kwh, kr_per_kw, export in caps:
+        flow = grid_export if export else grid_import
+        cost = cost + np.maximum(flow - cap_kwh, 0.0) * kr_per_kw
     return cost
 
 
@@ -406,11 +421,12 @@ def _shifted(values: np.ndarray, kwh: float, levels: np.ndarray) -> np.ndarray:
 def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
     """Run the dynamic program for fixed import targets; return per quarter results.
 
-    `targets` is (power charge level, other limit) in kWh per quarter: the import
-    target is the lower of the two, and the car's charging is added to the other
-    limit (it is exempt from the household's import limit, like the heat pump, and
-    the charger's power comes on top of the battery's), but not to the power charge
-    level, which caps the whole import.
+    `targets` is (power charge level, other limit, export target) in kWh per quarter:
+    the import target is the lower of the first two, and the car's charging is added
+    to the other limit (it is exempt from the household's import limit, like the
+    heat pump, and the charger's power comes on top of the battery's), but not to the
+    power charge level, which caps the whole import. `sell` keeps the export at most
+    at the export target.
 
     State, at the start of each quarter: the battery's SOC (`SOC_STEPS` levels from
     the shutdown SOC to the max), the previous quarter's mode (changing it costs
@@ -453,7 +469,7 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
     levels = _ev_levels(inputs)
     vehicle = inputs.vehicle if len(levels) > 1 else None
     deadline = vehicle.deadline if vehicle else count
-    level_caps, other_caps = targets
+    level_caps, other_caps, export_caps = targets
 
     def target(index: int, ev_kwh: float) -> float:
         return min(level_caps[index], other_caps[index] + ev_kwh, inputs.fuse_kwh)
@@ -476,7 +492,13 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
         for ev_kwh in _ev_actions(inputs, index, levels):
             for mode in _allowed(inputs, index):
                 soc, imp, exp = _step(
-                    inputs, index, MODES[mode], grid, target(index, ev_kwh), ev_kwh
+                    inputs,
+                    index,
+                    MODES[mode],
+                    grid,
+                    target(index, ev_kwh),
+                    ev_kwh,
+                    export_caps[index],
                 )
                 cost = _quarter_cost(
                     inputs, index, imp, exp, caps[index], ev_kwh
@@ -503,7 +525,13 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
     def total(index, mode, ev_kwh, soc, extra=0.0):
         load = ev_kwh + extra
         next_soc, imp, exp = _step(
-            inputs, index, MODES[mode], soc, target(index, ev_kwh), load
+            inputs,
+            index,
+            MODES[mode],
+            soc,
+            target(index, ev_kwh),
+            load,
+            export_caps[index],
         )
         following = values[index + 1][mode]
         if following.shape[1] == 1:
@@ -645,6 +673,7 @@ def optimize(
     exempt: Sequence[float] | None = None,
     probe_kwh: float = 0.0,
     vehicle: Vehicle | None = None,
+    export_history: Mapping[dt.datetime, float] | None = None,
 ) -> Plan:
     """Return the cheapest plan.
 
@@ -657,16 +686,19 @@ def optimize(
     the mode the battery runs now, so a recalculated plan only changes it when it pays;
     `exempt` kWh per quarter of the load that the import limit does not apply to (the
     heat pump); `probe_kwh` the extra load per quarter that `Plan.marginal` prices;
-    `vehicle` a car to charge in the same plan (see `Vehicle` and `_optimize`).
+    `vehicle` a car to charge in the same plan (see `Vehicle` and `_optimize`);
+    `export_history` the hourly mean grid export so far this month, like `history`,
+    for the export power charges.
     """
     # Keyed by the hour in UTC (see _hourly); local time for the tariff's periods
     history = {hour_start(h): kw for h, kw in (history or {}).items()}
+    export_history = {hour_start(h): kw for h, kw in (export_history or {}).items()}
     tz = starts[0].tzinfo if starts else dt.UTC
     limit = limit or Limit()
     net = np.array(load, dtype=float) - np.array(pv, dtype=float)
     buy = np.array(
         [
-            p * 1.25 / 1000 + tariff.buy_fee(s) / 100
+            p * 1.25 * tariff.spot_factor(s) / 1000 + tariff.buy_fee(s) / 100
             for s, p in zip(starts, prices, strict=True)
         ]
     )
@@ -717,7 +749,7 @@ def optimize(
     # Each hour's local start, for the tariff's periods; once, not per level tried
     local_of = {
         hour: hour.astimezone(tz)
-        for hour in (*history, *(hour_start(start) for start in starts))
+        for hour in (*history, *export_history, *map(hour_start, starts))
     }
 
     # The power charges in the horizon, per month, and the peak already reached
@@ -730,9 +762,10 @@ def optimize(
             if charge.period.contains(start):
                 key = _charge_key(index, start)
                 if key not in charges:
+                    flow = export_history if charge.export else history
                     month = [
                         (local_of[h], kw)
-                        for h, kw in history.items()
+                        for h, kw in flow.items()
                         if (local_of[h].year, local_of[h].month)
                         == (start.year, start.month)
                     ]
@@ -742,14 +775,23 @@ def optimize(
         quarter_keys.append(keys)
 
     def run(levels: dict[str, float]) -> Plan:
-        """Plan for fixed import target levels."""
+        """Plan for fixed import and export target levels."""
         caps, peak_levels = [], []
-        level_caps, other_caps = [], []
+        level_caps, other_caps, export_caps = [], [], []
         fuse = [limit.fuse_kw] if limit.fuse_kw > 0 else []
         for index, keys in enumerate(quarter_keys):
-            peak_levels.append(min([*(levels[k] for k in keys), *fuse], default=None))
+            imported = [k for k in keys if not charges[k][1].export]
+            peak_levels.append(
+                min([*(levels[k] for k in imported), *fuse], default=None)
+            )
             level_caps.append(
-                min((levels[k] * QUARTER_HOURS for k in keys), default=math.inf)
+                min((levels[k] * QUARTER_HOURS for k in imported), default=math.inf)
+            )
+            export_caps.append(
+                min(
+                    (levels[k] * QUARTER_HOURS for k in keys if charges[k][1].export),
+                    default=math.inf,
+                )
             )
             other_caps.append(
                 min(
@@ -763,12 +805,13 @@ def optimize(
                     (
                         levels[k] * QUARTER_HOURS,
                         charges[k][1].kr_per_kw * shares[k] / charges[k][1].peaks,
+                        charges[k][1].export,
                     )
                     for k in keys
                 ]
             )
         modes, socs, imports, exports, switches, marginal, ev_kwh, missing = _optimize(
-            inputs, (level_caps, other_caps), caps
+            inputs, (level_caps, other_caps, export_caps), caps
         )
         # As in _optimize: the car's charging comes on top of the battery's
         targets = [
@@ -792,14 +835,14 @@ def optimize(
         wear = sum(
             max(a - b, 0.0) * battery.wear_cost for a, b in pairwise([first, *socs])
         )
-        planned = _hourly(starts, imports)
-        combined = {**history, **planned}
+        combined = {**history, **_hourly(starts, imports)}
+        combined_export = {**export_history, **_hourly(starts, exports)}
         power = amortized = 0.0
         peaks = {}
         for key, (index, charge, before) in charges.items():
             month = [
                 (local_of[h], kw)
-                for h, kw in combined.items()
+                for h, kw in (combined_export if charge.export else combined).items()
                 if _charge_key(index, local_of[h]) == key
             ]
             after = charged_peak(charge, month)
@@ -852,12 +895,17 @@ def optimize(
         + max(float(np.max(net, initial=0.0)) / QUARTER_HOURS, 0.0)
         + (max(vehicle.powers_kw) if vehicle else 0.0)
     )
+    # The most the battery and the PV surplus can export
+    top_export = battery.max_power_kw + max(
+        float(np.max(-net, initial=0.0)) / QUARTER_HOURS, 0.0
+    )
     for _ in range(2):
         improved = False
         for key in charges:
             start = levels[key]
+            highest = top_export if charges[key][1].export else top
             for fine in (False, True):
-                for level in _candidate_levels(start, levels[key], top, fine=fine):
+                for level in _candidate_levels(start, levels[key], highest, fine=fine):
                     plan = run({**levels, key: level})
                     if plan.objective < best.objective - 0.01:
                         best, levels, improved = plan, {**levels, key: level}, True

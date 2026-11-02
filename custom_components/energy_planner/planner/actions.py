@@ -101,6 +101,7 @@ def heat_pump_economy(situation: Situation) -> dict[str, Any]:
         cop_curve,
         district,
         export / power if power > 0 else 0.0,
+        tariff.spot_factor(now),
     )
     result["spot"] = round(spot / 10, 1)
     result["power"] = round(power, 3)

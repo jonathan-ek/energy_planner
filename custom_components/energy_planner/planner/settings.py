@@ -74,6 +74,9 @@ SETTINGS: dict[str, Setting] = {
         # Energy counter of the grid import (the HAN port); its hourly changes this
         # month give the power peaks already paid for
         Setting("grid_import_sensor", "sensor.matarstallning_aktiv_energi_uttag"),
+        # The same for the grid export, for export power charges (None: no export
+        # peak reached yet this month)
+        Setting("grid_export_sensor", None),
         # A per phase, 0: not limited
         _number("main_fuse", 0, replans=True),
         # A per phase kept free by the fuse guard

@@ -99,18 +99,20 @@ def evaluate(
     curve: Sequence[tuple[float, float]],
     district_price: float,
     export_share: float = 0.0,
+    spot_factor: float = 1.0,
 ) -> dict:
     """Compare a kWh of heat from the heat pump with one from district heating.
 
     `spot` is SEK/MWh excl. VAT, the fees öre/kWh, `export_share` the part of the
-    heat pump's electricity that would otherwise be exported (0-1). Prices in the
-    result are öre/kWh; `saving` is per kWh of heat (positive: the heat pump is
+    heat pump's electricity that would otherwise be exported (0-1), `spot_factor` what
+    bought electricity's spot price is multiplied by (`Tariff.spot_factor`). Prices in
+    the result are öre/kWh; `saving` is per kWh of heat (positive: the heat pump is
     cheaper), `break_even_spot` the spot price (öre/kWh excl. VAT) up to which bought
     electricity pays.
     """
     pump_cop = cop(curve, outdoor)
     share = min(max(export_share, 0.0), 1.0)
-    bought = spot / 10 * 1.25 + buy_fee
+    bought = spot / 10 * 1.25 * spot_factor + buy_fee
     exported = spot / 10 + sell_fee
     electricity = share * exported + (1 - share) * bought
     result = {
@@ -128,7 +130,9 @@ def evaluate(
     heat = electricity / pump_cop
     result["heat_pump_heat_price"] = round(heat, 1)
     result["saving"] = round(district_price - heat, 1)
-    result["break_even_spot"] = round((district_price * pump_cop - buy_fee) / 1.25, 1)
+    result["break_even_spot"] = round(
+        (district_price * pump_cop - buy_fee) / 1.25 / spot_factor, 1
+    )
     return result
 
 
