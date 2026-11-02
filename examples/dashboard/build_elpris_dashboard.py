@@ -18,6 +18,11 @@ hold) and orange where it uses the battery (self-use, sell); `action` one colour
 With `plan` or `action` the quarters before the plan (earlier today) are grey and a legend
 follows the charts. The site's `colors` is the default (else `average`); another one is a trial,
 pushed as `dashboard-elpris-<colors>` and written with the suffix `_<colors>`.
+
+Two more views show what was done: "Utfall" the day before yesterday, yesterday and today with
+the price coloured by the recorded battery action, the battery, SOC and solar, and Tibber-like
+totals (bought, cost, sold, earned, average price, saved); "Månader" the totals per month. Its cards
+read the recorder's statistics and history themselves (async data_generators).
 """
 
 import asyncio
@@ -66,6 +71,9 @@ SITES = {
         "fee_jinja": "45 + (18 if 6 <= h < 23 else 9)",
         "sell_jinja": "(7.2 if now().month in [1, 2, 3, 11, 12] and now().isoweekday() <= 5"
                       " and 6 <= h < 22 else 5.1)",
+        # The same in JS for the history view, at the local time d
+        "sell_js": "([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >= 1 && d.getDay() <= 5"
+                   " && h >= 6 && h < 22 ? 7.2 : 5.1)",
         "import_kw": "states('sensor.aktiv_effekt_uttag_momentan_trefaseffekt') | float",
         "export_kw": "states('sensor.aktiv_effekt_inmatning_momentan_trefaseffekt') | float",
         "bought": "sensor.matarstallning_aktiv_energi_uttag",
@@ -92,6 +100,7 @@ SITES = {
         "fee_js": "45 + 32.3",
         "fee_jinja": "45 + 32.3",
         "sell_jinja": "10",
+        "sell_js": "10",
         "import_kw": "states('{pulse}_power') | float / 1000",
         "export_kw": "states('{pulse}_power_production') | float / 1000",
         "bought": "{pulse}_last_meter_consumption",
@@ -117,6 +126,7 @@ SITES = {
         "fee_js": "45 + 32.3",
         "fee_jinja": "45 + 32.3",
         "sell_jinja": "10",
+        "sell_js": "10",
         "import_kw": "states('sensor.aktiv_effekt_uttag_momentan_trefaseffekt') | float",
         "export_kw": "states('sensor.aktiv_effekt_inmatning_momentan_trefaseffekt') | float",
         "bought": "sensor.matarstallning_aktiv_energi_uttag",
@@ -142,6 +152,7 @@ SITES = {
         "fee_js": "45 + 32.3",
         "fee_jinja": "45 + 32.3",
         "sell_jinja": "10",
+        "sell_js": "10",
         "import_kw": "[-(states('sensor.solis_s6_solis_meter_total_active_power') | float), 0] | max / 1000",
         "export_kw": "[states('sensor.solis_s6_solis_meter_total_active_power') | float, 0] | max / 1000",
         "bought": "sensor.solis_s6_solis_total_energy_imported_from_grid",
@@ -689,6 +700,252 @@ FLOW = {
 }
 
 
+# The history views ("Utfall", "Månader"): what was done and what it came to, from the recorder.
+# Bought / sold kWh per hour (the meters' statistics) priced at the Nord Pool sensor's
+# last price in the hour (its statistics keep no mean) plus the fees; the savings package
+# prices per minute, so the net of the two can differ a little.
+# shortcut: hours without the Nord Pool sensor's statistics are not priced (the SE4 homes
+# lose some, see docs/battery-plan.md); add bought cost / sold income sensors if that matters.
+ACTION = "sensor.energy_planner_battery_action"
+AREA = NORDPOOL.split("_")[2].upper()  # sensor.nordpool_kwh_<area>_<currency>_...
+WITHOUT = "sensor.elkostnad_utan_sol_och_batteri"
+SELL_JS = ("const sell = (ms) => { const d = new Date(ms); const h = d.getHours(); return "
+           + SITE["sell_js"] + "; };")
+HISTORY_JS = FEE_JS + "\n" + SELL_JS + f"""
+const memo = (key, make) => {{
+  const cache = (window.__elprisHistory ||= {{}});
+  const hit = cache[key];
+  if (hit && Date.now() - hit.t < 60000) return hit.p;
+  const p = make();
+  cache[key] = {{t: Date.now(), p}};
+  p.catch(() => delete cache[key]);
+  return p;
+}};
+// Kind 'd' (days) or 'm' (months) back from the current one: [from, to) in ms
+const period = (kind, back) => {{
+  const n = new Date();
+  const from = kind === 'd' ? new Date(n.getFullYear(), n.getMonth(), n.getDate() - back)
+    : new Date(n.getFullYear(), n.getMonth() - back, 1);
+  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1)
+    : new Date(from.getFullYear(), from.getMonth() + 1, 1);
+  return [from.getTime(), Math.min(to.getTime(), n.getTime())];
+}};
+const hourly = (from, to) => memo('s' + from + '-' + to, () => hass.callWS({{
+  type: 'recorder/statistics_during_period', period: 'hour', types: ['change', 'state'],
+  start_time: new Date(from).toISOString(), end_time: new Date(to).toISOString(),
+  statistic_ids: ['{BOUGHT}', '{SOLD}', '{NORDPOOL}', '{SAVING}', '{WITHOUT}']}}));
+// Sums over the hours of [from, to), split by period start (day or month): Map start -> totals
+const totals = async (from, to, key) => {{
+  const r = await hourly(from, to);
+  const spot = new Map((r['{NORDPOOL}'] || []).map((x) => [x.start, x.state * {SCALE}]));
+  const out = new Map();
+  const add = (x, f) => {{
+    const k = key(x.start);
+    const t = out.get(k) || {{bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without: 0, unpriced: 0, area: 0, hours: 0}};
+    f(t, x.change || 0, spot.get(x.start));
+    out.set(k, t);
+  }};
+  for (const x of r['{BOUGHT}'] || []) add(x, (t, kwh, p) => {{
+    t.bought += kwh;
+    if (p == null) t.unpriced += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;
+  }});
+  for (const x of r['{SOLD}'] || []) add(x, (t, kwh, p) => {{
+    t.sold += kwh;
+    if (p != null) t.income += kwh * (p / 1.25 + sell(x.start)) / 100;
+  }});
+  for (const x of r['{SAVING}'] || []) add(x, (t, kr) => {{ t.saved += kr; }});
+  for (const x of r['{WITHOUT}'] || []) add(x, (t, kr) => {{ t.without += kr; }});
+  // The area's plain mean: what an even load (a monthly price contract) pays, with the same fees
+  for (const [ms, p] of spot) add({{start: ms}}, (t) => {{ t.area += p + fee(ms); t.hours += 1; }});
+  return out;
+}};
+const monthStart = (ms) => {{ const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); }};
+const value = (t, field) => field === 'area' ? (t.hours ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost / (t.bought - t.unpriced) * 100 : null) : t[field];
+"""
+
+
+# Tibber-like icon tiles: (background, SVG body drawn in a 24 x 24 box)
+ICONS = {
+    "bars": ("#bdf3fb", '<rect x="5" y="11" width="3" height="8" rx="1.5"/><rect x="10.5" y="5" width="3"'
+                        ' height="14" rx="1.5"/><rect x="16" y="9" width="3" height="10" rx="1.5"/>'),
+    "sun": ("#fdeec0", '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1'
+                       ' 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" stroke="#0b0f14" stroke-width="2"'
+                       ' stroke-linecap="round"/>'),
+    "scale": ("#22c7e8", '<path d="M12 4v16M7 20h10M5 7h14" stroke="#0b0f14" stroke-width="2"'
+                         ' stroke-linecap="round" fill="none"/><path d="M2.5 13l2.5-6 2.5 6zM16.5 13l2.5-6'
+                         ' 2.5 6z" stroke="#0b0f14" stroke-width="1.5" stroke-linejoin="round"'
+                         ' fill="none"/>'),
+    "coin": ("#a7f3d0", '<circle cx="12" cy="12" r="8" fill="none" stroke="#0b0f14" stroke-width="2"/>'
+                        '<path d="M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.6-1 1.4-2.5 1.6-2.5.6-2.5'
+                        ' 1.7 1 1.6 2.5 1.6 2.5-.5 2.5-1.5" stroke="#0b0f14" stroke-width="1.6"'
+                        ' fill="none" stroke-linecap="round"/>'),
+}
+
+
+def tibber_card(kind, back, title, icon, main, sub=None):
+    """One Tibber-like total: icon tile, title, the value big and a second value under it.
+    An apexcharts card showing only its header states (no chart), restyled."""
+    color, body = ICONS[icon]
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#0b0f14">{body}</svg>'
+    uri = "data:image/svg+xml," + svg.replace("#", "%23").replace('"', "'").replace("<", "%3C").replace(">", "%3E")
+    card = apex_base(10, "1h")
+    del card["span"]
+    card["now"] = {"show": False}
+    card["header"] = {"show": True, "title": title, "show_states": True, "colorize_states": False}
+    card["series"] = [{
+        "entity": NORDPOOL, "name": name, "unit": unit, "float_precision": decimals,
+        "show": {"in_chart": False, "in_header": True, "legend_value": False},
+        "data_generator": HISTORY_JS + f"""
+const [from, to] = period('{kind}', {back});
+const t = (await totals(from, to, () => from)).get(from);
+return t ? [[to, value(t, '{field}')]] : [];
+""",
+    } for field, name, unit, decimals in [main, *([sub] if sub else [])]]
+    # Prefixed with ha-card: the card's own stylesheet comes after card-mod's and wins a tie
+    card["card_mod"] = card_mod(f"""
+ha-card {{ padding: 4px 0 18px; }}
+ha-card #graph-wrapper {{ display: none; }}
+ha-card #header {{ position: relative; padding: 14px 16px 0 100px; min-height: 96px; }}
+ha-card #header::before {{ content: ''; position: absolute; left: 20px; top: 56px; width: 60px;
+  height: 60px; border-radius: 14px; background: {color} url("{uri}") center / 32px no-repeat; }}
+ha-card #header__title {{ color: var(--primary-text-color); font-size: 19px; font-weight: 500;
+  padding-bottom: 18px; margin-left: -80px; overflow: visible; }}
+ha-card #header__states {{ display: block; margin: 0; }}
+ha-card #header__states > * {{ margin: 0; }}
+ha-card #states__state {{ flex: none; }}
+ha-card #states__state:first-child #state {{ font-size: 30px; font-weight: 700; }}
+ha-card #states__state:first-child #uom {{ font-size: 30px; font-weight: 700; opacity: 1;
+  margin-left: 6px; }}
+ha-card #states__state:first-child #state__name {{ display: none; }}
+ha-card #states__state:nth-child(2) {{ display: flex; flex-direction: row-reverse;
+  justify-content: flex-end; gap: 6px; margin-top: 6px; color: var(--secondary-text-color); }}
+ha-card #states__state:nth-child(2) #state, ha-card #states__state:nth-child(2) #uom,
+ha-card #states__state:nth-child(2) #state__name {{ font-size: 17px; font-weight: 400; opacity: 1;
+  color: var(--secondary-text-color); }}
+""")
+    return card
+
+
+def summary_card(kind, back):
+    """Tibber-like totals for one day or month: bought, sold, the average price and saved."""
+    return {"type": "vertical-stack", "cards": [
+        tibber_card(kind, back, "Förbrukat", "bars", ("bought", "", "kWh", 0), ("cost", "Kostnad:", "kr", 2)),
+        tibber_card(kind, back, "Sålt", "sun", ("sold", "", "kWh", 0), ("income", "Tjänat", "kr", 2)),
+        tibber_card(kind, back, "Ditt snittpris", "scale", ("avg", "", "öre/kWh", 1),
+                    ("area", f"Medelpris i {AREA}:", "öre/kWh", 1)),
+        tibber_card(kind, back, "Sparat med sol och batteri", "coin", ("saved", "", "kr", 0),
+                    ("without", "Utan dem:", "kr", 0)),
+    ]}
+
+def months_chart():
+    """Cost and income per month (columns) and the average price paid (line), a year back."""
+    card = apex_base(200, "365d", yaxis=[
+        {"id": "kr", "min": 0, "decimals": 0, "apex_config": {"tickAmount": 4}},
+        {"id": "ore", "opposite": True, "min": 0, "decimals": 0, "apex_config": {"tickAmount": 4}},
+    ], xformat="MMM")
+    card["span"] = {"end": "month", "offset": "-15d"}
+    card["now"] = {"show": False}
+    card["update_interval"] = "30min"
+    card["header"] = {"show": True, "title": "Per månad"}
+    series = [("cost", "Kostnad", "kr", "column", HIGH, "kr"), ("income", "Tjänat", "kr", "column", LOW, "kr"),
+              ("avg", "Snittpris", "öre/kWh", "line", "#7c9cff", "ore")]
+    card["series"] = [{
+        "entity": NORDPOOL, "name": name, "unit": unit, "type": kind, "color": color, "yaxis_id": axis,
+        "float_precision": 1 if field == "avg" else 0, "extend_to": False,
+        "show": {"in_header": False, "legend_value": False},
+        "data_generator": HISTORY_JS + f"""
+const from = period('m', 11)[0];
+const sums = await totals(from, Date.now(), monthStart);
+return [...sums.entries()].map(([ms, t]) => [ms, value(t, '{field}')]);
+""",
+    } for field, name, unit, kind, color, axis in series]
+    card["apex_config"]["plotOptions"] = {"bar": {"borderRadius": 3, "columnWidth": "70%"}}
+    card["apex_config"]["tooltip"] = {"x": {"format": "MMMM yyyy"}}
+    card["apex_config"]["legend"] = {"show": True, "position": "top", "horizontalAlign": "left",
+                                     "fontSize": "12px", "markers": {"size": 5}}
+    return card
+
+
+def done_price_series(key):
+    """data_generator for the price line where the battery did what belongs to `key` of
+    PRICE_COLORS[COLORS], from the recorded battery action ("none": no action recorded)."""
+    groups = {m: k for k, (_, _, modes) in PRICE_COLORS[COLORS].items() for m in modes}
+    return HISTORY_JS + f"""
+const groups = {json.dumps(groups)};
+const states = {json.dumps(STATE_MODES)};
+const to = Math.min(end.getTime(), Date.now());
+const h = await memo('h' + start.getTime(), () => hass.callWS({{
+  type: 'history/history_during_period', minimal_response: true, no_attributes: true,
+  significant_changes_only: false, start_time: start.toISOString(), end_time: new Date(to).toISOString(),
+  entity_ids: ['{NORDPOOL}', '{ACTION}']}}));
+// The state in effect at ms (changes at the quarter's start may land a little after it)
+const at = (rows, ms) => {{
+  let s = null;
+  for (const r of rows || []) {{ if (r.lu * 1000 <= ms + 30000) s = r.s; else break; }}
+  return s;
+}};
+const pts = [];
+for (let q = start.getTime(); q < to; q += 900000) {{
+  const p = parseFloat(at(h['{NORDPOOL}'], q));
+  const g = groups[states[at(h['{ACTION}'], q)]] || 'none';
+  pts.push([q, isNaN(p) ? null : Math.round((p * {SCALE} + fee(q)) * 10) / 10, g]);
+}}
+return pts.map((p, i) => [p[0], p[2] === '{key}' || (i > 0 && pts[i - 1][2] === '{key}') ? p[1] : null]);
+"""
+
+
+def done_price_chart(offset=None):
+    """The price that day, coloured by what the battery did each quarter."""
+    card = plan_price_chart(150, "24h", offset, est=False, title="Elpris öre/kWh · vad batteriet gjorde")
+    for sr in card["series"]:
+        key = next((k for k, (c, label) in {**{k: v[:2] for k, v in PRICE_COLORS[COLORS].items()},
+                                             "none": NO_PLAN}.items() if label == sr["name"]), "none")
+        sr["data_generator"] = done_price_series(key)
+    card["yaxis"] = [{"min": 0, "align_to": 100, "decimals": 0, "apex_config": {"tickAmount": 2}}]
+    return card
+
+
+def done_day(back):
+    offset = f"-{back}d" if back else None
+    return {"type": "vertical-stack", "cards": [
+        summary_card("d", back),
+        done_price_chart(offset),
+        battery_chart(offset),
+        soc_chart(offset),
+        solar_chart(offset),
+    ]}
+
+
+def savings():
+    """The Besparing section: today's saving and the week / month / year charts."""
+    return {"type": "grid", "cards": [
+        {"type": "heading", "heading": "Besparing", "heading_style": "title"},
+        md_card(SAVE_MD),
+        tabs([("Vecka", history_stack("7d", "day", "ddd")),
+              ("Månad", history_stack("30d", "day", "d")),
+              ("År", history_stack("365d", "month", "MMM"))]),
+    ]}
+
+
+def history_views():
+    """Two views: what was done per day ("Utfall") and the totals per month ("Månader")."""
+    done = {"type": "grid", "cards": [
+        {"type": "heading", "heading": "Utfall", "heading_style": "title"},
+        tabs([("I förrgår", done_day(2)), ("Igår", done_day(1)), ("I dag", done_day(0))], default=2),
+        price_legend(),
+    ]}
+    months = {"type": "grid", "cards": [
+        {"type": "heading", "heading": "Månader", "heading_style": "title"},
+        tabs([("Förra månaden", summary_card("m", 1)), ("Denna månad", summary_card("m", 0))], default=1),
+        months_chart(),
+        {"type": "markdown", "content": "<small>" + SITE["note"] + " Kostnad och snittpris"
+         " för köpt el per timme, Tjänat för såld el.</small>", "card_mod": card_mod()},
+    ]}
+    view = {"type": "sections", "max_columns": 3, "dense_section_placement": True}
+    return [{"title": "Utfall", "path": "utfall", "icon": "mdi:history", **view, "sections": [done]},
+            {"title": "Månader", "path": "manader", "icon": "mdi:calendar-month", **view,
+             "sections": [months, savings()]}]
+
 def config():
     strip = price_chart(70, "24h", est=False)
     strip["now"] = {"show": True, "color": "#ffffff", "label": ""}
@@ -711,13 +968,7 @@ def config():
         {"type": "heading", "heading": "Hemmet", "heading_style": "title"},
         FLOW,
     ]}
-    savings_section = {"type": "grid", "cards": [
-        {"type": "heading", "heading": "Besparing", "heading_style": "title"},
-        md_card(SAVE_MD),
-        tabs([("Vecka", history_stack("7d", "day", "ddd")),
-              ("Månad", history_stack("30d", "day", "d")),
-              ("År", history_stack("365d", "month", "MMM"))]),
-    ]}
+    savings_section = savings()
     battery_section = {"type": "grid", "cards": [
         {"type": "heading", "heading": "Batteriaktivitet", "heading_style": "title"},
         tabs([("I dag", day_stack()), ("Imorgon", day_stack("+1d"))]),
@@ -728,7 +979,7 @@ def config():
         "title": "Elpris", "path": "elpris", "icon": "mdi:flash", "type": "sections",
         "max_columns": 3, "dense_section_placement": True,
         "sections": [price_section, savings_section, home_section, battery_section],
-    }]}
+    }, *history_views()]}
 
 
 def package():
