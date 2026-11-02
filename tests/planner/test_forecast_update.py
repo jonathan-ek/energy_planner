@@ -364,3 +364,46 @@ async def test_calendar_all_day_events(mock_hass):
             "",
         )
     ]
+
+
+async def test_calendar_changed(mock_hass):
+    """Test that only a change in events not yet ended counts."""
+    today = NOW.date()
+    ended = (
+        dt.datetime.combine(today, dt.time(9), TZ),
+        dt.datetime.combine(today, dt.time(10), TZ),
+        "Tvätt",
+        "",
+    )
+    sauna = (
+        dt.datetime.combine(today, dt.time(19), TZ),
+        dt.datetime.combine(today, dt.time(21), TZ),
+        "Bastu",
+        "",
+    )
+    with (
+        patch.object(forecast_update.dt_utils, "now", return_value=NOW),
+        patch.object(forecast_update, "_forecast_solar_sources", return_value=[]),
+        patch.object(forecast_update, "_hourly_means", return_value=statistics()),
+        patch.object(forecast_update, "_solar_planes", return_value=(None, [])),
+        patch.object(forecast_update, "_calendar_events") as events,
+    ):
+        # No forecast yet: the start-up update reads the calendar anyway
+        assert not await forecast_update.async_calendar_changed(mock_hass)
+        events.return_value = [ended]
+        await forecast_update.async_update_forecast(mock_hass)
+        events.return_value = []
+        assert not await forecast_update.async_calendar_changed(mock_hass)
+        events.return_value = [ended, sauna]
+        assert await forecast_update.async_calendar_changed(mock_hass)
+        await forecast_update.async_update_forecast(mock_hass)
+        assert not await forecast_update.async_calendar_changed(mock_hass)
+        events.side_effect = RuntimeError("boom")
+        assert not await forecast_update.async_calendar_changed(mock_hass)
+        events.side_effect = None
+        events.return_value = [ended]
+        # A failed build keeps the old events, so the next check tries again
+        mock_hass.async_add_executor_job.side_effect = RuntimeError("build")
+        with pytest.raises(RuntimeError):
+            await forecast_update.async_update_forecast(mock_hass)
+        assert await forecast_update.async_calendar_changed(mock_hass)

@@ -35,6 +35,7 @@ from .planner.ev import is_plugged as ev_is_plugged
 from .planner.ev import is_unplugged as ev_is_unplugged
 from .planner.fuse_guard import config_entities, update_guard
 from .planner import (
+    async_calendar_changed,
     async_car_unplugged,
     async_request_plan,
     async_set_ev_soc,
@@ -295,6 +296,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         async_track_utc_time_change(hass, update_forecast, minute=5, second=0)
     )
     entry.async_on_unload(async_at_started(hass, update_forecast))
+
+    async def calendar_check(now: dt.datetime):
+        # HA has no event for an edited calendar (its state only follows the
+        # current event), so it is read every few minutes
+        if await async_calendar_changed(hass):
+            await update_forecast()
+
+    entry.async_on_unload(
+        async_track_utc_time_change(hass, calendar_check, minute="/5", second=20)
+    )
 
     async def forecast_setting_changed(event: Event[EventStateChangedData]):
         old, new = event.data["old_state"], event.data["new_state"]

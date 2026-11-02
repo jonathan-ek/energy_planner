@@ -144,7 +144,11 @@ out to whole quarters, kept in UTC. Where they overlap, the last added wins.
   schedule of slots were removed (docs/adr/0001-one-planner-no-schedule.md);
   `migrate.py` cleans up their stored data and entities.
 - **Forecast:** recalculated at :05 every hour (after the recorder compiles hourly
-  statistics), once after HA has started and by the `update_forecast` service. Errors are logged and do not stop the timers.
+  statistics), once after HA has started, by the `update_forecast` service and when
+  the calendar's events not yet ended change (`async_calendar_changed`, read every
+  5 minutes at :20 s, since HA has no event for an edited calendar; the events are
+  stored in `hass.data[DOMAIN]["calendar_events"]`). Errors are logged and do not
+  stop the timers.
 - **Battery plan:** recalculated every quarter (:00:30, :15:30, …), after each timed
   forecast update, and when tomorrow's prices arrive (`tomorrow_valid`), a setting with
   `replans` (`planner/settings.py`) or the tariff

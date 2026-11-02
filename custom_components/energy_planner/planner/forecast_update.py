@@ -6,6 +6,8 @@ plane from the Forecast.Solar configuration, and the temperature) or else
 Forecast.Solar's estimates into a `forecast.ForecastInputs`; the pure
 `forecast.build_forecast` turns them into a `Forecast`, which is stored in
 `hass.data[DOMAIN]["forecast"]` and shown by the two forecast sensors.
+`async_calendar_changed` tells whether the calendar's coming events differ from the
+ones the last forecast saw, so an added, moved or removed event updates it.
 """
 
 import datetime as dt
@@ -32,6 +34,8 @@ HISTORY_DAYS = 35
 # Returns the latest forecast and the forecast made the day before, in one request
 OPEN_METEO_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 OPEN_METEO_TIMEOUT = aiohttp.ClientTimeout(total=30)
+# The calendar's events (from midnight, all-day too) the last forecast was built with
+CALENDAR_EVENTS = "calendar_events"
 
 
 async def _hourly_means(hass: HomeAssistant, statistic_ids, start, end):
@@ -263,6 +267,46 @@ async def _planned_loads(hass: HomeAssistant, calendar_id, start, end):
     return planned
 
 
+async def _calendar_snapshot(hass: HomeAssistant, calendar_id, now):
+    """Return the calendar's events in the forecast's days, None when it fails."""
+    end = dt_utils.start_of_local_day(
+        now.date() + dt.timedelta(days=forecast.FORECAST_DAYS)
+    )
+    try:
+        return await _calendar_events(
+            hass,
+            calendar_id,
+            dt_utils.start_of_local_day(now.date()),
+            end,
+            all_day=True,
+        )
+    except Exception as err:
+        # One line: the check runs every 5 minutes
+        _LOGGER.warning("Failed to read %s: %s", calendar_id, err)
+        return None
+
+
+async def async_calendar_changed(hass: HomeAssistant) -> bool:
+    """Return whether the calendar's events not yet ended changed since the forecast.
+
+    Compares a fresh read with the events stored by the last forecast update, both
+    without the events that have ended (they no longer change the plan).
+    """
+    previous = hass.data[DOMAIN].get(CALENDAR_EVENTS)
+    if previous is None:
+        return False
+    now = dt_utils.now()
+    calendar_id = settings.get(hass.data[DOMAIN]["config"], "forecast_calendar")
+    current = await _calendar_snapshot(hass, calendar_id, now)
+    if current is None:
+        return False
+
+    def coming(events):
+        return {event for event in events if event[1] > now}
+
+    return coming(current) != coming(previous)
+
+
 async def async_update_forecast(hass: HomeAssistant) -> None:
     """Fetch the inputs, build the forecast and publish it."""
     config = hass.data[DOMAIN]["config"]
@@ -280,6 +324,8 @@ async def async_update_forecast(hass: HomeAssistant) -> None:
     yesterday_start = dt_utils.start_of_local_day(today - dt.timedelta(days=1))
     midnight = dt_utils.start_of_local_day()
     end = dt_utils.start_of_local_day(today + dt.timedelta(days=forecast.FORECAST_DAYS))
+    # Read before the build, so a change while it runs is still seen by the next check
+    calendar_events = await _calendar_snapshot(hass, calendar_id, now)
 
     sources = _forecast_solar_sources(hass)
     forecast_ids = [entity for _, entity in sources if entity]
@@ -327,6 +373,8 @@ async def async_update_forecast(hass: HomeAssistant) -> None:
     # A few hundred thousand operations: off the event loop, like the optimizer
     result = await hass.async_add_executor_job(forecast.build_forecast, inputs)
     hass.data[DOMAIN]["forecast"] = result
+    # Only with the forecast: after a failed build the next check updates again
+    hass.data[DOMAIN][CALENDAR_EVENTS] = calendar_events
     details = result.details
     _LOGGER.info(
         "Forecast tomorrow: load %s kWh, PV %s kWh (%s, calibration %s)",

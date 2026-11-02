@@ -57,6 +57,8 @@ Method and numbers come from a backtest on the real HA data (Oct 2026):
   `away` (`forecast.AWAY_WORDS`, all-day events too) mark the quarters they cover as
   `away`: no weekend reserve there. The battery keeps `battery_reserve_soc`, and the
   load profile is not lowered.
+- An added, moved or removed event (not yet ended) updates the forecast and the plan
+  within 5 minutes; the calendar is read every 5 minutes and compared.
 - Output: a `forecast.Forecast` in `hass.data[DOMAIN]["forecast"]`: a `timeline` and
   per-quarter `load` (profile), `planned`, `reserve`, `pv` (kWh per quarter, all of
   today and the next two days, `FORECAST_DAYS`; the plan uses the third day once
