@@ -74,10 +74,36 @@ async def _hourly_import(hass: HomeAssistant, statistic_ids, start, end):
 
 
 def car_status(hass: HomeAssistant) -> str | None:
-    """Return the charger's state, None without a charger status sensor or state."""
+    """Return the charger's state, None without a charger status sensor or state.
+
+    The car's own state (`ev_car_status_sensor`) instead while only the car says it
+    is plugged in: it may see a plug-in minutes before the charger's cloud does.
+    """
     car = settings.car(hass.data[DOMAIN]["config"])
-    state = hass.states.get(car.status_sensor) if car is not None else None
+    if car is None:
+        return None
+    charger = _state(hass, car.status_sensor)
+    if not ev.is_plugged(charger) and car.car_status_sensor:
+        own = _state(hass, car.car_status_sensor)
+        if ev.is_plugged(own):
+            return own
+    return charger
+
+
+def _state(hass: HomeAssistant, entity_id: str) -> str | None:
+    state = hass.states.get(entity_id)
     return state.state if state is not None else None
+
+
+def _session_kwh(hass: HomeAssistant, car: settings.CarSettings) -> float | None:
+    """Return the session's energy, 0 while only the car says it is plugged in.
+
+    Until the charger has seen the plug-in its session sensor may still hold the
+    last session's total, which would be taken off the new need.
+    """
+    if not ev.is_plugged(_state(hass, car.status_sensor)):
+        return 0.0
+    return settings.reading(hass, car.session_energy_sensor)
 
 
 def ev_plugged(hass: HomeAssistant) -> bool:
@@ -95,7 +121,7 @@ def _car(hass: HomeAssistant) -> planning.CarReadings | None:
         settings=car,
         soc=settings.reading(hass, car.soc_sensor),
         charge_limit=settings.reading(hass, car.charge_limit_sensor),
-        delivered_kwh=settings.reading(hass, car.session_energy_sensor),
+        delivered_kwh=_session_kwh(hass, car),
         entered_soc=settings.get(config, "ev_soc"),
         entered_at_kwh=settings.get(config, "ev_soc_session_kwh"),
     )
@@ -126,7 +152,7 @@ async def async_set_ev_soc(
     config = hass.data[DOMAIN]["config"]
     car = settings.car(config)
     plugged = car is not None and ev_plugged(hass)
-    session = settings.reading(hass, car.session_energy_sensor) if plugged else None
+    session = _session_kwh(hass, car) if plugged else None
     unchanged = settings.get(config, "ev_soc") == soc
     values = {"ev_soc": float(soc), "ev_soc_session_kwh": session or 0.0}
     if charge_limit is not None:

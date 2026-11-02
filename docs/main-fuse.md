@@ -18,7 +18,8 @@ three-phase and balanced: the car charger's current and the battery's grid charg
   Zaptec reports the car's current about once a minute and the meter every 10-20 s,
   so a car that just started looks like house load; lowering only on a real excess
   keeps that from cutting the car. While the car should not charge, or has finished
-  (`ev_charger_status_sensor` ends in `finished`), no room is kept for it and its
+  (the car status ends in `finished`, Zaptec, or `complete`, the car's own Tesla BLE
+  state while the charger has not seen the plug-in), no room is kept for it and its
   setting is left alone.
 - The battery gets the rest: `grid_limit_kw` = house + car + the room left per phase
   (after the car's setting) × 3. Above it the inverter's peak shaving covers the load

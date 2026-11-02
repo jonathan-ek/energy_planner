@@ -123,6 +123,10 @@ SETTINGS: dict[str, Setting] = {
         # A trip: the need by then if that is before the next working morning
         Setting("ev_departure", None, "datetime", replans=True),
         Setting("ev_charger_status_sensor", None),
+        # The car's own charging state (e.g. Tesla BLE `sensor.*_charging`,
+        # `Disconnected` unplugged): plugged in when either says so, as the car may
+        # report a plug-in minutes before a charger's cloud does
+        Setting("ev_car_status_sensor", None),
         # kWh delivered since it was plugged in
         Setting("ev_session_energy_sensor", None),
         # The car's SOC and charge limit (%), for the need
@@ -201,6 +205,7 @@ class CarSettings:
     """The car's and its charger's settings."""
 
     status_sensor: str
+    car_status_sensor: str | None
     session_energy_sensor: str | None
     soc_sensor: str | None
     charge_limit_sensor: str | None
@@ -219,6 +224,7 @@ def car(config: Mapping[str, Any]) -> CarSettings | None:
         return None
     return CarSettings(
         status_sensor=status,
+        car_status_sensor=get(config, "ev_car_status_sensor") or None,
         session_energy_sensor=get(config, "ev_session_energy_sensor") or None,
         soc_sensor=get(config, "ev_soc_sensor") or None,
         charge_limit_sensor=get(config, "ev_charge_limit_sensor") or None,

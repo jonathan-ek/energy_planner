@@ -108,7 +108,8 @@ def _car_wanted(hass: HomeAssistant, now: dt.datetime) -> bool:
     if (
         status is None
         or not ev.is_plugged(status)
-        or status.lower().endswith("finished")
+        # Zaptec's connected_finished, or the car's own Complete (Tesla BLE)
+        or status.lower().endswith(("finished", "complete"))
     ):
         return False
     actions = actions_now(hass)

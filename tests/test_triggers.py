@@ -81,6 +81,54 @@ async def test_unplugging_clears_the_entered_soc_not_an_unreachable_charger():
     assert write.call_count == 2
 
 
+async def test_the_car_plugs_in_before_the_charger():
+    """Test that the car's own state replans only while the charger lags."""
+    hass = MagicMock()
+    hass.data = {
+        DOMAIN: {
+            "config": {
+                "ev_charger_status_sensor": "sensor.charger",
+                "ev_car_status_sensor": "sensor.car",
+            }
+        }
+    }
+    charger = {"state": "disconnected"}
+    hass.states.get = lambda _: SimpleNamespace(state=charger["state"])
+    callbacks = {}
+
+    def track(_hass, entity_ids, callback):
+        for entity_id in [entity_ids] if isinstance(entity_ids, str) else entity_ids:
+            callbacks[entity_id] = callback
+        return lambda: None
+
+    def change(old, new):
+        return SimpleNamespace(
+            data={
+                "entity_id": "sensor.car",
+                "old_state": SimpleNamespace(state=old),
+                "new_state": SimpleNamespace(state=new),
+            }
+        )
+
+    unplugged = AsyncMock()
+    with (
+        patch.object(integration, "async_track_state_change_event", track),
+        patch.object(integration, "async_request_plan", AsyncMock()) as request,
+        patch.object(integration, "async_car_unplugged", unplugged),
+        patch.object(integration, "write_plan_sensors"),
+    ):
+        integration._track_plan_triggers(hass, MagicMock())
+        await callbacks["sensor.car"](change("Disconnected", "Charging"))
+        request.assert_awaited_once_with(hass, "car plugged in")
+        # Once the charger says plugged in, the car's blips do not replan
+        charger["state"] = "connected_finished"
+        await callbacks["sensor.car"](change("Stopped", "unavailable"))
+        await callbacks["sensor.car"](change("unavailable", "Disconnected"))
+    assert request.await_count == 1
+    # Only the charger ends the session
+    unplugged.assert_not_awaited()
+
+
 async def test_fuse_guard_minute_is_not_held_back_by_a_reading():
     """Test that readings update the guard at most every 5 s, the minute always."""
     hass = MagicMock()

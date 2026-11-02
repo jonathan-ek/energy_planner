@@ -13,7 +13,12 @@ beats the end price. At
 `ev_charger_status_sensor` (no default: without it the car is not planned; any state
 but `disconnected`/`unavailable`/`unknown`/`off` means plugged in, so Zaptec's
 `connected_*`), `ev_session_energy_sensor` (kWh since plugged in),
-`ev_soc_sensor` / `ev_charge_limit_sensor` (%, with `ev_battery_capacity`, kWh).
+`ev_soc_sensor` / `ev_charge_limit_sensor` (%, with `ev_battery_capacity`, kWh),
+`ev_car_status_sensor` (the car's own charging state, e.g. Tesla BLE
+`sensor.*_charging`, `Disconnected` when unplugged: the car counts as plugged in
+when either it or the charger says so, as the car reports a plug-in minutes before
+a charger's cloud; only the charger ends the session, and until it has seen the
+plug-in the session energy counts as 0).
 Numbers: `ev_charge_limit` (%, default 100, the target without a limit sensor) and
 `ev_soc` (%, the SOC entered for this session, also by the `set_ev_soc` service with
 an optional charge limit; stored with the session energy then in
@@ -46,10 +51,14 @@ horizon), `planned_kwh`, `missing_kwh`.
   charges as without the planner); unplugged no state. Its attributes also carry the
   (fresh) plan's `need_kwh`, `need_source`, `ready`, `planned_kwh` and `missing_kwh`.
   `examples/ev/follow_ev_action_automation.yml` starts/stops a Zaptec with its charging
-  switch.
+  switch, and the car over Tesla BLE: it stops a car that charges before Zaptec's
+  cloud has seen the plug-in, and starts one stopped from the car (the Tesla app)
+  when the plan charges, at most every 2 minutes.
 - The owner's parents (Oct 2026): Tesla on a Zaptec (`sensor.garaget_laddstatus`,
   `sensor.garaget_session_total_charge`, `switch.garaget_laddar`), plugged in about
   16-19 until about 06:45, charging 1.5-2 h at ~11 kW at once; median night 18 kWh,
-  90th percentile 33 (2025-08 - 2026-10). Moving the evening charging to the night's cheapest hours saved
+  90th percentile 33 (2025-08 - 2026-10). Zaptec's cloud reported a plug-in about 2.5
+  minutes after the car started charging (2026-11-02: 0.35 kWh before the stop), the
+  Tesla BLE board (from 2026-11-02) at once. Moving the evening charging to the night's cheapest hours saved
   about 57 öre/kWh on the nights with prices (~1 500 kr/year). The car's SOC is to
   come from ESPHome Tesla BLE (M5Stack NanoC6).

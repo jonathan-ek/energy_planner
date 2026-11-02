@@ -387,6 +387,9 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
         )
     )
 
+    car = settings.car(config)
+    charger_sensor = car.status_sensor if car is not None else ""
+
     async def car_plugged(event: Event[EventStateChangedData]):
         old, new = event.data["old_state"], event.data["new_state"]
         old_state = old.state if old is not None else None
@@ -395,17 +398,25 @@ def _track_plan_triggers(hass: HomeAssistant, entry: ConfigEntry) -> None:
             return
         # The car action follows the charger now, not after the replan
         write_plan_sensors(hass)
-        if ev_is_unplugged(new_state):
+        from_charger = event.data["entity_id"] == charger_sensor
+        if from_charger and ev_is_unplugged(new_state):
             await async_car_unplugged(hass)
         was = ev_is_plugged(old_state)
         now = ev_is_plugged(new_state)
-        if was != now:
+        # The car's own state only matters while the charger does not say plugged in
+        charger = hass.states.get(charger_sensor)
+        if was != now and (
+            from_charger or not ev_is_plugged(charger.state if charger else None)
+        ):
             await async_request_plan(hass, "car plugged in" if now else "car unplugged")
 
-    car = settings.car(config)
     if car is not None:
         entry.async_on_unload(
-            async_track_state_change_event(hass, car.status_sensor, car_plugged)
+            async_track_state_change_event(
+                hass,
+                [car.status_sensor, *filter(None, [car.car_status_sensor])],
+                car_plugged,
+            )
         )
 
     drift_requested: list[dt.datetime] = []

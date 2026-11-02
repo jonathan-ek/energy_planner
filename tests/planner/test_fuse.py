@@ -213,6 +213,8 @@ def test_the_sensors_are_tracked_before_a_fuse_is_set():
         ("connected_requesting", "none", True),
         # A car that has finished draws nothing
         ("connected_finished", "charge", False),
+        # The car's own state (Tesla BLE) while the charger lags: full
+        ("Complete", "charge", False),
     ],
 )
 def test_car_wanted_from_the_published_action_and_the_live_charger(

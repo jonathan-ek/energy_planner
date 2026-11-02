@@ -229,6 +229,64 @@ async def test_unplugged_car_is_not_planned(mock_hass):
     assert build.call_args.args[0].car is None
 
 
+@pytest.mark.parametrize(
+    ("charger", "car", "expected"),
+    [
+        # The charger's cloud has not seen the plug-in yet: the car's state
+        ("disconnected", "Charging", "Charging"),
+        ("connected_finished", "Charging", "connected_finished"),
+        ("disconnected", "Disconnected", "disconnected"),
+        # The car out of reach says nothing
+        ("disconnected", "unavailable", "disconnected"),
+    ],
+)
+def test_car_status_from_the_car_while_the_charger_lags(
+    mock_hass, charger, car, expected
+):
+    """Test that the car's own state counts while only it says plugged in."""
+    STATES.update({"sensor.charger_status": charger, "sensor.car_charging": car})
+    mock_hass.data[DOMAIN]["config"].update(
+        {
+            "ev_charger_status_sensor": "sensor.charger_status",
+            "ev_car_status_sensor": "sensor.car_charging",
+        }
+    )
+    try:
+        assert battery_plan.car_status(mock_hass) == expected
+    finally:
+        del STATES["sensor.charger_status"], STATES["sensor.car_charging"]
+
+
+def test_no_session_energy_until_the_charger_sees_the_car(mock_hass):
+    """Test that the last session's total is not taken off a new need."""
+    STATES.update(
+        {
+            "sensor.charger_status": "disconnected",
+            "sensor.car_charging": "Charging",
+            "sensor.charger_session": "19.1",
+        }
+    )
+    mock_hass.data[DOMAIN]["config"].update(
+        {
+            "ev_charger_status_sensor": "sensor.charger_status",
+            "ev_car_status_sensor": "sensor.car_charging",
+            "ev_session_energy_sensor": "sensor.charger_session",
+        }
+    )
+    try:
+        car = battery_plan._car(mock_hass)
+        assert car is not None
+        assert car.delivered_kwh == 0.0
+        STATES["sensor.charger_status"] = "connected_charging"
+        car = battery_plan._car(mock_hass)
+        assert car is not None
+        assert car.delivered_kwh == 19.1
+    finally:
+        for key in ("sensor.charger_status", "sensor.car_charging"):
+            del STATES[key]
+        del STATES["sensor.charger_session"]
+
+
 @pytest.fixture
 def car_hass(mock_hass):
     """Return mock_hass with a plugged-in car that has delivered 6 kWh."""

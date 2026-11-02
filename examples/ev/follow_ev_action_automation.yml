@@ -4,8 +4,17 @@
 #
 # Planner config store: ev_charger_status_sensor = sensor.garaget_laddstatus,
 # ev_session_energy_sensor = sensor.garaget_session_total_charge, and once the car
-# reports them (ESPHome Tesla BLE) ev_soc_sensor and ev_charge_limit_sensor.
-# Turn off the car's own scheduled charging, or it may wait when the plan charges.
+# reports them (ESPHome Tesla BLE) ev_soc_sensor = sensor.tesla_ble_6c19c0_battery,
+# ev_charge_limit_sensor = number.tesla_ble_6c19c0_charging_limit and
+# ev_car_status_sensor = sensor.tesla_ble_6c19c0_charging. Turn off the car's own
+# scheduled charging, or it may wait when the plan charges.
+#
+# The car over BLE is the fast path: it reports a plug-in about 2.5 minutes before
+# Zaptec's cloud does (Nov 2026), so the planner's car action is set then, and the
+# car is stopped over BLE while the charger still says disconnected (only then: a
+# car stopped from the car can only be resumed over BLE). It is also started over BLE when the plan charges and the car itself was stopped (e.g.
+# from the Tesla app, where the charger switch is unavailable and can not resume
+# it). The car's Complete (full) is left alone.
 #
 # Without a fresh plan the action is `charge`, so the car charges as without the
 # planner; unplugged it has no state and nothing is done. Only writes when the
@@ -36,6 +45,13 @@ triggers:
     entity_id:
       - switch.garaget_laddar
     to: "on"
+  # The car's own state (Tesla BLE): a plug-in, or a stop from the car
+  - trigger: state
+    entity_id:
+      - sensor.tesla_ble_6c19c0_charging
+    to:
+      - Charging
+      - Stopped
   - trigger: time_pattern
     minutes: /15
   - trigger: state
@@ -65,13 +81,34 @@ actions:
             state: charge
           - condition: template
             value_template: "{{ guard_a != 0 }}"
-          - condition: state
-            entity_id: switch.garaget_laddar
-            state: "off"
         sequence:
-          - action: switch.turn_on
-            target:
-              entity_id: switch.garaget_laddar
+          - if:
+              - condition: state
+                entity_id: switch.garaget_laddar
+                state: "off"
+            then:
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.garaget_laddar
+          # Stopped from the car: only the car can resume it. At most every 2
+          # minutes (from the last wake, the button's state), so a car that will not
+          # start is not woken over and over
+          - if:
+              - condition: state
+                entity_id: sensor.tesla_ble_6c19c0_charging
+                state: Stopped
+              - condition: template
+                value_template: >-
+                  {% set woken = as_datetime(states('button.tesla_ble_6c19c0_wake_up'), None) %}
+                  {{ woken is none or now() - woken > timedelta(minutes=2) }}
+            then:
+              - action: button.press
+                target:
+                  entity_id: button.tesla_ble_6c19c0_wake_up
+              - delay: 10
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.tesla_ble_6c19c0_charger
       - conditions:
           - condition: or
             conditions:
@@ -80,11 +117,29 @@ actions:
                 state: wait
               - condition: template
                 value_template: "{{ guard_a == 0 }}"
-          - condition: state
-            entity_id: switch.garaget_laddar
-            state: "on"
         sequence:
-          - action: switch.turn_off
-            target:
-              entity_id: switch.garaget_laddar
+          - if:
+              - condition: state
+                entity_id: switch.garaget_laddar
+                state: "on"
+            then:
+              - action: switch.turn_off
+                target:
+                  entity_id: switch.garaget_laddar
+          # Before the charger's cloud has seen the plug-in, only the car can stop
+          # it. Only then: a car stopped from the car needs BLE to resume, while one
+          # paused by the charger resumes with the charger
+          - if:
+              - condition: state
+                entity_id: sensor.garaget_laddstatus
+                state: disconnected
+              - condition: state
+                entity_id: sensor.tesla_ble_6c19c0_charging
+                state:
+                  - Charging
+                  - Starting
+            then:
+              - action: switch.turn_off
+                target:
+                  entity_id: switch.tesla_ble_6c19c0_charger
 mode: single
