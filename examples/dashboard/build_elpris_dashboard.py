@@ -707,6 +707,8 @@ FLOW = {
 # shortcut: hours without the Nord Pool sensor's statistics are not priced (the SE4 homes
 # lose some, see docs/battery-plan.md); add bought cost / sold income sensors if that matters.
 ACTION = "sensor.energy_planner_battery_action"
+# Months back from the current one shown in Månader (a UI helper, created by --push)
+MONTH_BACK = "input_number.elpris_manad"
 AREA = NORDPOOL.split("_")[2].upper()  # sensor.nordpool_kwh_<area>_<currency>_...
 WITHOUT = "sensor.elkostnad_utan_sol_och_batteri"
 SELL_JS = ("const sell = (ms) => { const d = new Date(ms); const h = d.getHours(); return "
@@ -784,16 +786,22 @@ ICONS = {
 
 def tibber_card(kind, back, title, icon, main, sub=None):
     """One Tibber-like total: icon tile, title, the value big and a second value under it.
-    An apexcharts card showing only its header states (no chart), restyled."""
+    An apexcharts card showing only its header states (no chart), restyled. `back` None:
+    the months back are MONTH_BACK's, and the card updates when it changes."""
     color, body = ICONS[icon]
     svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#0b0f14">{body}</svg>'
     uri = "data:image/svg+xml," + svg.replace("#", "%23").replace('"', "'").replace("<", "%3C").replace(">", "%3E")
     card = apex_base(10, "1h")
     del card["span"]
     card["now"] = {"show": False}
+    if back is None:
+        # Without an interval the card regenerates on its entities' changes
+        del card["update_interval"]
+        back = "(parseInt(entity.state) || 0)"
     card["header"] = {"show": True, "title": title, "show_states": True, "colorize_states": False}
     card["series"] = [{
-        "entity": NORDPOOL, "name": name, "unit": unit, "float_precision": decimals,
+        "entity": NORDPOOL if back != "(parseInt(entity.state) || 0)" else MONTH_BACK,
+        "name": name, "unit": unit, "float_precision": decimals,
         "show": {"in_chart": False, "in_header": True, "legend_value": False},
         "data_generator": HISTORY_JS + f"""
 const [from, to] = period('{kind}', {back});
@@ -927,6 +935,31 @@ def savings():
     ]}
 
 
+MONTH_NAMES = ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti",
+               "september", "oktober", "november", "december"]
+
+
+def month_stepper():
+    """‹ month year ›: steps MONTH_BACK (older to the left), the month named in between."""
+    def step(icon, action):
+        return {"type": "button", "icon": icon, "show_name": False, "icon_height": "28px",
+                "tap_action": {"action": "perform-action", "perform_action": f"input_number.{action}",
+                               "target": {"entity_id": MONTH_BACK}},
+                "card_mod": card_mod(" ha-card { padding: 10px 0; } ")}
+    label = ("{%- set n = states('" + MONTH_BACK + "') | float(0) | int -%}"
+             "{%- set m0 = now().month - 1 - n -%}"
+             "{%- set names = " + json.dumps(MONTH_NAMES) + " -%}"
+             "<center><big><b>{{ names[m0 % 12] | capitalize }} {{ now().year + m0 // 12 }}</b></big>"
+             "{% if n == 0 %}<br><small>denna månad</small>{% endif %}</center>")
+    return {"type": "grid", "columns": 3, "square": False, "grid_options": {"columns": "full"}, "cards": [
+        step("mdi:chevron-left", "increment"),
+        {"type": "markdown", "content": label,
+         "card_mod": card_mod(" ha-card { padding: 6px 0; display: flex; align-items: center;"
+                              " justify-content: center; height: 100%; } ")},
+        step("mdi:chevron-right", "decrement"),
+    ]}
+
+
 def history_views():
     """Two views: what was done per day ("Utfall") and the totals per month ("Månader")."""
     done = {"type": "grid", "cards": [
@@ -936,7 +969,8 @@ def history_views():
     ]}
     months = {"type": "grid", "cards": [
         {"type": "heading", "heading": "Månader", "heading_style": "title"},
-        tabs([("Förra månaden", summary_card("m", 1)), ("Denna månad", summary_card("m", 0))], default=1),
+        month_stepper(),
+        summary_card("m", None),
         months_chart(),
         {"type": "markdown", "content": "<small>" + SITE["note"] + " Kostnad och snittpris"
          " för köpt el per timme, Tjänat för såld el.</small>", "card_mod": card_mod()},
@@ -1067,7 +1101,23 @@ async def push(cfg):
                                 "title": f"Elpris ({COLORS})" if TRIAL else "Elpris", "icon": "mdi:flash", "show_in_sidebar": True,
                                 "require_admin": False, "mode": "storage"})
             print("create", await ws.receive_json())
-        await ws.send_json({"id": 3, "type": "lovelace/config/save", "url_path": DASHBOARD,
+        await ws.send_json({"id": 3, "type": "input_number/list"})
+        helpers = [h["id"] for h in (await ws.receive_json())["result"]]
+        if MONTH_BACK.split(".")[1] not in helpers:
+            await ws.send_json({"id": 4, "type": "input_number/create", "name": "Elpris månad", "min": 0,
+                                "max": 35, "step": 1, "mode": "box", "icon": "mdi:calendar-month"})
+            print("helper", await ws.receive_json())
+        # Back to this month every night: the helper is shared by everyone viewing
+        reset = {"id": "elpris_manad_reset", "alias": "Elpris: visa denna månad",
+                 "description": "Generated by build_elpris_dashboard.py: Månader shows this month again.",
+                 "triggers": [{"trigger": "time", "at": "03:00:00"}],
+                 "actions": [{"action": "input_number.set_value", "target": {"entity_id": MONTH_BACK},
+                              "data": {"value": 0}}],
+                 "mode": "single"}
+        async with s.post(f"{url}/api/config/automation/config/{reset['id']}", json=reset,
+                          headers={"Authorization": f"Bearer {token}"}) as r:
+            print("reset automation", r.status, await r.text())
+        await ws.send_json({"id": 5, "type": "lovelace/config/save", "url_path": DASHBOARD,
                             "config": cfg})
         print("save", await ws.receive_json())
 

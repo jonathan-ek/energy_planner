@@ -8508,1402 +8508,711 @@ views:
     - type: heading
       heading: Månader
       heading_style: title
-    - type: custom:tabbed-card
-      options:
-        defaultTabIndex: 1
-      styles:
-        --mdc-theme-primary: var(--primary-text-color)
-        --mdc-tab-text-label-color-default: var(--secondary-text-color)
-        --mdc-typography-button-font-size: 14px
-      tabs:
-      - card:
-          type: vertical-stack
-          cards:
-          - type: custom:apexcharts-card
-            graph_span: 1h
-            update_interval: 5min
-            now:
-              show: false
-            header:
-              show: true
-              title: Förbrukat
-              show_states: true
-              colorize_states: false
-            experimental:
-              color_threshold: false
-            yaxis:
-            - min: 0
-              align_to: 100
-              decimals: 0
-              apex_config:
-                tickAmount: 4
-            apex_config:
-              chart:
-                height: 10
-                toolbar:
-                  show: false
-                zoom:
-                  enabled: false
-                background: transparent
-              legend:
-                show: false
-              grid:
-                borderColor: rgba(127,127,127,0.18)
-                strokeDashArray: 0
-                padding:
-                  left: 4
-                  right: 8
-                  top: 0
-                  bottom: 0
-              xaxis:
-                labels:
-                  format: HH
-                  style:
-                    fontSize: 11px
-                axisBorder:
-                  show: false
-                axisTicks:
-                  show: false
-                tooltip:
-                  enabled: false
-              tooltip:
-                x:
-                  format: ddd HH:mm
-              stroke:
-                width: 2
-              dataLabels:
-                enabled: false
-            card_mod:
-              style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
-                \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position:\
-                \ relative; padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before {\
-                \ content: ''; position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px;\
-                \ border-radius: 14px; background: #bdf3fb url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
-                \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Crect x='5' y='11' width='3' height='8' rx='1.5'/%3E%3Crect\
-                \ x='10.5' y='5' width='3' height='14' rx='1.5'/%3E%3Crect x='16' y='9' width='3' height='10'\
-                \ rx='1.5'/%3E%3C/svg%3E\") center / 32px no-repeat; }\nha-card #header__title { color:\
-                \ var(--primary-text-color); font-size: 19px; font-weight: 500;\n  padding-bottom: 18px;\
-                \ margin-left: -80px; overflow: visible; }\nha-card #header__states { display: block;\
-                \ margin: 0; }\nha-card #header__states > * { margin: 0; }\nha-card #states__state { flex:\
-                \ none; }\nha-card #states__state:first-child #state { font-size: 30px; font-weight: 700;\
-                \ }\nha-card #states__state:first-child #uom { font-size: 30px; font-weight: 700; opacity:\
-                \ 1;\n  margin-left: 6px; }\nha-card #states__state:first-child #state__name { display:\
-                \ none; }\nha-card #states__state:nth-child(2) { display: flex; flex-direction: row-reverse;\n\
-                \  justify-content: flex-end; gap: 6px; margin-top: 6px; color: var(--secondary-text-color);\
-                \ }\nha-card #states__state:nth-child(2) #state, ha-card #states__state:nth-child(2) #uom,\n\
-                ha-card #states__state:nth-child(2) #state__name { font-size: 17px; font-weight: 400;\
-                \ opacity: 1;\n  color: var(--secondary-text-color); }\n"
-            grid_options:
-              columns: full
-            series:
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: ''
-              unit: kWh
-              float_precision: 0
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 1);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'bought')]] : [];\n"
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: 'Kostnad:'
-              unit: kr
-              float_precision: 2
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 1);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'cost')]] : [];\n"
-          - type: custom:apexcharts-card
-            graph_span: 1h
-            update_interval: 5min
-            now:
-              show: false
-            header:
-              show: true
-              title: Sålt
-              show_states: true
-              colorize_states: false
-            experimental:
-              color_threshold: false
-            yaxis:
-            - min: 0
-              align_to: 100
-              decimals: 0
-              apex_config:
-                tickAmount: 4
-            apex_config:
-              chart:
-                height: 10
-                toolbar:
-                  show: false
-                zoom:
-                  enabled: false
-                background: transparent
-              legend:
-                show: false
-              grid:
-                borderColor: rgba(127,127,127,0.18)
-                strokeDashArray: 0
-                padding:
-                  left: 4
-                  right: 8
-                  top: 0
-                  bottom: 0
-              xaxis:
-                labels:
-                  format: HH
-                  style:
-                    fontSize: 11px
-                axisBorder:
-                  show: false
-                axisTicks:
-                  show: false
-                tooltip:
-                  enabled: false
-              tooltip:
-                x:
-                  format: ddd HH:mm
-              stroke:
-                width: 2
-              dataLabels:
-                enabled: false
-            card_mod:
-              style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
-                \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position:\
-                \ relative; padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before {\
-                \ content: ''; position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px;\
-                \ border-radius: 14px; background: #fdeec0 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
-                \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12\
-                \ 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1'\
-                \ stroke='%230b0f14' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E\") center /\
-                \ 32px no-repeat; }\nha-card #header__title { color: var(--primary-text-color); font-size:\
-                \ 19px; font-weight: 500;\n  padding-bottom: 18px; margin-left: -80px; overflow: visible;\
-                \ }\nha-card #header__states { display: block; margin: 0; }\nha-card #header__states >\
-                \ * { margin: 0; }\nha-card #states__state { flex: none; }\nha-card #states__state:first-child\
-                \ #state { font-size: 30px; font-weight: 700; }\nha-card #states__state:first-child #uom\
-                \ { font-size: 30px; font-weight: 700; opacity: 1;\n  margin-left: 6px; }\nha-card #states__state:first-child\
-                \ #state__name { display: none; }\nha-card #states__state:nth-child(2) { display: flex;\
-                \ flex-direction: row-reverse;\n  justify-content: flex-end; gap: 6px; margin-top: 6px;\
-                \ color: var(--secondary-text-color); }\nha-card #states__state:nth-child(2) #state, ha-card\
-                \ #states__state:nth-child(2) #uom,\nha-card #states__state:nth-child(2) #state__name\
-                \ { font-size: 17px; font-weight: 400; opacity: 1;\n  color: var(--secondary-text-color);\
-                \ }\n"
-            grid_options:
-              columns: full
-            series:
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: ''
-              unit: kWh
-              float_precision: 0
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 1);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'sold')]] : [];\n"
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: Tjänat
-              unit: kr
-              float_precision: 2
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 1);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'income')]] : [];\n"
-          - type: custom:apexcharts-card
-            graph_span: 1h
-            update_interval: 5min
-            now:
-              show: false
-            header:
-              show: true
-              title: Ditt snittpris
-              show_states: true
-              colorize_states: false
-            experimental:
-              color_threshold: false
-            yaxis:
-            - min: 0
-              align_to: 100
-              decimals: 0
-              apex_config:
-                tickAmount: 4
-            apex_config:
-              chart:
-                height: 10
-                toolbar:
-                  show: false
-                zoom:
-                  enabled: false
-                background: transparent
-              legend:
-                show: false
-              grid:
-                borderColor: rgba(127,127,127,0.18)
-                strokeDashArray: 0
-                padding:
-                  left: 4
-                  right: 8
-                  top: 0
-                  bottom: 0
-              xaxis:
-                labels:
-                  format: HH
-                  style:
-                    fontSize: 11px
-                axisBorder:
-                  show: false
-                axisTicks:
-                  show: false
-                tooltip:
-                  enabled: false
-              tooltip:
-                x:
-                  format: ddd HH:mm
-              stroke:
-                width: 2
-              dataLabels:
-                enabled: false
-            card_mod:
-              style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
-                \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position:\
-                \ relative; padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before {\
-                \ content: ''; position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px;\
-                \ border-radius: 14px; background: #22c7e8 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
-                \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Cpath d='M12 4v16M7 20h10M5 7h14' stroke='%230b0f14'\
-                \ stroke-width='2' stroke-linecap='round' fill='none'/%3E%3Cpath d='M2.5 13l2.5-6 2.5\
-                \ 6zM16.5 13l2.5-6 2.5 6z' stroke='%230b0f14' stroke-width='1.5' stroke-linejoin='round'\
-                \ fill='none'/%3E%3C/svg%3E\") center / 32px no-repeat; }\nha-card #header__title { color:\
-                \ var(--primary-text-color); font-size: 19px; font-weight: 500;\n  padding-bottom: 18px;\
-                \ margin-left: -80px; overflow: visible; }\nha-card #header__states { display: block;\
-                \ margin: 0; }\nha-card #header__states > * { margin: 0; }\nha-card #states__state { flex:\
-                \ none; }\nha-card #states__state:first-child #state { font-size: 30px; font-weight: 700;\
-                \ }\nha-card #states__state:first-child #uom { font-size: 30px; font-weight: 700; opacity:\
-                \ 1;\n  margin-left: 6px; }\nha-card #states__state:first-child #state__name { display:\
-                \ none; }\nha-card #states__state:nth-child(2) { display: flex; flex-direction: row-reverse;\n\
-                \  justify-content: flex-end; gap: 6px; margin-top: 6px; color: var(--secondary-text-color);\
-                \ }\nha-card #states__state:nth-child(2) #state, ha-card #states__state:nth-child(2) #uom,\n\
-                ha-card #states__state:nth-child(2) #state__name { font-size: 17px; font-weight: 400;\
-                \ opacity: 1;\n  color: var(--secondary-text-color); }\n"
-            grid_options:
-              columns: full
-            series:
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: ''
-              unit: öre/kWh
-              float_precision: 1
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 1);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'avg')]] : [];\n"
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: 'Medelpris i SE3:'
-              unit: öre/kWh
-              float_precision: 1
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 1);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'area')]] : [];\n"
-          - type: custom:apexcharts-card
-            graph_span: 1h
-            update_interval: 5min
-            now:
-              show: false
-            header:
-              show: true
-              title: Sparat med sol och batteri
-              show_states: true
-              colorize_states: false
-            experimental:
-              color_threshold: false
-            yaxis:
-            - min: 0
-              align_to: 100
-              decimals: 0
-              apex_config:
-                tickAmount: 4
-            apex_config:
-              chart:
-                height: 10
-                toolbar:
-                  show: false
-                zoom:
-                  enabled: false
-                background: transparent
-              legend:
-                show: false
-              grid:
-                borderColor: rgba(127,127,127,0.18)
-                strokeDashArray: 0
-                padding:
-                  left: 4
-                  right: 8
-                  top: 0
-                  bottom: 0
-              xaxis:
-                labels:
-                  format: HH
-                  style:
-                    fontSize: 11px
-                axisBorder:
-                  show: false
-                axisTicks:
-                  show: false
-                tooltip:
-                  enabled: false
-              tooltip:
-                x:
-                  format: ddd HH:mm
-              stroke:
-                width: 2
-              dataLabels:
-                enabled: false
-            card_mod:
-              style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
-                \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position:\
-                \ relative; padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before {\
-                \ content: ''; position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px;\
-                \ border-radius: 14px; background: #a7f3d0 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
-                \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Ccircle cx='12' cy='12' r='8' fill='none' stroke='%230b0f14'\
-                \ stroke-width='2'/%3E%3Cpath d='M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.6-1 1.4-2.5\
-                \ 1.6-2.5.6-2.5 1.7 1 1.6 2.5 1.6 2.5-.5 2.5-1.5' stroke='%230b0f14' stroke-width='1.6'\
-                \ fill='none' stroke-linecap='round'/%3E%3C/svg%3E\") center / 32px no-repeat; }\nha-card\
-                \ #header__title { color: var(--primary-text-color); font-size: 19px; font-weight: 500;\n\
-                \  padding-bottom: 18px; margin-left: -80px; overflow: visible; }\nha-card #header__states\
-                \ { display: block; margin: 0; }\nha-card #header__states > * { margin: 0; }\nha-card\
-                \ #states__state { flex: none; }\nha-card #states__state:first-child #state { font-size:\
-                \ 30px; font-weight: 700; }\nha-card #states__state:first-child #uom { font-size: 30px;\
-                \ font-weight: 700; opacity: 1;\n  margin-left: 6px; }\nha-card #states__state:first-child\
-                \ #state__name { display: none; }\nha-card #states__state:nth-child(2) { display: flex;\
-                \ flex-direction: row-reverse;\n  justify-content: flex-end; gap: 6px; margin-top: 6px;\
-                \ color: var(--secondary-text-color); }\nha-card #states__state:nth-child(2) #state, ha-card\
-                \ #states__state:nth-child(2) #uom,\nha-card #states__state:nth-child(2) #state__name\
-                \ { font-size: 17px; font-weight: 400; opacity: 1;\n  color: var(--secondary-text-color);\
-                \ }\n"
-            grid_options:
-              columns: full
-            series:
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: ''
-              unit: kr
-              float_precision: 0
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 1);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'saved')]] : [];\n"
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: 'Utan dem:'
-              unit: kr
-              float_precision: 0
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 1);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'without')]] : [];\n"
-        attributes:
-          label: Förra månaden
-      - card:
-          type: vertical-stack
-          cards:
-          - type: custom:apexcharts-card
-            graph_span: 1h
-            update_interval: 5min
-            now:
-              show: false
-            header:
-              show: true
-              title: Förbrukat
-              show_states: true
-              colorize_states: false
-            experimental:
-              color_threshold: false
-            yaxis:
-            - min: 0
-              align_to: 100
-              decimals: 0
-              apex_config:
-                tickAmount: 4
-            apex_config:
-              chart:
-                height: 10
-                toolbar:
-                  show: false
-                zoom:
-                  enabled: false
-                background: transparent
-              legend:
-                show: false
-              grid:
-                borderColor: rgba(127,127,127,0.18)
-                strokeDashArray: 0
-                padding:
-                  left: 4
-                  right: 8
-                  top: 0
-                  bottom: 0
-              xaxis:
-                labels:
-                  format: HH
-                  style:
-                    fontSize: 11px
-                axisBorder:
-                  show: false
-                axisTicks:
-                  show: false
-                tooltip:
-                  enabled: false
-              tooltip:
-                x:
-                  format: ddd HH:mm
-              stroke:
-                width: 2
-              dataLabels:
-                enabled: false
-            card_mod:
-              style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
-                \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position:\
-                \ relative; padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before {\
-                \ content: ''; position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px;\
-                \ border-radius: 14px; background: #bdf3fb url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
-                \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Crect x='5' y='11' width='3' height='8' rx='1.5'/%3E%3Crect\
-                \ x='10.5' y='5' width='3' height='14' rx='1.5'/%3E%3Crect x='16' y='9' width='3' height='10'\
-                \ rx='1.5'/%3E%3C/svg%3E\") center / 32px no-repeat; }\nha-card #header__title { color:\
-                \ var(--primary-text-color); font-size: 19px; font-weight: 500;\n  padding-bottom: 18px;\
-                \ margin-left: -80px; overflow: visible; }\nha-card #header__states { display: block;\
-                \ margin: 0; }\nha-card #header__states > * { margin: 0; }\nha-card #states__state { flex:\
-                \ none; }\nha-card #states__state:first-child #state { font-size: 30px; font-weight: 700;\
-                \ }\nha-card #states__state:first-child #uom { font-size: 30px; font-weight: 700; opacity:\
-                \ 1;\n  margin-left: 6px; }\nha-card #states__state:first-child #state__name { display:\
-                \ none; }\nha-card #states__state:nth-child(2) { display: flex; flex-direction: row-reverse;\n\
-                \  justify-content: flex-end; gap: 6px; margin-top: 6px; color: var(--secondary-text-color);\
-                \ }\nha-card #states__state:nth-child(2) #state, ha-card #states__state:nth-child(2) #uom,\n\
-                ha-card #states__state:nth-child(2) #state__name { font-size: 17px; font-weight: 400;\
-                \ opacity: 1;\n  color: var(--secondary-text-color); }\n"
-            grid_options:
-              columns: full
-            series:
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: ''
-              unit: kWh
-              float_precision: 0
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 0);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'bought')]] : [];\n"
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: 'Kostnad:'
-              unit: kr
-              float_precision: 2
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 0);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'cost')]] : [];\n"
-          - type: custom:apexcharts-card
-            graph_span: 1h
-            update_interval: 5min
-            now:
-              show: false
-            header:
-              show: true
-              title: Sålt
-              show_states: true
-              colorize_states: false
-            experimental:
-              color_threshold: false
-            yaxis:
-            - min: 0
-              align_to: 100
-              decimals: 0
-              apex_config:
-                tickAmount: 4
-            apex_config:
-              chart:
-                height: 10
-                toolbar:
-                  show: false
-                zoom:
-                  enabled: false
-                background: transparent
-              legend:
-                show: false
-              grid:
-                borderColor: rgba(127,127,127,0.18)
-                strokeDashArray: 0
-                padding:
-                  left: 4
-                  right: 8
-                  top: 0
-                  bottom: 0
-              xaxis:
-                labels:
-                  format: HH
-                  style:
-                    fontSize: 11px
-                axisBorder:
-                  show: false
-                axisTicks:
-                  show: false
-                tooltip:
-                  enabled: false
-              tooltip:
-                x:
-                  format: ddd HH:mm
-              stroke:
-                width: 2
-              dataLabels:
-                enabled: false
-            card_mod:
-              style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
-                \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position:\
-                \ relative; padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before {\
-                \ content: ''; position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px;\
-                \ border-radius: 14px; background: #fdeec0 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
-                \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12\
-                \ 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1'\
-                \ stroke='%230b0f14' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E\") center /\
-                \ 32px no-repeat; }\nha-card #header__title { color: var(--primary-text-color); font-size:\
-                \ 19px; font-weight: 500;\n  padding-bottom: 18px; margin-left: -80px; overflow: visible;\
-                \ }\nha-card #header__states { display: block; margin: 0; }\nha-card #header__states >\
-                \ * { margin: 0; }\nha-card #states__state { flex: none; }\nha-card #states__state:first-child\
-                \ #state { font-size: 30px; font-weight: 700; }\nha-card #states__state:first-child #uom\
-                \ { font-size: 30px; font-weight: 700; opacity: 1;\n  margin-left: 6px; }\nha-card #states__state:first-child\
-                \ #state__name { display: none; }\nha-card #states__state:nth-child(2) { display: flex;\
-                \ flex-direction: row-reverse;\n  justify-content: flex-end; gap: 6px; margin-top: 6px;\
-                \ color: var(--secondary-text-color); }\nha-card #states__state:nth-child(2) #state, ha-card\
-                \ #states__state:nth-child(2) #uom,\nha-card #states__state:nth-child(2) #state__name\
-                \ { font-size: 17px; font-weight: 400; opacity: 1;\n  color: var(--secondary-text-color);\
-                \ }\n"
-            grid_options:
-              columns: full
-            series:
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: ''
-              unit: kWh
-              float_precision: 0
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 0);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'sold')]] : [];\n"
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: Tjänat
-              unit: kr
-              float_precision: 2
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 0);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'income')]] : [];\n"
-          - type: custom:apexcharts-card
-            graph_span: 1h
-            update_interval: 5min
-            now:
-              show: false
-            header:
-              show: true
-              title: Ditt snittpris
-              show_states: true
-              colorize_states: false
-            experimental:
-              color_threshold: false
-            yaxis:
-            - min: 0
-              align_to: 100
-              decimals: 0
-              apex_config:
-                tickAmount: 4
-            apex_config:
-              chart:
-                height: 10
-                toolbar:
-                  show: false
-                zoom:
-                  enabled: false
-                background: transparent
-              legend:
-                show: false
-              grid:
-                borderColor: rgba(127,127,127,0.18)
-                strokeDashArray: 0
-                padding:
-                  left: 4
-                  right: 8
-                  top: 0
-                  bottom: 0
-              xaxis:
-                labels:
-                  format: HH
-                  style:
-                    fontSize: 11px
-                axisBorder:
-                  show: false
-                axisTicks:
-                  show: false
-                tooltip:
-                  enabled: false
-              tooltip:
-                x:
-                  format: ddd HH:mm
-              stroke:
-                width: 2
-              dataLabels:
-                enabled: false
-            card_mod:
-              style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
-                \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position:\
-                \ relative; padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before {\
-                \ content: ''; position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px;\
-                \ border-radius: 14px; background: #22c7e8 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
-                \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Cpath d='M12 4v16M7 20h10M5 7h14' stroke='%230b0f14'\
-                \ stroke-width='2' stroke-linecap='round' fill='none'/%3E%3Cpath d='M2.5 13l2.5-6 2.5\
-                \ 6zM16.5 13l2.5-6 2.5 6z' stroke='%230b0f14' stroke-width='1.5' stroke-linejoin='round'\
-                \ fill='none'/%3E%3C/svg%3E\") center / 32px no-repeat; }\nha-card #header__title { color:\
-                \ var(--primary-text-color); font-size: 19px; font-weight: 500;\n  padding-bottom: 18px;\
-                \ margin-left: -80px; overflow: visible; }\nha-card #header__states { display: block;\
-                \ margin: 0; }\nha-card #header__states > * { margin: 0; }\nha-card #states__state { flex:\
-                \ none; }\nha-card #states__state:first-child #state { font-size: 30px; font-weight: 700;\
-                \ }\nha-card #states__state:first-child #uom { font-size: 30px; font-weight: 700; opacity:\
-                \ 1;\n  margin-left: 6px; }\nha-card #states__state:first-child #state__name { display:\
-                \ none; }\nha-card #states__state:nth-child(2) { display: flex; flex-direction: row-reverse;\n\
-                \  justify-content: flex-end; gap: 6px; margin-top: 6px; color: var(--secondary-text-color);\
-                \ }\nha-card #states__state:nth-child(2) #state, ha-card #states__state:nth-child(2) #uom,\n\
-                ha-card #states__state:nth-child(2) #state__name { font-size: 17px; font-weight: 400;\
-                \ opacity: 1;\n  color: var(--secondary-text-color); }\n"
-            grid_options:
-              columns: full
-            series:
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: ''
-              unit: öre/kWh
-              float_precision: 1
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 0);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'avg')]] : [];\n"
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: 'Medelpris i SE3:'
-              unit: öre/kWh
-              float_precision: 1
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 0);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'area')]] : [];\n"
-          - type: custom:apexcharts-card
-            graph_span: 1h
-            update_interval: 5min
-            now:
-              show: false
-            header:
-              show: true
-              title: Sparat med sol och batteri
-              show_states: true
-              colorize_states: false
-            experimental:
-              color_threshold: false
-            yaxis:
-            - min: 0
-              align_to: 100
-              decimals: 0
-              apex_config:
-                tickAmount: 4
-            apex_config:
-              chart:
-                height: 10
-                toolbar:
-                  show: false
-                zoom:
-                  enabled: false
-                background: transparent
-              legend:
-                show: false
-              grid:
-                borderColor: rgba(127,127,127,0.18)
-                strokeDashArray: 0
-                padding:
-                  left: 4
-                  right: 8
-                  top: 0
-                  bottom: 0
-              xaxis:
-                labels:
-                  format: HH
-                  style:
-                    fontSize: 11px
-                axisBorder:
-                  show: false
-                axisTicks:
-                  show: false
-                tooltip:
-                  enabled: false
-              tooltip:
-                x:
-                  format: ddd HH:mm
-              stroke:
-                width: 2
-              dataLabels:
-                enabled: false
-            card_mod:
-              style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
-                \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position:\
-                \ relative; padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before {\
-                \ content: ''; position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px;\
-                \ border-radius: 14px; background: #a7f3d0 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
-                \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Ccircle cx='12' cy='12' r='8' fill='none' stroke='%230b0f14'\
-                \ stroke-width='2'/%3E%3Cpath d='M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.6-1 1.4-2.5\
-                \ 1.6-2.5.6-2.5 1.7 1 1.6 2.5 1.6 2.5-.5 2.5-1.5' stroke='%230b0f14' stroke-width='1.6'\
-                \ fill='none' stroke-linecap='round'/%3E%3C/svg%3E\") center / 32px no-repeat; }\nha-card\
-                \ #header__title { color: var(--primary-text-color); font-size: 19px; font-weight: 500;\n\
-                \  padding-bottom: 18px; margin-left: -80px; overflow: visible; }\nha-card #header__states\
-                \ { display: block; margin: 0; }\nha-card #header__states > * { margin: 0; }\nha-card\
-                \ #states__state { flex: none; }\nha-card #states__state:first-child #state { font-size:\
-                \ 30px; font-weight: 700; }\nha-card #states__state:first-child #uom { font-size: 30px;\
-                \ font-weight: 700; opacity: 1;\n  margin-left: 6px; }\nha-card #states__state:first-child\
-                \ #state__name { display: none; }\nha-card #states__state:nth-child(2) { display: flex;\
-                \ flex-direction: row-reverse;\n  justify-content: flex-end; gap: 6px; margin-top: 6px;\
-                \ color: var(--secondary-text-color); }\nha-card #states__state:nth-child(2) #state, ha-card\
-                \ #states__state:nth-child(2) #uom,\nha-card #states__state:nth-child(2) #state__name\
-                \ { font-size: 17px; font-weight: 400; opacity: 1;\n  color: var(--secondary-text-color);\
-                \ }\n"
-            grid_options:
-              columns: full
-            series:
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: ''
-              unit: kr
-              float_precision: 0
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 0);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'saved')]] : [];\n"
-            - entity: sensor.nordpool_kwh_se3_sek_3_10_025
-              name: 'Utan dem:'
-              unit: kr
-              float_precision: 0
-              show:
-                in_chart: false
-                in_header: true
-                legend_value: false
-              data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h\
-                \ >= 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h\
-                \ = d.getHours(); return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >=\
-                \ 1 && d.getDay() <= 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make)\
-                \ => {\n  const cache = (window.__elprisHistory ||= {});\n  const hit = cache[key];\n\
-                \  if (hit && Date.now() - hit.t < 60000) return hit.p;\n  const p = make();\n  cache[key]\
-                \ = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n  return p;\n};\n// Kind\
-                \ 'd' (days) or 'm' (months) back from the current one: [from, to) in ms\nconst period\
-                \ = (kind, back) => {\n  const n = new Date();\n  const from = kind === 'd' ? new Date(n.getFullYear(),\
-                \ n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(), n.getMonth() - back,\
-                \ 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(), from.getDate()\
-                \ + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return [from.getTime(),\
-                \ Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) => memo('s' + from\
-                \ + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period', period:\
-                \ 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(), end_time:\
-                \ new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
-                \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
-                \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the\
-                \ hours of [from, to), split by period start (day or month): Map start -> totals\nconst\
-                \ totals = async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot\
-                \ = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025'] || []).map((x) => [x.start, x.state\
-                \ * 1]));\n  const out = new Map();\n  const add = (x, f) => {\n    const k = key(x.start);\n\
-                \    const t = out.get(k) || {bought: 0, sold: 0, cost: 0, income: 0, saved: 0, without:\
-                \ 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change || 0, spot.get(x.start));\n \
-                \   out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced\
-                \ += kwh; else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
-                \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh\
-                \ * (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing']\
-                \ || []) add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
-                \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an\
-                \ even load (a monthly price contract) pays, with the same fees\n  for (const [ms, p]\
-                \ of spot) add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return\
-                \ out;\n};\nconst monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(),\
-                \ d.getMonth(), 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours\
-                \ ? t.area / t.hours : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost /\
-                \ (t.bought - t.unpriced) * 100 : null) : t[field];\n\nconst [from, to] = period('m',\
-                \ 0);\nconst t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t,\
-                \ 'without')]] : [];\n"
-        attributes:
-          label: Denna månad
+    - type: grid
+      columns: 3
+      square: false
       grid_options:
         columns: full
+      cards:
+      - type: button
+        icon: mdi:chevron-left
+        show_name: false
+        icon_height: 28px
+        tap_action:
+          action: perform-action
+          perform_action: input_number.increment
+          target:
+            entity_id: input_number.elpris_manad
+        card_mod:
+          style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; } ha-card { padding:
+            10px 0; } '
+      - type: markdown
+        content: '{%- set n = states(''input_number.elpris_manad'') | float(0) | int -%}{%- set m0 = now().month
+          - 1 - n -%}{%- set names = ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti",
+          "september", "oktober", "november", "december"] -%}<center><big><b>{{ names[m0 % 12] | capitalize
+          }} {{ now().year + m0 // 12 }}</b></big>{% if n == 0 %}<br><small>denna månad</small>{% endif
+          %}</center>'
+        card_mod:
+          style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; } ha-card { padding:
+            6px 0; display: flex; align-items: center; justify-content: center; height: 100%; } '
+      - type: button
+        icon: mdi:chevron-right
+        show_name: false
+        icon_height: 28px
+        tap_action:
+          action: perform-action
+          perform_action: input_number.decrement
+          target:
+            entity_id: input_number.elpris_manad
+        card_mod:
+          style: 'ha-card { border-radius: 20px; border: none; overflow: hidden; } ha-card { padding:
+            10px 0; } '
+    - type: vertical-stack
+      cards:
+      - type: custom:apexcharts-card
+        graph_span: 1h
+        now:
+          show: false
+        header:
+          show: true
+          title: Förbrukat
+          show_states: true
+          colorize_states: false
+        experimental:
+          color_threshold: false
+        yaxis:
+        - min: 0
+          align_to: 100
+          decimals: 0
+          apex_config:
+            tickAmount: 4
+        apex_config:
+          chart:
+            height: 10
+            toolbar:
+              show: false
+            zoom:
+              enabled: false
+            background: transparent
+          legend:
+            show: false
+          grid:
+            borderColor: rgba(127,127,127,0.18)
+            strokeDashArray: 0
+            padding:
+              left: 4
+              right: 8
+              top: 0
+              bottom: 0
+          xaxis:
+            labels:
+              format: HH
+              style:
+                fontSize: 11px
+            axisBorder:
+              show: false
+            axisTicks:
+              show: false
+            tooltip:
+              enabled: false
+          tooltip:
+            x:
+              format: ddd HH:mm
+          stroke:
+            width: 2
+          dataLabels:
+            enabled: false
+        card_mod:
+          style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
+            \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position: relative;\
+            \ padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before { content: '';\
+            \ position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px; border-radius:\
+            \ 14px; background: #bdf3fb url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
+            \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Crect x='5' y='11' width='3' height='8' rx='1.5'/%3E%3Crect\
+            \ x='10.5' y='5' width='3' height='14' rx='1.5'/%3E%3Crect x='16' y='9' width='3' height='10'\
+            \ rx='1.5'/%3E%3C/svg%3E\") center / 32px no-repeat; }\nha-card #header__title { color: var(--primary-text-color);\
+            \ font-size: 19px; font-weight: 500;\n  padding-bottom: 18px; margin-left: -80px; overflow:\
+            \ visible; }\nha-card #header__states { display: block; margin: 0; }\nha-card #header__states\
+            \ > * { margin: 0; }\nha-card #states__state { flex: none; }\nha-card #states__state:first-child\
+            \ #state { font-size: 30px; font-weight: 700; }\nha-card #states__state:first-child #uom {\
+            \ font-size: 30px; font-weight: 700; opacity: 1;\n  margin-left: 6px; }\nha-card #states__state:first-child\
+            \ #state__name { display: none; }\nha-card #states__state:nth-child(2) { display: flex; flex-direction:\
+            \ row-reverse;\n  justify-content: flex-end; gap: 6px; margin-top: 6px; color: var(--secondary-text-color);\
+            \ }\nha-card #states__state:nth-child(2) #state, ha-card #states__state:nth-child(2) #uom,\n\
+            ha-card #states__state:nth-child(2) #state__name { font-size: 17px; font-weight: 400; opacity:\
+            \ 1;\n  color: var(--secondary-text-color); }\n"
+        grid_options:
+          columns: full
+        series:
+        - entity: input_number.elpris_manad
+          name: ''
+          unit: kWh
+          float_precision: 0
+          show:
+            in_chart: false
+            in_header: true
+            legend_value: false
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h = d.getHours();\
+            \ return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >= 1 && d.getDay() <=\
+            \ 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make) => {\n  const cache = (window.__elprisHistory\
+            \ ||= {});\n  const hit = cache[key];\n  if (hit && Date.now() - hit.t < 60000) return hit.p;\n\
+            \  const p = make();\n  cache[key] = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n\
+            \  return p;\n};\n// Kind 'd' (days) or 'm' (months) back from the current one: [from, to)\
+            \ in ms\nconst period = (kind, back) => {\n  const n = new Date();\n  const from = kind ===\
+            \ 'd' ? new Date(n.getFullYear(), n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(),\
+            \ n.getMonth() - back, 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(),\
+            \ from.getDate() + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return\
+            \ [from.getTime(), Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) =>\
+            \ memo('s' + from + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period',\
+            \ period: 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(),\
+            \ end_time: new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
+            \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
+            \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the hours\
+            \ of [from, to), split by period start (day or month): Map start -> totals\nconst totals =\
+            \ async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025']\
+            \ || []).map((x) => [x.start, x.state * 1]));\n  const out = new Map();\n  const add = (x,\
+            \ f) => {\n    const k = key(x.start);\n    const t = out.get(k) || {bought: 0, sold: 0, cost:\
+            \ 0, income: 0, saved: 0, without: 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change\
+            \ || 0, spot.get(x.start));\n    out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced += kwh;\
+            \ else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh *\
+            \ (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing'] || [])\
+            \ add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
+            \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an even\
+            \ load (a monthly price contract) pays, with the same fees\n  for (const [ms, p] of spot)\
+            \ add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return out;\n};\n\
+            const monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(),\
+            \ 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours ? t.area / t.hours\
+            \ : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost / (t.bought - t.unpriced)\
+            \ * 100 : null) : t[field];\n\nconst [from, to] = period('m', (parseInt(entity.state) || 0));\n\
+            const t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t, 'bought')]]\
+            \ : [];\n"
+        - entity: input_number.elpris_manad
+          name: 'Kostnad:'
+          unit: kr
+          float_precision: 2
+          show:
+            in_chart: false
+            in_header: true
+            legend_value: false
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h = d.getHours();\
+            \ return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >= 1 && d.getDay() <=\
+            \ 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make) => {\n  const cache = (window.__elprisHistory\
+            \ ||= {});\n  const hit = cache[key];\n  if (hit && Date.now() - hit.t < 60000) return hit.p;\n\
+            \  const p = make();\n  cache[key] = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n\
+            \  return p;\n};\n// Kind 'd' (days) or 'm' (months) back from the current one: [from, to)\
+            \ in ms\nconst period = (kind, back) => {\n  const n = new Date();\n  const from = kind ===\
+            \ 'd' ? new Date(n.getFullYear(), n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(),\
+            \ n.getMonth() - back, 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(),\
+            \ from.getDate() + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return\
+            \ [from.getTime(), Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) =>\
+            \ memo('s' + from + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period',\
+            \ period: 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(),\
+            \ end_time: new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
+            \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
+            \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the hours\
+            \ of [from, to), split by period start (day or month): Map start -> totals\nconst totals =\
+            \ async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025']\
+            \ || []).map((x) => [x.start, x.state * 1]));\n  const out = new Map();\n  const add = (x,\
+            \ f) => {\n    const k = key(x.start);\n    const t = out.get(k) || {bought: 0, sold: 0, cost:\
+            \ 0, income: 0, saved: 0, without: 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change\
+            \ || 0, spot.get(x.start));\n    out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced += kwh;\
+            \ else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh *\
+            \ (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing'] || [])\
+            \ add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
+            \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an even\
+            \ load (a monthly price contract) pays, with the same fees\n  for (const [ms, p] of spot)\
+            \ add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return out;\n};\n\
+            const monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(),\
+            \ 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours ? t.area / t.hours\
+            \ : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost / (t.bought - t.unpriced)\
+            \ * 100 : null) : t[field];\n\nconst [from, to] = period('m', (parseInt(entity.state) || 0));\n\
+            const t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t, 'cost')]]\
+            \ : [];\n"
+      - type: custom:apexcharts-card
+        graph_span: 1h
+        now:
+          show: false
+        header:
+          show: true
+          title: Sålt
+          show_states: true
+          colorize_states: false
+        experimental:
+          color_threshold: false
+        yaxis:
+        - min: 0
+          align_to: 100
+          decimals: 0
+          apex_config:
+            tickAmount: 4
+        apex_config:
+          chart:
+            height: 10
+            toolbar:
+              show: false
+            zoom:
+              enabled: false
+            background: transparent
+          legend:
+            show: false
+          grid:
+            borderColor: rgba(127,127,127,0.18)
+            strokeDashArray: 0
+            padding:
+              left: 4
+              right: 8
+              top: 0
+              bottom: 0
+          xaxis:
+            labels:
+              format: HH
+              style:
+                fontSize: 11px
+            axisBorder:
+              show: false
+            axisTicks:
+              show: false
+            tooltip:
+              enabled: false
+          tooltip:
+            x:
+              format: ddd HH:mm
+          stroke:
+            width: 2
+          dataLabels:
+            enabled: false
+        card_mod:
+          style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
+            \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position: relative;\
+            \ padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before { content: '';\
+            \ position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px; border-radius:\
+            \ 14px; background: #fdeec0 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
+            \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12\
+            \ 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1' stroke='%230b0f14'\
+            \ stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E\") center / 32px no-repeat; }\nha-card\
+            \ #header__title { color: var(--primary-text-color); font-size: 19px; font-weight: 500;\n\
+            \  padding-bottom: 18px; margin-left: -80px; overflow: visible; }\nha-card #header__states\
+            \ { display: block; margin: 0; }\nha-card #header__states > * { margin: 0; }\nha-card #states__state\
+            \ { flex: none; }\nha-card #states__state:first-child #state { font-size: 30px; font-weight:\
+            \ 700; }\nha-card #states__state:first-child #uom { font-size: 30px; font-weight: 700; opacity:\
+            \ 1;\n  margin-left: 6px; }\nha-card #states__state:first-child #state__name { display: none;\
+            \ }\nha-card #states__state:nth-child(2) { display: flex; flex-direction: row-reverse;\n \
+            \ justify-content: flex-end; gap: 6px; margin-top: 6px; color: var(--secondary-text-color);\
+            \ }\nha-card #states__state:nth-child(2) #state, ha-card #states__state:nth-child(2) #uom,\n\
+            ha-card #states__state:nth-child(2) #state__name { font-size: 17px; font-weight: 400; opacity:\
+            \ 1;\n  color: var(--secondary-text-color); }\n"
+        grid_options:
+          columns: full
+        series:
+        - entity: input_number.elpris_manad
+          name: ''
+          unit: kWh
+          float_precision: 0
+          show:
+            in_chart: false
+            in_header: true
+            legend_value: false
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h = d.getHours();\
+            \ return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >= 1 && d.getDay() <=\
+            \ 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make) => {\n  const cache = (window.__elprisHistory\
+            \ ||= {});\n  const hit = cache[key];\n  if (hit && Date.now() - hit.t < 60000) return hit.p;\n\
+            \  const p = make();\n  cache[key] = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n\
+            \  return p;\n};\n// Kind 'd' (days) or 'm' (months) back from the current one: [from, to)\
+            \ in ms\nconst period = (kind, back) => {\n  const n = new Date();\n  const from = kind ===\
+            \ 'd' ? new Date(n.getFullYear(), n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(),\
+            \ n.getMonth() - back, 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(),\
+            \ from.getDate() + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return\
+            \ [from.getTime(), Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) =>\
+            \ memo('s' + from + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period',\
+            \ period: 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(),\
+            \ end_time: new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
+            \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
+            \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the hours\
+            \ of [from, to), split by period start (day or month): Map start -> totals\nconst totals =\
+            \ async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025']\
+            \ || []).map((x) => [x.start, x.state * 1]));\n  const out = new Map();\n  const add = (x,\
+            \ f) => {\n    const k = key(x.start);\n    const t = out.get(k) || {bought: 0, sold: 0, cost:\
+            \ 0, income: 0, saved: 0, without: 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change\
+            \ || 0, spot.get(x.start));\n    out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced += kwh;\
+            \ else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh *\
+            \ (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing'] || [])\
+            \ add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
+            \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an even\
+            \ load (a monthly price contract) pays, with the same fees\n  for (const [ms, p] of spot)\
+            \ add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return out;\n};\n\
+            const monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(),\
+            \ 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours ? t.area / t.hours\
+            \ : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost / (t.bought - t.unpriced)\
+            \ * 100 : null) : t[field];\n\nconst [from, to] = period('m', (parseInt(entity.state) || 0));\n\
+            const t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t, 'sold')]]\
+            \ : [];\n"
+        - entity: input_number.elpris_manad
+          name: Tjänat
+          unit: kr
+          float_precision: 2
+          show:
+            in_chart: false
+            in_header: true
+            legend_value: false
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h = d.getHours();\
+            \ return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >= 1 && d.getDay() <=\
+            \ 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make) => {\n  const cache = (window.__elprisHistory\
+            \ ||= {});\n  const hit = cache[key];\n  if (hit && Date.now() - hit.t < 60000) return hit.p;\n\
+            \  const p = make();\n  cache[key] = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n\
+            \  return p;\n};\n// Kind 'd' (days) or 'm' (months) back from the current one: [from, to)\
+            \ in ms\nconst period = (kind, back) => {\n  const n = new Date();\n  const from = kind ===\
+            \ 'd' ? new Date(n.getFullYear(), n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(),\
+            \ n.getMonth() - back, 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(),\
+            \ from.getDate() + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return\
+            \ [from.getTime(), Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) =>\
+            \ memo('s' + from + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period',\
+            \ period: 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(),\
+            \ end_time: new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
+            \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
+            \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the hours\
+            \ of [from, to), split by period start (day or month): Map start -> totals\nconst totals =\
+            \ async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025']\
+            \ || []).map((x) => [x.start, x.state * 1]));\n  const out = new Map();\n  const add = (x,\
+            \ f) => {\n    const k = key(x.start);\n    const t = out.get(k) || {bought: 0, sold: 0, cost:\
+            \ 0, income: 0, saved: 0, without: 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change\
+            \ || 0, spot.get(x.start));\n    out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced += kwh;\
+            \ else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh *\
+            \ (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing'] || [])\
+            \ add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
+            \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an even\
+            \ load (a monthly price contract) pays, with the same fees\n  for (const [ms, p] of spot)\
+            \ add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return out;\n};\n\
+            const monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(),\
+            \ 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours ? t.area / t.hours\
+            \ : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost / (t.bought - t.unpriced)\
+            \ * 100 : null) : t[field];\n\nconst [from, to] = period('m', (parseInt(entity.state) || 0));\n\
+            const t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t, 'income')]]\
+            \ : [];\n"
+      - type: custom:apexcharts-card
+        graph_span: 1h
+        now:
+          show: false
+        header:
+          show: true
+          title: Ditt snittpris
+          show_states: true
+          colorize_states: false
+        experimental:
+          color_threshold: false
+        yaxis:
+        - min: 0
+          align_to: 100
+          decimals: 0
+          apex_config:
+            tickAmount: 4
+        apex_config:
+          chart:
+            height: 10
+            toolbar:
+              show: false
+            zoom:
+              enabled: false
+            background: transparent
+          legend:
+            show: false
+          grid:
+            borderColor: rgba(127,127,127,0.18)
+            strokeDashArray: 0
+            padding:
+              left: 4
+              right: 8
+              top: 0
+              bottom: 0
+          xaxis:
+            labels:
+              format: HH
+              style:
+                fontSize: 11px
+            axisBorder:
+              show: false
+            axisTicks:
+              show: false
+            tooltip:
+              enabled: false
+          tooltip:
+            x:
+              format: ddd HH:mm
+          stroke:
+            width: 2
+          dataLabels:
+            enabled: false
+        card_mod:
+          style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
+            \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position: relative;\
+            \ padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before { content: '';\
+            \ position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px; border-radius:\
+            \ 14px; background: #22c7e8 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
+            \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Cpath d='M12 4v16M7 20h10M5 7h14' stroke='%230b0f14'\
+            \ stroke-width='2' stroke-linecap='round' fill='none'/%3E%3Cpath d='M2.5 13l2.5-6 2.5 6zM16.5\
+            \ 13l2.5-6 2.5 6z' stroke='%230b0f14' stroke-width='1.5' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E\"\
+            ) center / 32px no-repeat; }\nha-card #header__title { color: var(--primary-text-color); font-size:\
+            \ 19px; font-weight: 500;\n  padding-bottom: 18px; margin-left: -80px; overflow: visible;\
+            \ }\nha-card #header__states { display: block; margin: 0; }\nha-card #header__states > * {\
+            \ margin: 0; }\nha-card #states__state { flex: none; }\nha-card #states__state:first-child\
+            \ #state { font-size: 30px; font-weight: 700; }\nha-card #states__state:first-child #uom {\
+            \ font-size: 30px; font-weight: 700; opacity: 1;\n  margin-left: 6px; }\nha-card #states__state:first-child\
+            \ #state__name { display: none; }\nha-card #states__state:nth-child(2) { display: flex; flex-direction:\
+            \ row-reverse;\n  justify-content: flex-end; gap: 6px; margin-top: 6px; color: var(--secondary-text-color);\
+            \ }\nha-card #states__state:nth-child(2) #state, ha-card #states__state:nth-child(2) #uom,\n\
+            ha-card #states__state:nth-child(2) #state__name { font-size: 17px; font-weight: 400; opacity:\
+            \ 1;\n  color: var(--secondary-text-color); }\n"
+        grid_options:
+          columns: full
+        series:
+        - entity: input_number.elpris_manad
+          name: ''
+          unit: öre/kWh
+          float_precision: 1
+          show:
+            in_chart: false
+            in_header: true
+            legend_value: false
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h = d.getHours();\
+            \ return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >= 1 && d.getDay() <=\
+            \ 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make) => {\n  const cache = (window.__elprisHistory\
+            \ ||= {});\n  const hit = cache[key];\n  if (hit && Date.now() - hit.t < 60000) return hit.p;\n\
+            \  const p = make();\n  cache[key] = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n\
+            \  return p;\n};\n// Kind 'd' (days) or 'm' (months) back from the current one: [from, to)\
+            \ in ms\nconst period = (kind, back) => {\n  const n = new Date();\n  const from = kind ===\
+            \ 'd' ? new Date(n.getFullYear(), n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(),\
+            \ n.getMonth() - back, 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(),\
+            \ from.getDate() + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return\
+            \ [from.getTime(), Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) =>\
+            \ memo('s' + from + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period',\
+            \ period: 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(),\
+            \ end_time: new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
+            \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
+            \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the hours\
+            \ of [from, to), split by period start (day or month): Map start -> totals\nconst totals =\
+            \ async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025']\
+            \ || []).map((x) => [x.start, x.state * 1]));\n  const out = new Map();\n  const add = (x,\
+            \ f) => {\n    const k = key(x.start);\n    const t = out.get(k) || {bought: 0, sold: 0, cost:\
+            \ 0, income: 0, saved: 0, without: 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change\
+            \ || 0, spot.get(x.start));\n    out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced += kwh;\
+            \ else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh *\
+            \ (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing'] || [])\
+            \ add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
+            \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an even\
+            \ load (a monthly price contract) pays, with the same fees\n  for (const [ms, p] of spot)\
+            \ add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return out;\n};\n\
+            const monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(),\
+            \ 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours ? t.area / t.hours\
+            \ : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost / (t.bought - t.unpriced)\
+            \ * 100 : null) : t[field];\n\nconst [from, to] = period('m', (parseInt(entity.state) || 0));\n\
+            const t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t, 'avg')]]\
+            \ : [];\n"
+        - entity: input_number.elpris_manad
+          name: 'Medelpris i SE3:'
+          unit: öre/kWh
+          float_precision: 1
+          show:
+            in_chart: false
+            in_header: true
+            legend_value: false
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h = d.getHours();\
+            \ return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >= 1 && d.getDay() <=\
+            \ 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make) => {\n  const cache = (window.__elprisHistory\
+            \ ||= {});\n  const hit = cache[key];\n  if (hit && Date.now() - hit.t < 60000) return hit.p;\n\
+            \  const p = make();\n  cache[key] = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n\
+            \  return p;\n};\n// Kind 'd' (days) or 'm' (months) back from the current one: [from, to)\
+            \ in ms\nconst period = (kind, back) => {\n  const n = new Date();\n  const from = kind ===\
+            \ 'd' ? new Date(n.getFullYear(), n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(),\
+            \ n.getMonth() - back, 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(),\
+            \ from.getDate() + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return\
+            \ [from.getTime(), Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) =>\
+            \ memo('s' + from + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period',\
+            \ period: 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(),\
+            \ end_time: new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
+            \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
+            \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the hours\
+            \ of [from, to), split by period start (day or month): Map start -> totals\nconst totals =\
+            \ async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025']\
+            \ || []).map((x) => [x.start, x.state * 1]));\n  const out = new Map();\n  const add = (x,\
+            \ f) => {\n    const k = key(x.start);\n    const t = out.get(k) || {bought: 0, sold: 0, cost:\
+            \ 0, income: 0, saved: 0, without: 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change\
+            \ || 0, spot.get(x.start));\n    out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced += kwh;\
+            \ else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh *\
+            \ (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing'] || [])\
+            \ add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
+            \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an even\
+            \ load (a monthly price contract) pays, with the same fees\n  for (const [ms, p] of spot)\
+            \ add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return out;\n};\n\
+            const monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(),\
+            \ 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours ? t.area / t.hours\
+            \ : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost / (t.bought - t.unpriced)\
+            \ * 100 : null) : t[field];\n\nconst [from, to] = period('m', (parseInt(entity.state) || 0));\n\
+            const t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t, 'area')]]\
+            \ : [];\n"
+      - type: custom:apexcharts-card
+        graph_span: 1h
+        now:
+          show: false
+        header:
+          show: true
+          title: Sparat med sol och batteri
+          show_states: true
+          colorize_states: false
+        experimental:
+          color_threshold: false
+        yaxis:
+        - min: 0
+          align_to: 100
+          decimals: 0
+          apex_config:
+            tickAmount: 4
+        apex_config:
+          chart:
+            height: 10
+            toolbar:
+              show: false
+            zoom:
+              enabled: false
+            background: transparent
+          legend:
+            show: false
+          grid:
+            borderColor: rgba(127,127,127,0.18)
+            strokeDashArray: 0
+            padding:
+              left: 4
+              right: 8
+              top: 0
+              bottom: 0
+          xaxis:
+            labels:
+              format: HH
+              style:
+                fontSize: 11px
+            axisBorder:
+              show: false
+            axisTicks:
+              show: false
+            tooltip:
+              enabled: false
+          tooltip:
+            x:
+              format: ddd HH:mm
+          stroke:
+            width: 2
+          dataLabels:
+            enabled: false
+        card_mod:
+          style: "ha-card { border-radius: 20px; border: none; overflow: hidden; }\nha-card { padding:\
+            \ 4px 0 18px; }\nha-card #graph-wrapper { display: none; }\nha-card #header { position: relative;\
+            \ padding: 14px 16px 0 100px; min-height: 96px; }\nha-card #header::before { content: '';\
+            \ position: absolute; left: 20px; top: 56px; width: 60px;\n  height: 60px; border-radius:\
+            \ 14px; background: #a7f3d0 url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'\
+            \ viewBox='0 0 24 24' fill='%230b0f14'%3E%3Ccircle cx='12' cy='12' r='8' fill='none' stroke='%230b0f14'\
+            \ stroke-width='2'/%3E%3Cpath d='M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.6-1 1.4-2.5\
+            \ 1.6-2.5.6-2.5 1.7 1 1.6 2.5 1.6 2.5-.5 2.5-1.5' stroke='%230b0f14' stroke-width='1.6' fill='none'\
+            \ stroke-linecap='round'/%3E%3C/svg%3E\") center / 32px no-repeat; }\nha-card #header__title\
+            \ { color: var(--primary-text-color); font-size: 19px; font-weight: 500;\n  padding-bottom:\
+            \ 18px; margin-left: -80px; overflow: visible; }\nha-card #header__states { display: block;\
+            \ margin: 0; }\nha-card #header__states > * { margin: 0; }\nha-card #states__state { flex:\
+            \ none; }\nha-card #states__state:first-child #state { font-size: 30px; font-weight: 700;\
+            \ }\nha-card #states__state:first-child #uom { font-size: 30px; font-weight: 700; opacity:\
+            \ 1;\n  margin-left: 6px; }\nha-card #states__state:first-child #state__name { display: none;\
+            \ }\nha-card #states__state:nth-child(2) { display: flex; flex-direction: row-reverse;\n \
+            \ justify-content: flex-end; gap: 6px; margin-top: 6px; color: var(--secondary-text-color);\
+            \ }\nha-card #states__state:nth-child(2) #state, ha-card #states__state:nth-child(2) #uom,\n\
+            ha-card #states__state:nth-child(2) #state__name { font-size: 17px; font-weight: 400; opacity:\
+            \ 1;\n  color: var(--secondary-text-color); }\n"
+        grid_options:
+          columns: full
+        series:
+        - entity: input_number.elpris_manad
+          name: ''
+          unit: kr
+          float_precision: 0
+          show:
+            in_chart: false
+            in_header: true
+            legend_value: false
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h = d.getHours();\
+            \ return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >= 1 && d.getDay() <=\
+            \ 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make) => {\n  const cache = (window.__elprisHistory\
+            \ ||= {});\n  const hit = cache[key];\n  if (hit && Date.now() - hit.t < 60000) return hit.p;\n\
+            \  const p = make();\n  cache[key] = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n\
+            \  return p;\n};\n// Kind 'd' (days) or 'm' (months) back from the current one: [from, to)\
+            \ in ms\nconst period = (kind, back) => {\n  const n = new Date();\n  const from = kind ===\
+            \ 'd' ? new Date(n.getFullYear(), n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(),\
+            \ n.getMonth() - back, 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(),\
+            \ from.getDate() + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return\
+            \ [from.getTime(), Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) =>\
+            \ memo('s' + from + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period',\
+            \ period: 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(),\
+            \ end_time: new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
+            \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
+            \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the hours\
+            \ of [from, to), split by period start (day or month): Map start -> totals\nconst totals =\
+            \ async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025']\
+            \ || []).map((x) => [x.start, x.state * 1]));\n  const out = new Map();\n  const add = (x,\
+            \ f) => {\n    const k = key(x.start);\n    const t = out.get(k) || {bought: 0, sold: 0, cost:\
+            \ 0, income: 0, saved: 0, without: 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change\
+            \ || 0, spot.get(x.start));\n    out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced += kwh;\
+            \ else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh *\
+            \ (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing'] || [])\
+            \ add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
+            \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an even\
+            \ load (a monthly price contract) pays, with the same fees\n  for (const [ms, p] of spot)\
+            \ add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return out;\n};\n\
+            const monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(),\
+            \ 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours ? t.area / t.hours\
+            \ : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost / (t.bought - t.unpriced)\
+            \ * 100 : null) : t[field];\n\nconst [from, to] = period('m', (parseInt(entity.state) || 0));\n\
+            const t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t, 'saved')]]\
+            \ : [];\n"
+        - entity: input_number.elpris_manad
+          name: 'Utan dem:'
+          unit: kr
+          float_precision: 0
+          show:
+            in_chart: false
+            in_header: true
+            legend_value: false
+          data_generator: "const fee = (ms) => { const h = new Date(ms).getHours(); return 45 + (h >=\
+            \ 6 && h < 23 ? 18 : 9); };\nconst sell = (ms) => { const d = new Date(ms); const h = d.getHours();\
+            \ return ([1, 2, 3, 11, 12].includes(d.getMonth() + 1) && d.getDay() >= 1 && d.getDay() <=\
+            \ 5 && h >= 6 && h < 22 ? 7.2 : 5.1); };\nconst memo = (key, make) => {\n  const cache = (window.__elprisHistory\
+            \ ||= {});\n  const hit = cache[key];\n  if (hit && Date.now() - hit.t < 60000) return hit.p;\n\
+            \  const p = make();\n  cache[key] = {t: Date.now(), p};\n  p.catch(() => delete cache[key]);\n\
+            \  return p;\n};\n// Kind 'd' (days) or 'm' (months) back from the current one: [from, to)\
+            \ in ms\nconst period = (kind, back) => {\n  const n = new Date();\n  const from = kind ===\
+            \ 'd' ? new Date(n.getFullYear(), n.getMonth(), n.getDate() - back)\n    : new Date(n.getFullYear(),\
+            \ n.getMonth() - back, 1);\n  const to = kind === 'd' ? new Date(from.getFullYear(), from.getMonth(),\
+            \ from.getDate() + 1)\n    : new Date(from.getFullYear(), from.getMonth() + 1, 1);\n  return\
+            \ [from.getTime(), Math.min(to.getTime(), n.getTime())];\n};\nconst hourly = (from, to) =>\
+            \ memo('s' + from + '-' + to, () => hass.callWS({\n  type: 'recorder/statistics_during_period',\
+            \ period: 'hour', types: ['change', 'state'],\n  start_time: new Date(from).toISOString(),\
+            \ end_time: new Date(to).toISOString(),\n  statistic_ids: ['sensor.matarstallning_aktiv_energi_uttag',\
+            \ 'sensor.matarstallning_aktiv_energi_inmatning', 'sensor.nordpool_kwh_se3_sek_3_10_025',\
+            \ 'sensor.elbesparing', 'sensor.elkostnad_utan_sol_och_batteri']}));\n// Sums over the hours\
+            \ of [from, to), split by period start (day or month): Map start -> totals\nconst totals =\
+            \ async (from, to, key) => {\n  const r = await hourly(from, to);\n  const spot = new Map((r['sensor.nordpool_kwh_se3_sek_3_10_025']\
+            \ || []).map((x) => [x.start, x.state * 1]));\n  const out = new Map();\n  const add = (x,\
+            \ f) => {\n    const k = key(x.start);\n    const t = out.get(k) || {bought: 0, sold: 0, cost:\
+            \ 0, income: 0, saved: 0, without: 0, unpriced: 0, area: 0, hours: 0};\n    f(t, x.change\
+            \ || 0, spot.get(x.start));\n    out.set(k, t);\n  };\n  for (const x of r['sensor.matarstallning_aktiv_energi_uttag']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.bought += kwh;\n    if (p == null) t.unpriced += kwh;\
+            \ else t.cost += kwh * (p + fee(x.start)) / 100;\n  });\n  for (const x of r['sensor.matarstallning_aktiv_energi_inmatning']\
+            \ || []) add(x, (t, kwh, p) => {\n    t.sold += kwh;\n    if (p != null) t.income += kwh *\
+            \ (p / 1.25 + sell(x.start)) / 100;\n  });\n  for (const x of r['sensor.elbesparing'] || [])\
+            \ add(x, (t, kr) => { t.saved += kr; });\n  for (const x of r['sensor.elkostnad_utan_sol_och_batteri']\
+            \ || []) add(x, (t, kr) => { t.without += kr; });\n  // The area's plain mean: what an even\
+            \ load (a monthly price contract) pays, with the same fees\n  for (const [ms, p] of spot)\
+            \ add({start: ms}, (t) => { t.area += p + fee(ms); t.hours += 1; });\n  return out;\n};\n\
+            const monthStart = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(),\
+            \ 1).getTime(); };\nconst value = (t, field) => field === 'area' ? (t.hours ? t.area / t.hours\
+            \ : null) : field === 'avg' ? (t.bought - t.unpriced > 0 ? t.cost / (t.bought - t.unpriced)\
+            \ * 100 : null) : t[field];\n\nconst [from, to] = period('m', (parseInt(entity.state) || 0));\n\
+            const t = (await totals(from, to, () => from)).get(from);\nreturn t ? [[to, value(t, 'without')]]\
+            \ : [];\n"
     - type: custom:apexcharts-card
       graph_span: 365d
       span:
