@@ -53,7 +53,10 @@ horizon), `planned_kwh`, `missing_kwh`.
   `examples/ev/follow_ev_action_automation.yml` starts/stops a Zaptec with its charging
   switch, and the car over Tesla BLE: it stops a car that charges before Zaptec's
   cloud has seen the plug-in, and starts one stopped from the car (the Tesla app)
-  when the plan charges, at most every 2 minutes.
+  when the plan charges, at most every 2 minutes. When the BLE board restarts its
+  states are `unknown` until the car wakes (it reads only an awake car; the SOC
+  need falls back to the history meanwhile, 2026-11-02: 34.6 kWh instead of 21.7),
+  so the automation then wakes the car and asks for a data update.
 - The owner's parents (Oct 2026): Tesla on a Zaptec (`sensor.garaget_laddstatus`,
   `sensor.garaget_session_total_charge`, `switch.garaget_laddar`), plugged in about
   16-19 until about 06:45, charging 1.5-2 h at ~11 kW at once; median night 18 kWh,
