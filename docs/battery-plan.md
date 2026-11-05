@@ -132,6 +132,29 @@ with it off, self-use. An inverter script follows the action sensor
   power charge or fuse the battery is just kept. Without a SOC reading the action
   uses the SOC the plan expects now (`Plan.soc_at`), not 0, which would look like an
   empty battery.
+- Full charge: `battery_full_charge_days` (number, days, 0: off) asks for a charge
+  to 100 %, also above `battery_max_soc`, that often, so the BMS balances the cells
+  and recalibrates its SOC near full (LFP mostly does both only there). It came from
+  Kidde's battery (Nov 2026): two parallel stacks of different age, kept at
+  10-30 % for weeks; the BMS then forced 21 grid charges in 6 days at 16-21 % SOC
+  (a flag in `battery_fault_status_2_bms`, about 2 kWh at 9.5-10 kW each). The SOC
+  last at 99 % or more is stored as `battery_full_at` at each plan (the first plan
+  without one starts the count). Due `days` after it, by the end of the plan
+  (`planning.full_charge`): missing it then costs a penalty rising from 0 to 2 SEK
+  per kWh of capacity over half the interval more (at least a day), so the plan
+  fills the battery in cheap quarters or with PV first, and at any price once long
+  overdue; a day of 500 öre is skipped while the window allows. In the optimizer a
+  `FullCharge` adds the state "full yet": the backward pass runs twice (twice the
+  time while one is due), see `_optimize`. While it is pending, energy above the max
+  SOC may not be discharged (`_above_max_used`): with a small penalty the plan
+  otherwise stored up to 98 % for arbitrage and sold it back, never full. The
+  action's `charge` and `hold` SOC are the plan's, and `follow_battery_action.py`'s
+  daylight hold stores PV up to the higher of it and the max SOC, so the scripts
+  charge to 100 %; an inverter with its own max charge SOC below 100 must allow it
+  (the owner's EH1P has 90). The plan leaves 100 % in the next quarter: reaching it
+  once counts, there is no hold at the top for the BMS to finish balancing.
+  `battery_full_at` is written at most once an hour and only with the interval set. A full discharge is not planned: LFP
+  needs no deep cycles, and the BMS's low-end limit is what forced Kidde's charges.
 - Car: `optimize(vehicle=Vehicle(...))` plans an EV with the battery (in HA see
   `docs/car.md`). `Vehicle`: charger powers (`charger_powers(min, max)`, 0 or one
   of them per quarter), the energy needed at the plug, when it is plugged in and the
@@ -177,4 +200,9 @@ with it off, self-use. An inverter script follows the action sensor
   the action's current (the plan's energy over the run) instead of peak shaving, so
   the import is the house plus that current (Kiddes: S6-EH3P without dispatch; the house
   and the car share a 16 A fuse, the battery has its own, the connection is 35 A, so
-  `main_fuse` is 35).
+  `main_fuse` is 35). `PEAK_SHAVING_HOLD = False` (Kiddes, since 2026-11-04) runs
+  `pause` as the time-of-use charge window at 0 A instead of peak shaving: his
+  S6-EH3P in peak shaving covered the whole house from the battery down to the
+  baseline (2.3 kW load, ~0 W import), and below about 20 % its BMS forced grid charges.
+  With the window the grid covers the load and the battery holds (checked: 0.2 A).
+  His shutdown/reserve SOC were raised to 22/25 % at the same time.

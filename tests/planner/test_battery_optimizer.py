@@ -741,3 +741,60 @@ def test_main_fuse_limits_car_and_battery_together():
         if kwh > 0:
             assert target >= kwh / 0.25
     assert all(level == 12.0 for level in fused.peak_levels)
+
+
+def test_due_full_charge_fills_to_100_in_the_cheapest_hours():
+    """Test that a due full charge goes above the max SOC, where it is cheapest.
+
+    The night is a little cheaper than the day, less than the wear: without a full
+    charge the plan does not cycle at all.
+    """
+    prices = [900.0 if 2 <= s.hour < 5 else 1000.0 for s in STARTS]
+    store = dataclasses.replace(battery(2.0, max_kwh=18.0), wear_cost=0.2)
+    plain = opt.optimize(STARTS, prices, LOAD, NO_PV, store, NO_FEES)
+    assert "charge" not in plain.modes
+    full = opt.FullCharge(kwh=20.0, penalty=5.0)
+    plan = opt.optimize(STARTS, prices, LOAD, NO_PV, store, NO_FEES, full_charge=full)
+    assert plan.full_charge_reached
+    assert max(plan.soc) == pytest.approx(20.0)
+    charging = {
+        s.hour for s, m in zip(STARTS, plan.modes, strict=True) if m == "charge"
+    }
+    assert charging <= {2, 3, 4}
+    # Once full it is not charged again
+    assert "charge" not in plan.modes[plan.soc.index(max(plan.soc)) + 1 :]
+
+
+def test_full_charge_waits_when_the_penalty_is_small():
+    """Test that a full charge costing more than its penalty is left for later."""
+    prices = [900.0 if 2 <= s.hour < 5 else 1000.0 for s in STARTS]
+    store = dataclasses.replace(battery(2.0, max_kwh=18.0), wear_cost=0.2)
+    full = opt.FullCharge(kwh=20.0, penalty=0.01)
+    plan = opt.optimize(STARTS, prices, LOAD, NO_PV, store, NO_FEES, full_charge=full)
+    assert not plan.full_charge_reached
+    assert "charge" not in plan.modes
+
+
+def test_pending_full_charge_does_not_use_the_room_above_max_for_trading():
+    """Test that energy above the max SOC is only stored on the way to 100 %.
+
+    One cheap quarter and a tiny penalty: charging to 19.6 kWh and selling it back
+    paid, without ever being full.
+    """
+    prices = [100.0 if i == 8 else 1000.0 for i in range(96)]
+    store = battery(17.6, max_kwh=18.0, grid_charge_kw=8.0)
+    full = opt.FullCharge(kwh=20.0, penalty=0.01)
+    no_load = [0.0] * 96
+    plan = opt.optimize(
+        STARTS, prices, no_load, NO_PV, store, NO_FEES, full_charge=full
+    )
+    assert plan.full_charge_reached or max(plan.soc) <= 18.0 + 1e-6
+
+
+def test_soc_above_max_is_not_clamped():
+    """Test that a SOC above the max (after a full charge) is planned from as is."""
+    plan = opt.optimize(
+        STARTS, [500.0] * 96, LOAD, NO_PV, battery(20.0, max_kwh=18.0), NO_FEES
+    )
+    # 1 kW load from 20 kWh: the first quarter ends at 19.75, not at the max
+    assert plan.soc[0] == pytest.approx(19.75)

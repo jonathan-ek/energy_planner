@@ -109,7 +109,9 @@ out to whole quarters, kept in UTC. Where they overlap, the last added wins.
 - `number`: `ev_soc` and `ev_charge_limit` (see `docs/car.md`), `battery_efficiency` (%, round trip),
   `max_charge_current`, `max_discharge_current`, `battery_capacity` (Wh),
   `battery_shutdown_soc` (%, default 10), `battery_reserve_soc` (%, default 20: the plan does not
-  discharge below it, see `docs/battery-plan.md`), `battery_max_soc`, `network_cost` (öre/kWh incl. VAT paid on
+  discharge below it, see `docs/battery-plan.md`), `battery_max_soc`,
+  `battery_full_charge_days` (days between charges to 100 %, default 0 = off; the last
+  one is stored as `battery_full_at`, see `docs/battery-plan.md`), `network_cost` (öre/kWh incl. VAT paid on
   bought energy: transfer fee + energy tax, ~63 here), `network_compensation` (öre/kWh
   received when selling, ~5 here),
   `forecast_weekend_reserve` (kWh, default 4), `forecast_reserve_start` /

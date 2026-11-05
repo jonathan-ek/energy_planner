@@ -41,6 +41,12 @@ shutdown SOC `min_kwh`): the inverter may use that energy to shave unexpected
 peaks. Below the reserve the SOC can be (after such a peak), and the energy missing
 at the end is charged at the end price, so the plan refills it.
 
+A full charge (`FullCharge`, to 100 % even above the max SOC) that is due adds a
+second state, whether the battery has been full yet in the plan: not reaching it by
+the end costs `FullCharge.penalty`, so the plan fills the battery in the cheapest
+quarters (or with PV) when that costs less than the penalty. The program then runs
+twice, see `_optimize`.
+
 Battery wear (`Battery.wear_cost`, SEK per kWh taken out of the battery) is added to
 every discharge, so the battery is only cycled when the price difference pays for it.
 
@@ -114,6 +120,18 @@ class Battery:
     def floor_kwh(self) -> float:
         """The lowest SOC the plan discharges to: the reserve or the shutdown SOC."""
         return max(self.min_kwh, self.reserve_kwh)
+
+
+@dataclasses.dataclass(frozen=True)
+class FullCharge:
+    """A full charge that is due: the battery should reach `kwh` in the plan.
+
+    `kwh` is the battery's 100 %, which may be above `Battery.max_kwh`: the plan
+    only charges above the max SOC for this. Not reaching it costs `penalty` SEK.
+    """
+
+    kwh: float
+    penalty: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -194,6 +212,8 @@ class Plan:
     ev_missing_kwh: float = 0.0
     ev_missing_cost: float = 0.0
     fuse_excess_kwh: float = 0.0  # import above the main fuse
+    # A due full charge (FullCharge) is reached in the plan, or none is due
+    full_charge_reached: bool = True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -216,6 +236,7 @@ class _Inputs:
     # A forced `charge` charges up to it, a forced `sell` sells down to it (kWh);
     # empty or None: no target
     forced_soc: Sequence[float | None] = ()
+    full_charge: FullCharge | None = None  # a due full charge, None: none
 
 
 def _forced_soc(inputs: _Inputs, index: int) -> float | None:
@@ -231,18 +252,21 @@ def _step(
     target_kwh,
     extra=0.0,
     export_kwh=math.inf,
+    ceiling=None,
 ):
     """Return (next soc, grid import, grid export) for a mode, vectorized over soc.
 
     `extra` is load added to the quarter's (for Plan.marginal), `export_kwh` the
-    export target: `sell` discharges no faster than the load plus it.
+    export target: `sell` discharges no faster than the load plus it. `ceiling` is
+    the most the battery charges to (default its max; a due full charge's 100 %).
     """
     battery = inputs.battery
+    ceiling = battery.max_kwh if ceiling is None else ceiling
     eta = math.sqrt(battery.efficiency)
     net = inputs.net[index] + extra
     power = battery.max_power_kw * QUARTER_HOURS
     available = np.maximum(soc - battery.floor_kwh, 0.0) * eta  # deliverable kWh
-    room = np.maximum(battery.max_kwh - soc, 0.0) / eta  # kWh it can take in
+    room = np.maximum(ceiling - soc, 0.0) / eta  # kWh it can take in
     forced_soc = _forced_soc(inputs, index)
     surplus = max(-net, 0.0)
     demand = max(net, 0.0)
@@ -259,7 +283,7 @@ def _step(
         if forced_soc is not None:
             # At the target it neither charges nor discharges, like the inverter's
             # time-of-use charge window at its cut-off SOC
-            room = np.maximum(min(battery.max_kwh, forced_soc) - soc, 0.0) / eta
+            room = np.maximum(min(ceiling, forced_soc) - soc, 0.0) / eta
         grid_room = min(battery.max_grid_charge_kw * QUARTER_HOURS, target_kwh - demand)
         stored = np.minimum(np.minimum(room, power), surplus + max(grid_room, 0.0))
         grid = demand - surplus + stored
@@ -332,6 +356,19 @@ def _valid(inputs: _Inputs, index: int, mode: int, soc) -> np.ndarray | bool:
         return True
     reached = soc <= target + SOC_TOLERANCE
     return reached if MODES[mode] == "self_use" else np.logical_not(reached)
+
+
+def _above_max_used(inputs: _Inputs, index: int, soc, next_soc):
+    """Return where a step discharges energy stored above the max SOC, vectorized.
+
+    While a full charge is pending, energy above the max SOC is only for reaching
+    100 %: without this a small penalty let the plan store above the max for
+    arbitrage and sell it back without ever being full. A forced mode may.
+    """
+    if inputs.forced[index]:
+        return np.zeros(np.shape(soc), dtype=bool)
+    max_kwh = inputs.battery.max_kwh
+    return (soc > max_kwh + SOC_TOLERANCE) & (next_soc < soc - SOC_TOLERANCE)
 
 
 def _ev_levels(inputs: _Inputs) -> np.ndarray:
@@ -455,11 +492,21 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
     delivered energy is tracked exactly and capped at the need. `Plan.marginal`
     (with `probe_kwh`) is computed here, the extra load added to the car's.
 
+    A due full charge (`_Inputs.full_charge`) runs the backward pass twice. First the
+    values once the battery has been full (the plain program, charging up to the max
+    SOC), then the values while it has not: charging goes up to its 100 %, a step
+    that reaches it continues in the first values, and the end costs the penalty.
+    The forward pass starts in the second (unless the battery is full now) and
+    moves to the first when it reaches 100 %. The SOC grid goes up to 100 % then
+    (and up to the SOC now, if above the max).
+
     Returns (modes, socs, imports, exports, switches, marginal, ev kWh per quarter,
-    car energy missing at its deadline).
+    car energy missing at its deadline, whether the full charge was reached).
     """
     battery = inputs.battery
-    grid = np.linspace(battery.min_kwh, battery.max_kwh, SOC_STEPS)
+    full = inputs.full_charge
+    top = max(battery.max_kwh, battery.soc_kwh, full.kwh if full else 0.0)
+    grid = np.linspace(battery.min_kwh, top, SOC_STEPS)
     count = len(inputs.starts)
     rows = len(MODES) + 1
     switch = np.full((rows, len(MODES)), SWITCH_COST)
@@ -474,49 +521,75 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
     def target(index: int, ev_kwh: float) -> float:
         return min(level_caps[index], other_caps[index] + ev_kwh, inputs.fuse_kwh)
 
-    # values[t][previous mode, soc level, car level]: the cost from the start of
-    # quarter t on. The car axis has one level after the deadline
-    battery_end = -(grid - battery.floor_kwh) * inputs.end_price
-    end = np.tile(battery_end[:, None], (rows, 1, 1))
-    if vehicle and deadline >= count:
-        end = end + _ev_missing(inputs, levels, at_end=True)[None, None, :]
-    values = [end]
-    for index in range(count - 1, -1, -1):
-        following = values[-1]
-        if vehicle and index + 1 == deadline < count:
-            # The deadline: what each car level still misses
-            following = following + _ev_missing(inputs, levels, at_end=False)
-            values[-1] = following
-        car = following.shape[2]
-        best = np.full((len(MODES), SOC_STEPS, car), np.inf)
-        for ev_kwh in _ev_actions(inputs, index, levels):
-            for mode in _allowed(inputs, index):
-                soc, imp, exp = _step(
-                    inputs,
-                    index,
-                    MODES[mode],
-                    grid,
-                    target(index, ev_kwh),
-                    ev_kwh,
-                    export_caps[index],
-                )
-                cost = _quarter_cost(
-                    inputs, index, imp, exp, caps[index], ev_kwh
-                ) + _wear(battery, grid, soc)
-                cost = np.where(_valid(inputs, index, mode, grid), cost, np.inf)
-                if car > 1:
-                    future = _shifted(
-                        _at_soc(following[mode], grid, soc), ev_kwh, levels
+    def future_of(following, soc, ev_kwh):
+        """Return the value at each next soc (and the car level plus ev_kwh)."""
+        if following.shape[1] > 1:
+            return _shifted(_at_soc(following, grid, soc), ev_kwh, levels)
+        return np.interp(soc, grid, following[:, 0])[:, None]
+
+    def backward(ceiling: float, done=None) -> list[np.ndarray]:
+        """Return the values from the end, charging up to `ceiling`.
+
+        With `done` (the values once the full charge is reached) the values while
+        it is still pending: a step reaching it continues in `done`.
+        """
+        # values[t][previous mode, soc level, car level]: the cost from the start
+        # of quarter t on. The car axis has one level after the deadline
+        battery_end = -(grid - battery.floor_kwh) * inputs.end_price
+        end = np.tile(battery_end[:, None], (rows, 1, 1))
+        if vehicle and deadline >= count:
+            end = end + _ev_missing(inputs, levels, at_end=True)[None, None, :]
+        if done is not None and full is not None:
+            end = end + full.penalty
+        values = [end]
+        for index in range(count - 1, -1, -1):
+            following = values[-1]
+            if vehicle and index + 1 == deadline < count:
+                # The deadline: what each car level still misses
+                following = following + _ev_missing(inputs, levels, at_end=False)
+                values[-1] = following
+            car = following.shape[2]
+            best = np.full((len(MODES), SOC_STEPS, car), np.inf)
+            for ev_kwh in _ev_actions(inputs, index, levels):
+                for mode in _allowed(inputs, index):
+                    soc, imp, exp = _step(
+                        inputs,
+                        index,
+                        MODES[mode],
+                        grid,
+                        target(index, ev_kwh),
+                        ev_kwh,
+                        export_caps[index],
+                        ceiling,
                     )
-                else:
-                    future = np.interp(soc, grid, following[mode][:, 0])[:, None]
-                best[mode] = np.minimum(best[mode], cost[:, None] + future)
-        # Best over the modes for each previous mode
-        values.append(np.min(best[None] + switch[:, :, None, None], axis=1))
-    values.reverse()
+                    cost = _quarter_cost(
+                        inputs, index, imp, exp, caps[index], ev_kwh
+                    ) + _wear(battery, grid, soc)
+                    cost = np.where(_valid(inputs, index, mode, grid), cost, np.inf)
+                    if done is not None:
+                        cost = np.where(
+                            _above_max_used(inputs, index, grid, soc), np.inf, cost
+                        )
+                    future = future_of(following[mode], soc, ev_kwh)
+                    if done is not None and full is not None:
+                        reached = (soc >= full.kwh - SOC_TOLERANCE)[:, None]
+                        future = np.where(
+                            reached,
+                            future_of(done[index + 1][mode], soc, ev_kwh),
+                            future,
+                        )
+                    best[mode] = np.minimum(best[mode], cost[:, None] + future)
+            # Best over the modes for each previous mode
+            values.append(np.min(best[None] + switch[:, :, None, None], axis=1))
+        values.reverse()
+        return values
+
+    values = backward(battery.max_kwh)
+    pending = backward(full.kwh, values) if full is not None else values
 
     # Forward pass from the actual state of charge and the mode running now
-    soc = np.array([min(max(battery.soc_kwh, battery.min_kwh), battery.max_kwh)])
+    soc = np.array([min(max(battery.soc_kwh, battery.min_kwh), top)])
+    full_reached = full is None or soc[0] >= full.kwh - SOC_TOLERANCE
     delivered = 0.0
     previous = MODES.index(inputs.current_mode) if inputs.current_mode else rows - 1
     modes, socs, imports, exports, marginal, charged = [], [], [], [], [], []
@@ -532,8 +605,14 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
             target(index, ev_kwh),
             load,
             export_caps[index],
+            battery.max_kwh if full_reached or full is None else full.kwh,
         )
-        following = values[index + 1][mode]
+        table = (
+            values
+            if full_reached or full is None or next_soc[0] >= full.kwh - SOC_TOLERANCE
+            else pending
+        )
+        following = table[index + 1][mode]
         if following.shape[1] == 1:
             future = float(np.interp(next_soc[0], grid, following[:, 0]))
         else:
@@ -546,6 +625,8 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
             + switch[previous, mode]
         )
         if not np.all(_valid(inputs, index, mode, soc)):
+            cost = math.inf
+        if not full_reached and np.any(_above_max_used(inputs, index, soc, next_soc)):
             cost = math.inf
         return cost, next_soc, imp, exp
 
@@ -584,6 +665,9 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
         )
         switches += switch[previous, mode] > 0
         previous = mode
+        full_reached = full_reached or (
+            full is not None and soc[0] >= full.kwh - SOC_TOLERANCE
+        )
         delivered = min(delivered + ev_kwh, levels[-1]) if vehicle else 0.0
         modes.append(MODES[mode])
         socs.append(float(soc[0]))
@@ -591,7 +675,17 @@ def _optimize(inputs: _Inputs, targets, caps: list[list[tuple]]):
         exports.append(float(exp[0]))
         charged.append(ev_kwh)
     missing = max(vehicle.need_kwh - delivered, 0.0) if vehicle else 0.0
-    return modes, socs, imports, exports, switches, marginal, charged, missing
+    return (
+        modes,
+        socs,
+        imports,
+        exports,
+        switches,
+        marginal,
+        charged,
+        missing,
+        full_reached,
+    )
 
 
 def _hourly(starts: Sequence[dt.datetime], kwh: Sequence[float]):
@@ -674,6 +768,7 @@ def optimize(
     probe_kwh: float = 0.0,
     vehicle: Vehicle | None = None,
     export_history: Mapping[dt.datetime, float] | None = None,
+    full_charge: FullCharge | None = None,
 ) -> Plan:
     """Return the cheapest plan.
 
@@ -688,7 +783,7 @@ def optimize(
     heat pump); `probe_kwh` the extra load per quarter that `Plan.marginal` prices;
     `vehicle` a car to charge in the same plan (see `Vehicle` and `_optimize`);
     `export_history` the hourly mean grid export so far this month, like `history`,
-    for the export power charges.
+    for the export power charges; `full_charge` a full charge that is due.
     """
     # Keyed by the hour in UTC (see _hourly); local time for the tariff's periods
     history = {hour_start(h): kw for h, kw in (history or {}).items()}
@@ -744,6 +839,7 @@ def optimize(
         float(np.min(buy[-END_WINDOW:])) if len(buy) else 0.0,
         limit.fuse_kw * QUARTER_HOURS if limit.fuse_kw > 0 else math.inf,
         tuple(forced_soc) if forced_soc else (),
+        full_charge,
     )
 
     # Each hour's local start, for the tariff's periods; once, not per level tried
@@ -810,9 +906,17 @@ def optimize(
                     for k in keys
                 ]
             )
-        modes, socs, imports, exports, switches, marginal, ev_kwh, missing = _optimize(
-            inputs, (level_caps, other_caps, export_caps), caps
-        )
+        (
+            modes,
+            socs,
+            imports,
+            exports,
+            switches,
+            marginal,
+            ev_kwh,
+            missing,
+            full_reached,
+        ) = _optimize(inputs, (level_caps, other_caps, export_caps), caps)
         # As in _optimize: the car's charging comes on top of the battery's
         targets = [
             min(level, other + car_kwh, inputs.fuse_kwh)
@@ -831,7 +935,7 @@ def optimize(
                 )[0]
             )
         energy = float(np.dot(imports, buy) - np.dot(exports, sell))
-        first = min(max(battery.soc_kwh, battery.min_kwh), battery.max_kwh)
+        first = max(battery.soc_kwh, battery.min_kwh)
         wear = sum(
             max(a - b, 0.0) * battery.wear_cost for a, b in pairwise([first, *socs])
         )
@@ -876,12 +980,14 @@ def optimize(
             - end_value
             + (excess + fuse_excess) * LIMIT_PENALTY
             + switches * SWITCH_COST
-            + ev_missing_cost,
+            + ev_missing_cost
+            + (0.0 if full_reached or full_charge is None else full_charge.penalty),
             marginal,
             ev_kwh,
             missing,
             ev_missing_cost,
             fuse_excess,
+            full_reached,
         )
 
     # Coordinate search over the import targets, starting at the peaks already paid.

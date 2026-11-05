@@ -63,6 +63,11 @@ SETTINGS: dict[str, Setting] = {
         _number("battery_efficiency", 85, replans=True),
         # öre per kWh taken out
         _number("battery_wear_cost", 20, replans=True),
+        # Days between full charges (to 100 %, also above the max SOC), for the
+        # BMS to balance the cells and calibrate its SOC; 0: off
+        _number("battery_full_charge_days", 0, replans=True),
+        # When the SOC last reached 100 % (set by the planner)
+        Setting("battery_full_at", None),
         Setting("battery_soc_sensor", "sensor.solis_s6_solis_battery_soc"),
         Setting("battery_voltage_sensor", "sensor.solis_s6_solis_battery_voltage"),
         # The grid
@@ -182,6 +187,8 @@ class BatterySettings:
     wear_sek_per_kwh: float  # per kWh taken out
     soc_sensor: str
     voltage_sensor: str
+    full_charge_days: float = 0.0  # between full charges, 0: off
+    full_at: dt.datetime | None = None  # when the SOC last reached 100 %
 
 
 def battery(config: Mapping[str, Any]) -> BatterySettings:
@@ -197,6 +204,8 @@ def battery(config: Mapping[str, Any]) -> BatterySettings:
         wear_sek_per_kwh=number(config, "battery_wear_cost") / 100,
         soc_sensor=get(config, "battery_soc_sensor"),
         voltage_sensor=get(config, "battery_voltage_sensor"),
+        full_charge_days=number(config, "battery_full_charge_days"),
+        full_at=get(config, "battery_full_at"),
     )
 
 

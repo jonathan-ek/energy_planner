@@ -20,6 +20,7 @@ from . import ev, heat_pump, manual, settings
 from .battery_optimizer import (
     QUARTER_HOURS,
     Battery,
+    FullCharge,
     Limit,
     Vehicle,
     charger_powers,
@@ -110,6 +111,34 @@ def battery(config: settings.BatterySettings, soc: float, voltage: float) -> Bat
         wear_cost=config.wear_sek_per_kwh,
         reserve_kwh=capacity * config.reserve_soc / 100,
     )
+
+
+# SEK per kWh of capacity that missing a full charge costs once it is overdue by
+# half its interval; it rises linearly from 0 when it is due
+FULL_CHARGE_PENALTY = 2.0
+
+
+def full_charge(
+    config: settings.BatterySettings, end: dt.datetime
+) -> FullCharge | None:
+    """Return the full charge due by the end of the plan, None when none is.
+
+    Due `full_charge_days` after the SOC last reached 100 %: missing it then costs
+    nothing yet, and the penalty rises to `FULL_CHARGE_PENALTY` per kWh of capacity
+    over half that interval more (at least a day). So the plan fills the battery
+    where it is cheap first, and at any price once it is long overdue.
+    """
+    days = config.full_charge_days
+    if days <= 0 or config.full_at is None:
+        return None
+    # In UTC: a difference of local times in one zone is by wall clock
+    age = (end.astimezone(dt.UTC) - config.full_at.astimezone(dt.UTC)).total_seconds()
+    age /= 86400
+    overdue = (age - days) / max(days / 2, 1.0)
+    if overdue <= 0:
+        return None
+    capacity = config.capacity_kwh
+    return FullCharge(capacity, FULL_CHARGE_PENALTY * capacity * min(overdue, 1.0))
 
 
 def heat_pump_quarters(
@@ -291,6 +320,7 @@ def build_plan(inputs: PlanInputs) -> Plan | None:
         forced_soc=[None if t is None else t / 100 * capacity for t in forced_soc],
         current_mode=last.value_at(inputs.now, last.modes) if last else None,
         vehicle=car,
+        full_charge=full_charge(inputs.battery, planned.local_end(len(planned) - 1)),
     )
     heat = heat_pump_quarters(
         inputs.heat_pump, forecast.heat_pump_loss, starts, temperatures

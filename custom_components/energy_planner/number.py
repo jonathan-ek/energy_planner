@@ -7,8 +7,8 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfPower,
     UnitOfTemperature,
-    PERCENTAGE,
     UnitOfTime,
+    PERCENTAGE,
 )
 from homeassistant.components.sensor.const import (
     SensorDeviceClass,
@@ -103,6 +103,22 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
                 "max_val": 100,
                 "step": 1,
                 "unit_of_measurement": PERCENTAGE,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
+                # Days between full charges (to 100 %, also above the max SOC) for
+                # the BMS to balance and calibrate; the plan picks the cheapest
+                # time once one is due. 0: off
+                "id": "battery_full_charge_days",
+                "name": "Battery full charge interval",
+                "min_val": 0,
+                "max_val": 90,
+                "step": 1,
+                "unit_of_measurement": UnitOfTime.DAYS,
                 "enabled": True,
                 "data_store": "config",
             },

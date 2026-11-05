@@ -77,6 +77,7 @@ def mock_hass():
                 "grid_import_limit_end": 23,
             },
             "forecast": make_forecast(STARTS),
+            "save": AsyncMock(),
             PLAN_SENSORS: [MagicMock()],
             spot.PRICE_STORE: {},
         }
@@ -631,3 +632,26 @@ async def test_import_history_is_the_lowest_source_per_hour():
     # The hour after the gap is dropped, the next one counts again
     assert gap == {h12: 2.0}
     assert none == {}
+
+
+async def test_full_charge_is_recorded(mock_hass):
+    """Test that a full SOC is stored as the last full charge, a lower one is not."""
+    config = mock_hass.data[DOMAIN]["config"]
+    config["battery_full_at"] = before = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    await battery_plan._record_full_charge(mock_hass, 99.0)
+    assert config["battery_full_at"] == before  # full charges off
+    config["battery_full_charge_days"] = 7
+    await battery_plan._record_full_charge(mock_hass, 80.0)
+    assert config["battery_full_at"] == before
+    await battery_plan._record_full_charge(mock_hass, 99.0)
+    recorded = config["battery_full_at"]
+    assert recorded > before
+    await battery_plan._record_full_charge(mock_hass, 100.0)
+    assert config["battery_full_at"] == recorded  # at most once an hour
+
+
+async def test_first_plan_starts_the_full_charge_count(mock_hass):
+    """Test that without a stored full charge any SOC starts the count."""
+    config = mock_hass.data[DOMAIN]["config"]
+    await battery_plan._record_full_charge(mock_hass, 40.0)
+    assert config["battery_full_at"] is not None

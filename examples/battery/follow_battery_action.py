@@ -83,6 +83,12 @@ PEAK_SHAVING_CHARGE = True
 # In `hold` the baseline is kept this far below the SOC: the S6-EH3P also charges
 # from the grid at the baseline (29 -> 31 % at 8.9 kW with it at 29, Oct 2026)
 HOLD_SOC_MARGIN = 3
+# Without DISPATCH `pause` uses peak shaving when the action has an import target.
+# Kidde's S6-EH3P then covered the whole load from the battery down to the
+# baseline (Nov 2026: 2.3 kW house, ~0 W import), until its BMS forced a grid
+# charge. False: the charge window at 0 A instead, which really keeps the battery
+# (the grid covers the load, nothing shaves above the import target)
+PEAK_SHAVING_HOLD = True
 # Inverters with an enable switch for time-of-use and each window (e.g. the
 # S6-EH3P: switch.time_of_use, switch.solis_s6_solis_grid_connected_charging_period_6
 # and ..._discharging_period_6); None where the times alone set the window (EH1P)
@@ -200,7 +206,9 @@ target = attributes.get("import_target_kw")
 grid_limit = None if target is None else int(round(target * 10)) * 100  # W
 guard = hass.states.get(FUSE_GUARD)
 guard_kw = guard.attributes.get("grid_limit_kw") if guard else None
-checked = dt_util.parse_datetime(guard.attributes.get("updated") or "") if guard else None
+checked = (
+    dt_util.parse_datetime(guard.attributes.get("updated") or "") if guard else None
+)
 if (
     grid_limit is not None
     and guard_kw is not None
@@ -274,7 +282,8 @@ elif DISPATCH and state == "pause":
                 "mode": "battery_charge",
                 "power_watts": MAX_CHARGE_POWER,
                 "import_limit_watts": 0,
-                "soc_max": int(get_float(MAX_SOC, 100.0)),
+                # Above the max SOC when the plan's hold ends higher (a full charge)
+                "soc_max": int(max(get_float(MAX_SOC, 100.0), soc or 0)),
             }
     elif grid_limit is not None and grid_limit <= HOLD_IMPORT_MAX:
         # Import up to the target, the battery covers the load above it
@@ -310,7 +319,7 @@ elif state == "charge" and soc is not None:
     else:
         charge = (current, soc)
 elif state == "pause":
-    if grid_limit is not None:
+    if grid_limit is not None and PEAK_SHAVING_HOLD:
         # Keep the battery, it only covers the load above the import target. The
         # baseline is kept HOLD_SOC_MARGIN below the battery's SOC, so it does not
         # charge from the grid; it is only lowered, not raised.

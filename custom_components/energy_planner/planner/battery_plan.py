@@ -29,6 +29,9 @@ from .utils import get_tariff
 
 _LOGGER = logging.getLogger(__name__)
 
+# SOC % that counts as a full charge (planning.full_charge): the BMS may stop at 99
+FULL_SOC = 99
+
 
 async def _hourly_import(hass: HomeAssistant, statistic_ids, start, end):
     """Grid import (or export) per hour start (UTC) in kWh (= the hourly mean kW).
@@ -125,6 +128,25 @@ def _car(hass: HomeAssistant) -> planning.CarReadings | None:
         entered_soc=settings.get(config, "ev_soc"),
         entered_at_kwh=settings.get(config, "ev_soc_session_kwh"),
     )
+
+
+async def _record_full_charge(hass: HomeAssistant, soc: float) -> None:
+    """Store now as the last full charge when the SOC is full.
+
+    Also on the first plan without one, so the interval counts from there. Only
+    with full charges on, and at most once an hour: a battery kept full would
+    otherwise write the store every quarter.
+    """
+    config = hass.data[DOMAIN]["config"]
+    last = config.get("battery_full_at")
+    now = dt_utils.utcnow()
+    if last is None or (
+        soc >= FULL_SOC
+        and settings.number(config, "battery_full_charge_days") > 0
+        and now - last >= dt.timedelta(hours=1)
+    ):
+        config["battery_full_at"] = now
+        await hass.data[DOMAIN]["save"]()
 
 
 async def _store_ev_settings(hass: HomeAssistant, values: dict) -> None:
@@ -309,6 +331,8 @@ async def async_update_plan(hass: HomeAssistant) -> None:
     if forecast is None or soc is None or not voltage:
         _LOGGER.info("No forecast or battery state, skipping the battery plan")
         return
+    await _record_full_charge(hass, soc)
+    battery = settings.battery(config)
     # After the prices, whose first estimate of the day can take a while
     now = dt_utils.now()
     month_start = dt_utils.start_of_local_day(now.date().replace(day=1))

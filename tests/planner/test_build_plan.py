@@ -387,3 +387,36 @@ def test_main_fuse_caps_the_import():
     assert all(t is not None and t <= fuse + 1e-9 for t in result["targets"])
     assert max(result["grid_import"]) <= fuse + 0.01
     assert result["fuse_excess_kwh"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("age_days", "penalty"),
+    [(6.0, None), (7.0, None), (8.75, 2.0 * 25.6 * 0.5), (12.0, 2.0 * 25.6)],
+)
+def test_full_charge_penalty_rises_once_due(age_days, penalty):
+    """Test that a full charge every 7 days is due after 7 and long overdue at 10.5."""
+    config = dataclasses.replace(
+        BATTERY, full_charge_days=7, full_at=NOW - dt.timedelta(days=age_days)
+    )
+    due = planning.full_charge(config, NOW)
+    if penalty is None:
+        assert due is None
+    else:
+        assert due is not None
+        assert due.kwh == pytest.approx(25.6)
+        assert due.penalty == pytest.approx(penalty)
+
+
+def test_no_full_charge_when_off():
+    """Test that an interval of 0 never asks for a full charge."""
+    config = dataclasses.replace(BATTERY, full_at=NOW - dt.timedelta(days=100))
+    assert planning.full_charge(config, NOW) is None
+
+
+def test_overdue_full_charge_reaches_100():
+    """Test that the plan charges above the 90 % max SOC when a full charge is due."""
+    config = dataclasses.replace(
+        BATTERY, full_charge_days=7, full_at=NOW - dt.timedelta(days=30)
+    )
+    assert max(plan()["soc"]) <= 90
+    assert max(plan(battery=config)["soc"]) == pytest.approx(100, abs=0.5)

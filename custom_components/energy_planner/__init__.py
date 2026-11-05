@@ -133,8 +133,9 @@ def parse_stored_data(hass: HomeAssistant):
     config = hass.data[DOMAIN]["config"]
     if type(config.get("ev_ready_time")) is str:
         config["ev_ready_time"] = dt.time.fromisoformat(config["ev_ready_time"])
-    if type(config.get("ev_departure")) is str:
-        config["ev_departure"] = dt_utils.parse_datetime(config["ev_departure"])
+    for key in ("ev_departure", "battery_full_at"):
+        if type(config.get(key)) is str:
+            config[key] = dt_utils.parse_datetime(config[key])
 
 
 async def _manual_slots_changed(hass: HomeAssistant, reason: str) -> None:
