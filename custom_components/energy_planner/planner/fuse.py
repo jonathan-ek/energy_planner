@@ -17,6 +17,11 @@ from the live import per phase (`limits`):
    (`ev_current_a`) is raised to the room, up to the charger's highest, and lowered
    only when the battery can not take enough off (see `limits`); below `EV_MIN_A`
    it can not charge, 0.
+   With a car circuit fuse (`circuit_a`, a smaller fuse the house and the car share
+   while the battery is on the main fuse's side, Kidde's 16 A) the car's room is
+   also the circuit's: its fuse minus the margin minus the circuit's load
+   (`Reading.circuit_kw`) without the car, per phase. The battery can not take
+   load off that fuse, so a circuit phase over it lowers the car by the excess.
 4. The battery gets the rest: the inverter's grid limit (`grid_limit_kw`, total
    import) is the house's and the car's load plus the room left per phase (after
    the car's setting, or its draw if higher) times the phases. Above it the inverter's
@@ -50,13 +55,15 @@ class Reading:
     `inverter_kw` is what the inverter draws from the house's wiring (charging the
     battery from the grid; negative while it delivers power), `ev_a` the car's
     current now (A per phase, the highest phase) and `ev_setting_a` the charger's
-    current setting.
+    current setting. `circuit_kw` is the load per phase behind the car circuit's
+    fuse, the car included (empty: no circuit fuse, None: one is missing).
     """
 
     phase_kw: tuple[float, ...]
     inverter_kw: float = 0.0
     ev_a: float = 0.0
     ev_setting_a: float | None = None
+    circuit_kw: tuple[float, ...] | None = ()
 
 
 def limits(
@@ -66,6 +73,7 @@ def limits(
     ev_max_a: float,
     *,
     ev_wanted: bool,
+    circuit_a: float = 0.0,
 ) -> dict:
     """Return the room on the busiest phase and the limits for the car and battery.
 
@@ -73,7 +81,10 @@ def limits(
     A, 0: it can not charge), `grid_limit_kw` the inverter's max usable grid power;
     `phase_a` and `house_a` are the currents per phase now, all and without the
     controllable loads, `over_a` how far the busiest phase is above the fuse minus
-    the margin.
+    the margin. With a car circuit fuse (`circuit_a` and `reading.circuit_kw`)
+    `circuit_room_a` is the room left on its busiest phase for the car; a circuit
+    phase over it lowers the car whether it should charge or not (nothing else
+    relieves that fuse), and without its readings the car gets at most `EV_MIN_A`.
 
     The car's current is reported about once a minute and the meter more often, so
     just after the car starts its draw looks like the house's. Its setting is
@@ -88,6 +99,16 @@ def limits(
     house_w = [kw * 1000 - inverter_w - car_w for kw in reading.phase_kw]
     room_w = min(allowed_w - w for w in house_w)
     over_w = max(kw * 1000 for kw in reading.phase_kw) - allowed_w
+    ev_room_w = room_w
+    circuit_room_w = None
+    circuit_over_w = 0.0
+    if circuit_a > 0 and reading.circuit_kw:
+        circuit_allowed_w = (circuit_a - margin_a) * VOLTAGE
+        circuit_room_w = min(
+            circuit_allowed_w - (kw * 1000 - car_w) for kw in reading.circuit_kw
+        )
+        circuit_over_w = max(kw * 1000 for kw in reading.circuit_kw) - circuit_allowed_w
+        ev_room_w = min(room_w, circuit_room_w)
     setting = min(
         reading.ev_setting_a if reading.ev_setting_a is not None else ev_max_a,
         ev_max_a,
@@ -97,15 +118,22 @@ def limits(
         excess_w = over_w - max(inverter_w, 0.0)
         if excess_w > 0:
             ev_a = min(setting, reading.ev_a) - excess_w / VOLTAGE
-        else:
-            ev_a = max(setting, min(room_w / VOLTAGE, ev_max_a))
+        elif circuit_over_w <= 0:
+            ev_a = max(setting, min(ev_room_w / VOLTAGE, ev_max_a))
+    if circuit_over_w > 0:
+        # A car not reported yet draws what looks like the circuit's load: its
+        # setting is what it draws
+        drawn_a = min(setting, reading.ev_a) if reading.ev_a >= EV_MIN_A else setting
+        ev_a = min(ev_a, drawn_a - circuit_over_w / VOLTAGE)
+    if circuit_a > 0 and reading.circuit_kw is None:
+        ev_a = min(ev_a, EV_MIN_A)
     ev_a = math.floor(ev_a + 1e-9)
     if ev_a < EV_MIN_A:
         ev_a = 0
     # The car may draw up to its setting while it should charge
     reserved_w = max(ev_a * VOLTAGE if ev_wanted else 0.0, car_w)
     grid_w = sum(house_w) + phases * (car_w + room_w - reserved_w)
-    return {
+    result = {
         "phase_a": [round(kw * 1000 / VOLTAGE, 1) for kw in reading.phase_kw],
         "house_a": [round(w / VOLTAGE, 1) for w in house_w],
         "room_a": round(room_w / VOLTAGE, 1),
@@ -113,6 +141,9 @@ def limits(
         "ev_current_a": ev_a,
         "grid_limit_kw": round(max(grid_w, 0.0) / 1000, 2),
     }
+    if circuit_room_w is not None:
+        result["circuit_room_a"] = round(circuit_room_w / VOLTAGE, 1)
+    return result
 
 
 def smooth(

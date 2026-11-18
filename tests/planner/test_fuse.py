@@ -232,3 +232,119 @@ def test_car_wanted_from_the_published_action_and_the_live_charger(
     }
     hass.data = data
     assert fuse_guard._car_wanted(hass, NOW) is wanted
+
+
+def test_the_car_circuit_fuse_limits_the_car_not_the_battery():
+    """Test Kidde's 16 A house and car circuit, the battery on the 35 A side."""
+    # House 8 A on L1 (circuit and grid), the car at 0 A, the battery idle
+    circuit = (8 * 0.23, 2 * 0.23, 2 * 0.23)
+    reading = fuse.Reading(circuit, ev_a=0, ev_setting_a=0, circuit_kw=circuit)
+    limits = fuse.limits(reading, 35, 2, 10, ev_wanted=True, circuit_a=16)
+    # 16 - 2 margin - 8 A: the car gets 6 A, not its highest 10 A
+    assert limits["ev_current_a"] == 6
+    assert limits["circuit_room_a"] == 6.0
+    # The battery still gets the main fuse's room: (33 - 8 - 6 car) A x 3 + house
+    assert limits["grid_limit_kw"] == pytest.approx((19 * 3 + 12) * 0.23, abs=0.01)
+    # Without a circuit fuse: unchanged
+    assert fuse.limits(reading, 35, 2, 10, ev_wanted=True)["ev_current_a"] == 10
+
+
+def test_an_overloaded_car_circuit_lowers_the_car():
+    """Test that a circuit phase over its fuse lowers the car, battery or not."""
+    # L1: 9 A house + 10 A car = 19 A, 5 A over 16 - 2; the battery charges 9 kW
+    circuit = (19 * 0.23, 12 * 0.23, 12 * 0.23)
+    phases = tuple(kw + 3.0 for kw in circuit)
+    reading = fuse.Reading(phases, 9.0, 10, 10, circuit_kw=circuit)
+    limits = fuse.limits(reading, 35, 2, 10, ev_wanted=True, circuit_a=16)
+    assert limits["ev_current_a"] == 0  # 10 - 5 = 5 A is below the car's 6 A
+    circuit = (17 * 0.23, 12 * 0.23, 12 * 0.23)
+    reading = fuse.Reading(phases, 9.0, 10, 10, circuit_kw=circuit)
+    assert (
+        fuse.limits(reading, 35, 2, 10, ev_wanted=True, circuit_a=16)["ev_current_a"]
+        == 7
+    )
+
+
+def test_a_late_car_reading_trims_the_car_on_the_circuit():
+    """Test that a car not reported yet is lowered from its setting, not stopped."""
+    # Raised to 8 A, it draws, the circuit reads 14.3 A while the car reads 0 A
+    circuit = (14.3 * 0.23, 10 * 0.23, 10 * 0.23)
+    reading = fuse.Reading(circuit, ev_a=0, ev_setting_a=8, circuit_kw=circuit)
+    limits = fuse.limits(reading, 35, 0, 10, ev_wanted=True, circuit_a=14)
+    assert limits["ev_current_a"] == 7
+
+
+def test_an_overloaded_circuit_lowers_a_car_that_should_not_charge():
+    """Test that a car charging by hand is lowered when the circuit is over."""
+    circuit = (20 * 0.23, 12 * 0.23, 12 * 0.23)
+    reading = fuse.Reading(circuit, ev_a=10, ev_setting_a=10, circuit_kw=circuit)
+    assert (
+        fuse.limits(reading, 35, 0, 10, ev_wanted=False, circuit_a=16)["ev_current_a"]
+        == 6
+    )
+    # Not over: left alone
+    circuit = (14 * 0.23, 12 * 0.23, 12 * 0.23)
+    reading = fuse.Reading(circuit, ev_a=10, ev_setting_a=10, circuit_kw=circuit)
+    limits = fuse.limits(reading, 35, 0, 10, ev_wanted=False, circuit_a=16)
+    assert limits["ev_current_a"] == 10
+    assert limits["circuit_room_a"] == 12.0
+
+
+def test_a_missing_circuit_reading_holds_the_car_at_its_lowest():
+    """Test that without the circuit's load the car gets 6 A, the battery its room."""
+    phases = (1.0, 1.0, 1.0)
+    reading = fuse.Reading(phases, ev_a=10, ev_setting_a=10, circuit_kw=None)
+    limits = fuse.limits(reading, 35, 0, 10, ev_wanted=True, circuit_a=16)
+    assert limits["ev_current_a"] == fuse.EV_MIN_A
+    assert "circuit_room_a" not in limits
+    assert limits["grid_limit_kw"] > 0
+    # Without a circuit fuse the same reading is unchanged
+    assert fuse.limits(reading, 35, 0, 10, ev_wanted=True) == fuse.limits(
+        fuse.Reading(phases, ev_a=10, ev_setting_a=10), 35, 0, 10, ev_wanted=True
+    )
+
+
+def test_update_guard_reads_the_circuit_only_with_its_fuse():
+    """Test the circuit sensors from HA states: W, missing, and off at 0 A."""
+    states = {
+        "sensor.l1": state(1.0, "kW"),
+        "sensor.l2": state(1.0, "kW"),
+        "sensor.l3": state(1.0, "kW"),
+        "sensor.c1": state(3220, "W"),
+        "sensor.c2": state(1.0, "kW"),
+        "sensor.c3": state(1.0, "kW"),
+        "sensor.ev1": state(0.0, "A"),
+        "sensor.ev": state(0.0, "A"),
+    }
+    hass = MagicMock()
+    hass.states.get = states.get
+    hass.data = {
+        DOMAIN: {
+            "config": {
+                "main_fuse": 35,
+                "fuse_margin": 0,
+                "ev_charger_max_power": 6900,
+                "ev_circuit_fuse": 16,
+                "grid_phase_import_sensors": ["sensor.l1", "sensor.l2", "sensor.l3"],
+                "ev_phase_current_sensors": ["sensor.ev1"],
+                "ev_charger_current_number": "sensor.ev",
+                "ev_circuit_load_sensors": ["sensor.c1", "sensor.c2", "sensor.c3"],
+            }
+        }
+    }
+    with (
+        patch.object(fuse_guard.dt_utils, "now", return_value=NOW),
+        patch.object(fuse_guard, "_car_wanted", return_value=True),
+    ):
+        fuse_guard.update_guard(hass)
+        # L1: 3.22 kW = 14 A, 2 A left: too little for the car
+        assert hass.data[DOMAIN]["fuse_guard"]["circuit_room_a"] == 2.0
+        assert hass.data[DOMAIN]["fuse_guard"]["ev_current_a"] == 0
+        del states["sensor.c3"]
+        fuse_guard.update_guard(hass)
+        assert "circuit_room_a" not in hass.data[DOMAIN]["fuse_guard"]
+        # Off: the missing sensor is not read
+        hass.data[DOMAIN]["config"]["ev_circuit_fuse"] = 0
+        hass.data[DOMAIN].pop("fuse_guard_smoothing")
+        fuse_guard.update_guard(hass)
+        assert hass.data[DOMAIN]["fuse_guard"]["ev_current_a"] == 10

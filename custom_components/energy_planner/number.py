@@ -270,6 +270,22 @@ async def async_setup_entry(hass, config_entry: ConfigEntry, async_add_devices):
         EnergyPlannerNumberEntity(
             hass,
             {
+                # A smaller fuse per phase the house and the car share, the battery
+                # on the main fuse's side: the fuse guard keeps the car within it
+                # (planner/fuse.py), 0 = none
+                "id": "ev_circuit_fuse",
+                "name": "Car circuit fuse",
+                "min_val": 0,
+                "max_val": 100,
+                "step": 1,
+                "unit_of_measurement": UnitOfElectricCurrent.AMPERE,
+                "enabled": True,
+                "data_store": "config",
+            },
+        ),
+        EnergyPlannerNumberEntity(
+            hass,
+            {
                 "id": "grid_import_limit_start",
                 "name": "Grid import limit from",
                 "min_val": 0,

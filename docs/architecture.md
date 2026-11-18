@@ -118,7 +118,8 @@ out to whole quarters, kept in UTC. Where they overlap, the last added wins.
   `forecast_reserve_end` (h, default 18 / 22), `grid_import_limit` (kW hourly mean the
   planner may import, 0 = off), `grid_import_limit_start` / `grid_import_limit_end`
   (h, default 6 / 23), `main_fuse` (A per phase, three phases, 0 = off) and
-  `fuse_margin` (A, default 2; see `docs/main-fuse.md`), `battery_wear_cost` (öre per kWh taken out of the battery,
+  `fuse_margin` (A, default 2; see `docs/main-fuse.md`), `ev_circuit_fuse` (A per
+  phase, a smaller fuse the house and car share, 0 = none; `docs/main-fuse.md`), `battery_wear_cost` (öre per kWh taken out of the battery,
   default 20), `heat_pump_power` (W while heating until the draw is measured,
   default 300, 0 = not planned),
   `heat_pump_margin` (öre per kWh of heat, default 5), `heat_pump_heating_limit`
@@ -135,7 +136,7 @@ out to whole quarters, kept in UTC. Where they overlap, the last added wins.
   (`sensor.gw1100a_indoor_temperature`); fuse guard inputs (no defaults, see "Main
   fuse") `grid_phase_import_sensors`, `grid_phase_export_sensors`,
   `inverter_ac_power_sensor`, `inverter_grid_power_sensor`, `ev_phase_current_sensors`,
-  `ev_charger_current_number`
+  `ev_charger_current_number`, `ev_circuit_load_sensors`
 
 ## Control flow
 

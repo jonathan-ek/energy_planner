@@ -9,8 +9,9 @@ the grid import as the inverter's own meter sees it, which its peak shaving limi
 at the owner's parents it reads about 1.3 kW less than the electricity meter, so the
 grid limit is shifted by the difference), `ev_phase_current_sensors` (the
 charger's current per phase, A) and `ev_charger_current_number` (its current
-setting, A). The fuse is `number.energy_planner_main_fuse`, the margin
-`number.energy_planner_fuse_margin`.
+setting, A), and for a car circuit fuse (`number.energy_planner_ev_circuit_fuse`)
+`ev_circuit_load_sensors` (its load per phase, the car included, W or kW). The fuse
+is `number.energy_planner_main_fuse`, the margin `number.energy_planner_fuse_margin`.
 
 The result is in `hass.data[DOMAIN]["fuse_guard"]` (None without a guard), published
 by `sensor.energy_planner_fuse_guard`; the inverter script and the car automation
@@ -61,6 +62,7 @@ def config_entities(config: dict) -> list[str]:
             if (entity_id := settings.get(config, key))
         ),
         *(settings.get(config, "ev_phase_current_sensors") or []),
+        *(settings.get(config, "ev_circuit_load_sensors") or []),
     ]
 
 
@@ -88,11 +90,22 @@ def _reading(
         settings.reading(hass, entity_id, max_age=MAX_AGE, now=now) or 0.0
         for entity_id in guard.ev_phase_current_sensors
     ]
+    circuit_kw: tuple[float, ...] | None = ()
+    if guard.ev_circuit_fuse_a > 0 and guard.ev_circuit_load_sensors:
+        loads = [
+            settings.reading(hass, entity_id, unit="kW", max_age=MAX_AGE, now=now)
+            for entity_id in guard.ev_circuit_load_sensors
+        ]
+        # A missing or silent phase: the car is held at its lowest (fuse.limits)
+        circuit_kw = (
+            None if None in loads else tuple(kw for kw in loads if kw is not None)
+        )
     return fuse.Reading(
         tuple(phase_kw),
         -(delivered or 0.0),
         max(currents, default=0.0),
         settings.reading(hass, guard.ev_charger_current_number),
+        circuit_kw,
     )
 
 
@@ -141,6 +154,7 @@ def update_guard(hass: HomeAssistant) -> None:
         # An 11 kW charger is 16 A
         round(config.charger_max_kw * 1000 / (len(reading.phase_kw) * fuse.VOLTAGE)),
         ev_wanted=_car_wanted(hass, now),
+        circuit_a=config.ev_circuit_fuse_a,
     )
     meter_kw = settings.reading(
         hass, config.inverter_grid_power_sensor, unit="kW", max_age=MAX_AGE, now=now

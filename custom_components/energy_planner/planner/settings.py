@@ -93,6 +93,10 @@ SETTINGS: dict[str, Setting] = {
         Setting("inverter_grid_power_sensor", None),
         Setting("ev_phase_current_sensors", None),
         Setting("ev_charger_current_number", None),
+        # A per phase, a smaller fuse the house and the car share (the battery on
+        # the main fuse's side), 0: none; its load per phase, the car included
+        _number("ev_circuit_fuse", 0),
+        Setting("ev_circuit_load_sensors", None),
         # The forecast
         Setting("forecast_load_model", "profile", "select"),
         Setting("forecast_pv_calibration", "daily", "select"),
@@ -288,6 +292,8 @@ class FuseSettings:
     ev_phase_current_sensors: tuple[str, ...]
     ev_charger_current_number: str | None
     ev_charger_status_sensor: str | None
+    ev_circuit_fuse_a: float = 0.0
+    ev_circuit_load_sensors: tuple[str, ...] = ()
 
 
 def fuse(config: Mapping[str, Any]) -> FuseSettings | None:
@@ -307,6 +313,8 @@ def fuse(config: Mapping[str, Any]) -> FuseSettings | None:
         ev_phase_current_sensors=tuple(get(config, "ev_phase_current_sensors") or ()),
         ev_charger_current_number=get(config, "ev_charger_current_number") or None,
         ev_charger_status_sensor=get(config, "ev_charger_status_sensor") or None,
+        ev_circuit_fuse_a=number(config, "ev_circuit_fuse"),
+        ev_circuit_load_sensors=tuple(get(config, "ev_circuit_load_sensors") or ()),
     )
 
 

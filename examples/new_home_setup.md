@@ -43,7 +43,7 @@ Every setting and its default is in `SETTINGS` in
 | `forecast_load_model`, `forecast_pv_calibration` | Selects: `temperature` for a house heated with electricity, `hourly` for panels shaded part of the day |
 | `outdoor_temperature_sensor`, `indoor_temperature_sensor`, `heat_pump_climate`, `heat_pump_model`, `district_heating` | The heat pump (`docs/heat-pump.md`); the outdoor sensor is also used by the `temperature` load model |
 | `ev_charger_status_sensor`, `ev_session_energy_sensor`, `ev_soc_sensor`, `ev_charge_limit_sensor` | The car (`docs/car.md`); without a status sensor the car is not planned |
-| `grid_phase_import_sensors`, `grid_phase_export_sensors`, `inverter_ac_power_sensor`, `inverter_grid_power_sensor`, `ev_phase_current_sensors`, `ev_charger_current_number` | The main fuse guard (`docs/main-fuse.md`), optional |
+| `grid_phase_import_sensors`, `grid_phase_export_sensors`, `inverter_ac_power_sensor`, `inverter_grid_power_sensor`, `ev_phase_current_sensors`, `ev_charger_current_number`, `ev_circuit_load_sensors` | The main fuse guard (`docs/main-fuse.md`), optional |
 
 The forecast needs hourly statistics of the load and PV sensors and works better
 with a couple of weeks of history. After the restart, `sensor.energy_planner_battery_plan`
